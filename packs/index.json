@@ -6,7 +6,7 @@
       "name": "claude",
       "description": "Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding.",
       "versions": [
-        "1.0.0"
+        "1.0.1"
       ]
     },
     {
