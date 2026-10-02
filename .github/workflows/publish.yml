@@ -32,13 +32,28 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Pin cosign v3: `sign-blob --bundle` then writes the standard sigstore
-      # bundle (verificationMaterial) the mvm client's sigstore-verify stack
-      # parses. cosign v2 writes a legacy {base64Signature, cert, rekorBundle}
-      # blob bundle that verification rejects.
+      # cosign v3 writes the standard sigstore bundle (verificationMaterial)
+      # the mvm client's sigstore-verify stack parses; v2 writes a legacy
+      # blob bundle that verification rejects. cosign-installer cannot
+      # install v3 (v3 releases ship only a sigstore bundle, no .sig), so the
+      # action installs the default v2 as a bootstrap verifier and this step
+      # verifies and installs v3 pinned to its release tag.
       - uses: sigstore/cosign-installer@v3
-        with:
-          cosign-release: "v3.1.1"
+
+      - name: Install cosign v3
+        env:
+          COSIGN_V3_VERSION: "v3.1.1"
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity-regexp "https://github.com/sigstore/cosign/.*@refs/tags/$(echo "${COSIGN_V3_VERSION}" | sed 's/\./\\./g')" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          sudo install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign
+          cosign version
 
       - name: Install Python
         uses: actions/setup-python@v6
