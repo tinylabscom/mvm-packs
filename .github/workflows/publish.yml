@@ -54,7 +54,10 @@ jobs:
             --bundle cosign-linux-amd64.sigstore.json \
             --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
             --certificate-oidc-issuer https://accounts.google.com
-          sudo install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign
+          # The installer put v2 on PATH at $HOME/.cosign; overwrite it so the
+          # build step's `cosign` is v3.
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
           cosign version
 
       - name: Install Python
