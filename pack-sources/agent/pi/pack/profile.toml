@@ -1,0 +1,8 @@
+description = "What a pi agent workload may reach and which stored secrets it may use."
+
+[groups]
+include = ["llm-apis", "github"]
+
+[[overrides.secrets.bind]]
+name = "anthropic"
+hosts = ["api.anthropic.com"]

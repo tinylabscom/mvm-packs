@@ -1,0 +1,2 @@
+version = "1.0.0"
+description = "Node.js runtime policy: the npm registry, Node downloads, and GitHub release assets for native-module prebuilds."

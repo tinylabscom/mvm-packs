@@ -1,0 +1,2 @@
+version = "1.0.0"
+description = "Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings."

@@ -1,0 +1,2 @@
+version = "1.0.0"
+description = "Rust runtime policy: crates.io and its CDNs, rustup/toolchain downloads, and GitHub for git dependencies."

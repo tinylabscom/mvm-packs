@@ -1,0 +1,9 @@
+description = "Hosts a Node.js workload needs: npm packages and tarballs, Node runtime downloads, and GitHub release assets for prebuilt native modules."
+
+[network]
+allow = [
+  "registry.npmjs.org:443",
+  "nodejs.org:443",
+  "github.com:443",
+  "objects.githubusercontent.com:443",
+]
