@@ -1,0 +1,12 @@
+{
+  "description": "pi agent policy: LLM APIs and GitHub, with the Anthropic secret binding.",
+  "files": [
+    {
+      "path": "pack/profile.toml",
+      "sha256": "9f762bcefaf93fbefcf284e46ee549e0d1cfc32439bdb1e1cb90c860fb0b3a49",
+      "size": 208
+    }
+  ],
+  "reference": "agent/pi@1.0.0",
+  "schema_version": 1
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Node.js runtime policy: the npm registry, Node downloads, and GitHub release assets for native-module prebuilds.",
+  "files": [
+    {
+      "path": "pack/group.toml",
+      "sha256": "8048340a8fb7fcb294031cc2373937934b6f713d0da952652d9ea386d6d019ec",
+      "size": 284
+    }
+  ],
+  "reference": "runtime/node@1.0.0",
+  "schema_version": 1
+}

@@ -1,0 +1,12 @@
+{
+  "description": "Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.",
+  "files": [
+    {
+      "path": "pack/profile.toml",
+      "sha256": "601f70861e0328a477c5f9e13b635639d2c51cc976836b5541e931aeb18e9a58",
+      "size": 354
+    }
+  ],
+  "reference": "agent/goose@1.0.0",
+  "schema_version": 1
+}

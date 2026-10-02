@@ -1,0 +1,12 @@
+{
+  "description": "OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack.",
+  "files": [
+    {
+      "path": "pack/profile.toml",
+      "sha256": "059403bc853d7d91f1223ec8b9dd4cecf1236635871e9ea1124e0a8c475c9b79",
+      "size": 308
+    }
+  ],
+  "reference": "agent/codex@1.0.0",
+  "schema_version": 1
+}

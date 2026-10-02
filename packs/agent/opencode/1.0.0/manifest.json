@@ -1,0 +1,12 @@
+{
+  "description": "opencode agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.",
+  "files": [
+    {
+      "path": "pack/profile.toml",
+      "sha256": "040f700601981a7a0540304005dc929dd1f8859a7fa71290d3c5325d6bc49e22",
+      "size": 351
+    }
+  ],
+  "reference": "agent/opencode@1.0.0",
+  "schema_version": 1
+}

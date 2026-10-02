@@ -10,9 +10,65 @@
       ]
     },
     {
+      "namespace": "agent",
+      "name": "codex",
+      "description": "OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "namespace": "agent",
+      "name": "goose",
+      "description": "Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "namespace": "agent",
+      "name": "opencode",
+      "description": "opencode agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "namespace": "agent",
+      "name": "pi",
+      "description": "pi agent policy: LLM APIs and GitHub, with the Anthropic secret binding.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "namespace": "runtime",
+      "name": "go",
+      "description": "Go runtime policy: the module proxy and checksum database, the Go vanity host, and GitHub for direct module fetches.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "namespace": "runtime",
+      "name": "node",
+      "description": "Node.js runtime policy: the npm registry, Node downloads, and GitHub release assets for native-module prebuilds.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
       "namespace": "runtime",
       "name": "python",
       "description": "Python runtime policy: package registries and common API hosts a Python workload needs.",
+      "versions": [
+        "1.0.0"
+      ]
+    },
+    {
+      "namespace": "runtime",
+      "name": "rust",
+      "description": "Rust runtime policy: crates.io and its CDNs, rustup/toolchain downloads, and GitHub for git dependencies.",
       "versions": [
         "1.0.0"
       ]

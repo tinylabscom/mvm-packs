@@ -1,0 +1,12 @@
+{
+  "description": "Rust runtime policy: crates.io and its CDNs, rustup/toolchain downloads, and GitHub for git dependencies.",
+  "files": [
+    {
+      "path": "pack/group.toml",
+      "sha256": "b81c6dbe79f5de88db09a90bf70e1f9ccf0d424d95d792771e1d0d19e4b75b62",
+      "size": 335
+    }
+  ],
+  "reference": "runtime/rust@1.0.0",
+  "schema_version": 1
+}
