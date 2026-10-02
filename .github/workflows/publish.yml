@@ -32,7 +32,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Pin cosign v3: `sign-blob --bundle` then writes the standard sigstore
+      # bundle (verificationMaterial) the mvm client's sigstore-verify stack
+      # parses. cosign v2 writes a legacy {base64Signature, cert, rekorBundle}
+      # blob bundle that verification rejects.
       - uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: "v3.1.1"
 
       - name: Install Python
         uses: actions/setup-python@v6
