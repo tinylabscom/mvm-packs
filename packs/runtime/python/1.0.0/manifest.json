@@ -1,0 +1,12 @@
+{
+  "description": "Python runtime policy: package registries and common API hosts a Python workload needs.",
+  "files": [
+    {
+      "path": "pack/group.toml",
+      "sha256": "d02a7f54ff33c96a0e690292016cee9d3b5d741569757a5965613e4e31563a10",
+      "size": 288
+    }
+  ],
+  "reference": "runtime/python@1.0.0",
+  "schema_version": 1
+}
