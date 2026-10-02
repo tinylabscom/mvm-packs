@@ -1,0 +1,8 @@
+description = "What an OpenAI Codex agent workload may reach and which stored secrets it may use. The Codex CLI ships through npm, so the Node runtime pack composes underneath."
+
+[groups]
+include = ["llm-apis", "github", "runtime/node"]
+
+[[overrides.secrets.bind]]
+name = "openai"
+hosts = ["api.openai.com"]

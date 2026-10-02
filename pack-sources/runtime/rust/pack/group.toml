@@ -1,0 +1,11 @@
+description = "Hosts a Rust workload needs: crates.io, the sparse index and crate CDN, rustup and toolchain downloads, and GitHub for git dependencies."
+
+[network]
+allow = [
+  "crates.io:443",
+  "index.crates.io:443",
+  "static.crates.io:443",
+  "static.rust-lang.org:443",
+  "github.com:443",
+  "objects.githubusercontent.com:443",
+]

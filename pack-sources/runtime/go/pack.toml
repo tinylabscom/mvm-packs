@@ -1,0 +1,2 @@
+version = "1.0.0"
+description = "Go runtime policy: the module proxy and checksum database, the Go vanity host, and GitHub for direct module fetches."

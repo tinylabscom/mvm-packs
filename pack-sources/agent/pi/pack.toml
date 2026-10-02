@@ -1,0 +1,2 @@
+version = "1.0.0"
+description = "pi agent policy: LLM APIs and GitHub, with the Anthropic secret binding."

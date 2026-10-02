@@ -1,0 +1,12 @@
+description = "What an opencode agent workload may reach and which stored secrets it may use; it routes across providers, so both LLM secret bindings compose."
+
+[groups]
+include = ["llm-apis", "github"]
+
+[[overrides.secrets.bind]]
+name = "anthropic"
+hosts = ["api.anthropic.com"]
+
+[[overrides.secrets.bind]]
+name = "openai"
+hosts = ["api.openai.com"]

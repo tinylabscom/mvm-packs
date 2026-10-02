@@ -1,0 +1,2 @@
+version = "1.0.0"
+description = "OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack."
