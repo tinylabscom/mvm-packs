@@ -48,10 +48,12 @@ jobs:
           base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
           curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64"
           curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64.sigstore.json"
+          # Sigstore signs its cosign releases keyless from its release
+          # service account, not a GitHub workflow identity.
           cosign verify-blob cosign-linux-amd64 \
             --bundle cosign-linux-amd64.sigstore.json \
-            --certificate-identity-regexp "https://github.com/sigstore/cosign/.*@refs/tags/$(echo "${COSIGN_V3_VERSION}" | sed 's/\./\\./g')" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
           sudo install -m 0755 cosign-linux-amd64 /usr/local/bin/cosign
           cosign version
 
