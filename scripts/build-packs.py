@@ -91,6 +91,19 @@ def manifest_bytes(reference, description, payload):
     return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
 
 
+def bundle_is_current(bundle_path):
+    """True when the bundle exists in the standard sigstore format the mvm
+    client parses (verificationMaterial); cosign v2's legacy blob bundle is
+    re-signed."""
+    if not bundle_path.is_file():
+        return False
+    try:
+        bundle = json.loads(bundle_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    return "verificationMaterial" in bundle
+
+
 def sign(manifest_path, bundle_path):
     cmd = ["cosign", "sign-blob", "--yes"]
     key = os.environ.get("COSIGN_KEY")
@@ -114,13 +127,14 @@ def build_one(source):
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
-        if existing == manifest:
+        if existing == manifest and bundle_is_current(out / "manifest.sigstore.json"):
             print(f"{reference}: unchanged")
             return
-        fail(
-            f"{reference}: version already published with different bytes; "
-            "bump the version in pack.toml"
-        )
+        if existing != manifest:
+            fail(
+                f"{reference}: version already published with different bytes; "
+                "bump the version in pack.toml"
+            )
 
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
