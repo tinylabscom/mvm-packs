@@ -1,0 +1,54 @@
+name: Publish signed packs
+
+# The pack registry is this repository: pack sources under pack-sources/ are
+# built into signed, content-addressed packs under packs/, exactly the layout
+# `mvmctl search` and `mvmctl pull` read. Every manifest is signed keyless by
+# this workflow; the mvm client verifies the bundle on pull and on every
+# policy load against the publisher trust policy, whose built-in default
+# accepts this workflow's identity:
+#
+#   https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main
+#
+# Signing happens while the run's OIDC identity is refs/heads/main (a push
+# trigger), before the artifacts commit, so the identity is stable across
+# runs.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pack-sources/**"
+      - "scripts/build-packs.py"
+      - ".github/workflows/publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Install Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build and sign packs
+        env:
+          COSIGN_YES: "true"
+        run: python3 scripts/build-packs.py
+
+      - name: Validate the registry layout
+        run: python3 scripts/validate-packs.py
+
+      - name: Commit published packs
+        uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "chore(packs): publish signed pack registry [skip ci]"
+          file_pattern: "packs/"
