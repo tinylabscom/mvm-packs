@@ -14,6 +14,23 @@ SPEC.loader.exec_module(build_packs)
 
 
 class PackImageTests(unittest.TestCase):
+    def test_python_runtime_source_is_pinned_and_publishable(self):
+        source = Path(__file__).resolve().parents[1] / "pack-sources/runtime/python"
+        meta = build_packs.parse_pack_toml(source / "pack.toml")
+        self.assertEqual(meta["version"], "1.1.0")
+        encoded, files = build_packs.manifest_bytes(
+            "runtime/python@1.1.0",
+            meta["description"],
+            source / "pack",
+            meta["image"],
+        )
+        manifest = json.loads(encoded)
+        self.assertEqual(manifest["image"], {"manifest": "pack/image/mvm.toml"})
+        self.assertEqual(len(files), 4)
+        lock = json.loads((source / "pack/image/flake.lock").read_text())
+        self.assertEqual(lock["nodes"]["mvm"]["locked"]["rev"],
+                         "4e65b221744885e536ec91a3f2948cdc508dcb49")
+
     def test_image_descriptor_names_only_signed_neighbors(self):
         with tempfile.TemporaryDirectory() as temporary:
             payload = Path(temporary)
