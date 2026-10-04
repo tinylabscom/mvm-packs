@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -27,9 +28,17 @@ class PackImageTests(unittest.TestCase):
         manifest = json.loads(encoded)
         self.assertEqual(manifest["image"], {"manifest": "pack/image/mvm.toml"})
         self.assertEqual(len(files), 4)
+        self.assertIn("pack/group.toml", {item["path"] for item in files})
         lock = json.loads((source / "pack/image/flake.lock").read_text())
         self.assertEqual(lock["nodes"]["mvm"]["locked"]["rev"],
                          "4e65b221744885e536ec91a3f2948cdc508dcb49")
+
+    def test_python_runtime_exposes_its_own_composable_policy(self):
+        source = Path(__file__).resolve().parents[1] / "pack-sources/runtime/python"
+        group = tomllib.loads((source / "pack/group.toml").read_text())
+        self.assertIn("files.pythonhosted.org:443", group["network"]["allow"])
+        self.assertNotIn("shares", group)
+        self.assertNotIn("env", group)
 
     def test_image_descriptor_names_only_signed_neighbors(self):
         with tempfile.TemporaryDirectory() as temporary:
