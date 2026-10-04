@@ -11,9 +11,10 @@ Sources live under `pack-sources/<namespace>/<name>/`:
 
 ```
 pack-sources/runtime/python/
-├── pack.toml          # version = "1.0.0", description = "..."
+├── pack.toml          # version = "1.1.0"; [image] selects pack/image/mvm.toml
 └── pack/
-    └── group.toml     # the policy document (profile.toml also allowed)
+    ├── group.toml     # composable policy (profile.toml also allowed)
+    └── image/         # signed image manifest, flake and lock
 ```
 
 An image-bearing pack can also declare `[image]` in `pack.toml`:
@@ -66,10 +67,24 @@ replaces that default wholesale.
 
 ```sh
 mvmctl search                                # what the registry offers
-mvmctl pull agent/claude@1.0.0               # verify, install, pin
+mvmctl pull agent/claude@1.0.1               # verify, install, pin
 mvmctl run --policy agent/claude -- make test
 ```
 
 A pack composes where its reference sits in the `--policy` order; the
 signature is re-verified on every load and the manifest digest is pinned in
 `$MVM_HOME/registry/packs.lock.toml`.
+
+An application can also include a pack's verified policy without using its
+image. For example, after pulling `runtime/python`, an application's
+`mvm.toml` can compose the pack group with its own policy:
+
+```toml
+[policy]
+include = ["runtime/python", "./policy/app.toml"]
+```
+
+The application group can tighten the pack's grants; denies win. A generated
+template exposes its shipped policy through the same `[policy]` table.
+An explicit `--policy` on `run` replaces the project table, so name every
+desired layer on the command line when using that override.
