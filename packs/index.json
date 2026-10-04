@@ -60,8 +60,9 @@
     {
       "namespace": "runtime",
       "name": "python",
-      "description": "Python runtime policy: package registries and common API hosts a Python workload needs.",
+      "description": "Python runtime policy and pinned guest image for package registries and common API hosts.",
       "versions": [
+        "1.1.0",
         "1.0.0"
       ]
     },
