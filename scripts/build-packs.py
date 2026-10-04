@@ -31,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -57,7 +58,16 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    return {"version": version, "description": description}
+    if set(data) - {"version", "description", "image"}:
+        fail(f"{path}: unknown pack metadata fields")
+    image = data.get("image")
+    if image is not None:
+        if not isinstance(image, dict) or set(image) != {"manifest"}:
+            fail(f"{path}: [image] must contain exactly manifest")
+        manifest = image["manifest"]
+        if not isinstance(manifest, str) or not manifest.startswith("pack/"):
+            fail(f"{path}: image manifest must name an in-pack path")
+    return {"version": version, "description": description, "image": image}
 
 
 def sha256_of(path):
@@ -70,7 +80,7 @@ def sha256_of(path):
     return digest.hexdigest(), size
 
 
-def manifest_bytes(reference, description, payload):
+def manifest_bytes(reference, description, payload, image=None):
     # The payload root itself is the `pack/` directory: its contents ship
     # under `pack/` in the manifest, the path mvm reads policy documents
     # from (pack/profile.toml, pack/group.toml).
@@ -88,6 +98,35 @@ def manifest_bytes(reference, description, payload):
         "description": description,
         "files": files,
     }
+    if image is not None:
+        manifest_path = image["manifest"]
+        parts = manifest_path.split("/")
+        if (
+            len(parts) < 3
+            or parts[0] != "pack"
+            or parts[-1] != "mvm.toml"
+            or not all(parts)
+            or ".." in parts
+            or "\\" in manifest_path
+        ):
+            fail(f"unsafe image manifest path {manifest_path!r}")
+        declared = {entry["path"] for entry in files}
+        parent = "/".join(parts[:-1])
+        for required in ("mvm.toml", "flake.nix", "flake.lock"):
+            if f"{parent}/{required}" not in declared:
+                fail(f"image source file {parent}/{required} is not signed")
+        source_manifest = payload / "/".join(parts[1:])
+        if source_manifest.stat().st_size > 64 * 1024:
+            fail(f"image manifest {manifest_path!r} exceeds 64 KiB")
+        try:
+            source = tomllib.loads(source_manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+            fail(f"image manifest {manifest_path!r} is not valid UTF-8 TOML")
+        if set(source) - {"schema_version", "flake", "profile", "name"}:
+            fail(f"image manifest {manifest_path!r} declares host authority")
+        if source.get("flake", ".") != ".":
+            fail(f"image manifest {manifest_path!r} must select the local signed flake")
+        manifest["image"] = image
     return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
 
 
@@ -123,7 +162,7 @@ def build_one(source):
         fail(f"{source}: missing pack/ payload directory")
     reference = f"{namespace}/{name}@{meta['version']}"
     out = PACKS / namespace / name / meta["version"]
-    manifest, _ = manifest_bytes(reference, meta["description"], payload)
+    manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
