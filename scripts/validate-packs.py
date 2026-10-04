@@ -47,8 +47,11 @@ def validate_manifest(path):
         problems.append(f"{rel}: invalid JSON: {error}")
         return
     check(isinstance(manifest, dict), f"{rel}: manifest must be an object")
+    fields = {"schema_version", "reference", "description", "files"}
+    if "image" in manifest:
+        fields.add("image")
     check(
-        set(manifest) == {"schema_version", "reference", "description", "files"},
+        set(manifest) == fields,
         f"{rel}: unknown or missing fields: {sorted(manifest)}",
     )
     check(manifest.get("schema_version") == 1, f"{rel}: schema_version must be 1")
@@ -113,6 +116,32 @@ def validate_manifest(path):
                 digest == entry["sha256"] and actual_size == size,
                 f"{rel}: {rel_path!r} digest/size drift from the manifest",
             )
+
+    image = manifest.get("image")
+    if image is not None:
+        check(
+            isinstance(image, dict) and set(image) == {"manifest"},
+            f"{rel}: image must contain exactly manifest",
+        )
+        image_path = image.get("manifest") if isinstance(image, dict) else None
+        if isinstance(image_path, str):
+            parts = image_path.split("/")
+            safe = (
+                len(parts) >= 3
+                and parts[0] == "pack"
+                and parts[-1] == "mvm.toml"
+                and all(parts)
+                and ".." not in parts
+                and "\\" not in image_path
+            )
+            check(safe, f"{rel}: unsafe image manifest path {image_path!r}")
+            if safe:
+                parent = "/".join(parts[:-1])
+                for name in ("mvm.toml", "flake.nix", "flake.lock"):
+                    required = f"{parent}/{name}"
+                    check(required in seen, f"{rel}: image file {required!r} is not signed")
+        else:
+            problems.append(f"{rel}: image manifest must be a path string")
 
     check(
         path.with_name("manifest.sigstore.json").is_file(),

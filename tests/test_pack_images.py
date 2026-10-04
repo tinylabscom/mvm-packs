@@ -1,0 +1,75 @@
+"""Publisher contract tests for signed image-bearing pack manifests."""
+
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "build-packs.py"
+SPEC = importlib.util.spec_from_file_location("build_packs", SCRIPT)
+build_packs = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(build_packs)
+
+
+class PackImageTests(unittest.TestCase):
+    def test_image_descriptor_names_only_signed_neighbors(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = Path(temporary)
+            image_dir = payload / "image"
+            image_dir.mkdir()
+            (image_dir / "mvm.toml").write_text('flake = "."\n')
+            (image_dir / "flake.nix").write_text("{}\n")
+            (image_dir / "flake.lock").write_text('{}\n')
+
+            encoded, files = build_packs.manifest_bytes(
+                "runtime/python@1.0.0",
+                "Python image",
+                payload,
+                {"manifest": "pack/image/mvm.toml"},
+            )
+            manifest = json.loads(encoded)
+            self.assertEqual(manifest["image"], {"manifest": "pack/image/mvm.toml"})
+            self.assertEqual(len(files), 3)
+
+            (image_dir / "mvm.toml").write_text('[network]\nallow_hosts = ["example.com"]\n')
+            with self.assertRaisesRegex(SystemExit, "host authority"):
+                build_packs.manifest_bytes(
+                    "runtime/python@1.0.0",
+                    "Python image",
+                    payload,
+                    {"manifest": "pack/image/mvm.toml"},
+                )
+            (image_dir / "mvm.toml").write_text('flake = "github:elsewhere/image"\n')
+            with self.assertRaisesRegex(SystemExit, "local signed flake"):
+                build_packs.manifest_bytes(
+                    "runtime/python@1.0.0",
+                    "Python image",
+                    payload,
+                    {"manifest": "pack/image/mvm.toml"},
+                )
+
+            (image_dir / "flake.lock").unlink()
+            with self.assertRaisesRegex(SystemExit, "not signed"):
+                build_packs.manifest_bytes(
+                    "runtime/python@1.0.0",
+                    "Python image",
+                    payload,
+                    {"manifest": "pack/image/mvm.toml"},
+                )
+
+    def test_image_descriptor_refuses_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            for path in ("../mvm.toml", "pack/../mvm.toml", "pack/image/other.toml"):
+                with self.subTest(path=path), self.assertRaisesRegex(SystemExit, "unsafe"):
+                    build_packs.manifest_bytes(
+                        "runtime/python@1.0.0",
+                        "Python image",
+                        Path(temporary),
+                        {"manifest": path},
+                    )
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -68,7 +68,9 @@ jobs:
       - name: Build and sign packs
         env:
           COSIGN_YES: "true"
-        run: python3 scripts/build-packs.py
+        run: |
+          python3 -m unittest discover -s tests
+          python3 scripts/build-packs.py
 
       - name: Validate the registry layout
         run: python3 scripts/validate-packs.py

@@ -16,6 +16,23 @@ pack-sources/runtime/python/
     └── group.toml     # the policy document (profile.toml also allowed)
 ```
 
+An image-bearing pack can also declare `[image]` in `pack.toml`:
+
+```toml
+version = "1.1.0"
+description = "Python runtime policy and image"
+
+[image]
+manifest = "pack/image/mvm.toml"
+```
+
+The payload must then include `pack/image/mvm.toml`, `pack/image/flake.nix`,
+and `pack/image/flake.lock`. All three are hashed into the signed manifest.
+The image manifest may contain only `schema_version`, `flake`, `profile`, and
+`name`; `flake` must be `"."` (or omitted). Host grants belong to the operator's
+policy, never to a publisher's image manifest. A changed source requires a new
+pack version.
+
 The workflow builds the published layout under `packs/`:
 
 ```
@@ -55,4 +72,4 @@ mvmctl run --policy agent/claude -- make test
 
 A pack composes where its reference sits in the `--policy` order; the
 signature is re-verified on every load and the manifest digest is pinned in
-`$MVM_HOME/packs.lock.toml`.
+`$MVM_HOME/registry/packs.lock.toml`.
