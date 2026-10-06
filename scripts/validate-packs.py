@@ -8,14 +8,18 @@ non-negative sizes. Also checks every declared file exists with the exact
 digest and length, and that a signature bundle sits beside each manifest.
 """
 
+import argparse
 import hashlib
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKS = ROOT / "packs"
+PUBLISHER_IDENTITY = "https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main"
+PUBLISHER_ISSUER = "https://token.actions.githubusercontent.com"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -39,7 +43,26 @@ def sha256_and_size(path):
     return digest.hexdigest(), size
 
 
-def validate_manifest(path):
+def verify_signature(path):
+    bundle = path.with_name("manifest.sigstore.json")
+    if not bundle.is_file():
+        problems.append(f"{path.relative_to(ROOT)}: missing signature bundle")
+        return
+    command = [
+        "cosign", "verify-blob", str(path), "--bundle", str(bundle),
+        "--certificate-identity", PUBLISHER_IDENTITY,
+        "--certificate-oidc-issuer", PUBLISHER_ISSUER,
+    ]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        problems.append("cosign is required for signature verification")
+        return
+    if result.returncode != 0:
+        problems.append(f"{path.relative_to(ROOT)}: publisher signature verification failed")
+
+
+def validate_manifest(path, verify_signatures=False):
     rel = path.relative_to(ROOT).as_posix()
     try:
         manifest = json.loads(path.read_text())
@@ -147,15 +170,29 @@ def validate_manifest(path):
         path.with_name("manifest.sigstore.json").is_file(),
         f"{rel}: missing manifest.sigstore.json",
     )
+    declared = {Path("files") / entry["path"] for entry in files if isinstance(entry, dict) and isinstance(entry.get("path"), str)} if isinstance(files, list) else set()
+    allowed = declared | {Path("manifest.json"), Path("manifest.sigstore.json")}
+    for included in path.parent.rglob("*"):
+        relative = included.relative_to(path.parent)
+        if included.is_symlink():
+            problems.append(f"{rel}: symlink is not allowed: {relative}")
+        elif included.is_file() and relative not in allowed:
+            problems.append(f"{rel}: unsigned file is not allowed: {relative}")
+    if verify_signatures:
+        verify_signature(path)
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--verify-signatures", action="store_true", help="verify every bundle against the publisher identity")
+    args = parser.parse_args(argv)
+    problems.clear()
     if not PACKS.is_dir():
         sys.exit("validate-packs: packs/ does not exist")
     manifests = sorted(PACKS.glob("*/*/*/manifest.json"))
     check(bool(manifests), "no manifests under packs/<ns>/<name>/<version>/")
     for manifest in manifests:
-        validate_manifest(manifest)
+        validate_manifest(manifest, args.verify_signatures)
     index = json.loads((PACKS / "index.json").read_text())
     check(set(index) == {"schema_version", "packs"}, "index.json: unexpected fields")
     check(index.get("schema_version") == 1, "index.json: schema_version must be 1")
