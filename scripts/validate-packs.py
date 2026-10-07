@@ -158,6 +158,10 @@ def validate_manifest(path, verify_signatures=False):
 
     image = manifest.get("image")
     if image is not None:
+        problems.append(
+            f"{rel}: image-bearing pack cannot be published: schema v1 has no "
+            "built image digest, base-set pin, or provenance attestation"
+        )
         check(
             isinstance(image, dict) and set(image) == {"manifest"},
             f"{rel}: image must contain exactly manifest",

@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "build-packs.py"
@@ -16,6 +17,26 @@ SPEC.loader.exec_module(build_packs)
 
 
 class PackImageTests(unittest.TestCase):
+    def test_source_image_cannot_be_published_without_built_artifact_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "pack-sources" / "runtime" / "python"
+            image_dir = source / "pack" / "image"
+            image_dir.mkdir(parents=True)
+            (source / "pack.toml").write_text(
+                'version = "1.0.0"\ndescription = "Python"\n'
+                '[image]\nmanifest = "pack/image/mvm.toml"\n'
+            )
+            (image_dir / "mvm.toml").write_text('flake = "."\n')
+            (image_dir / "flake.nix").write_text("{}\n")
+            (image_dir / "flake.lock").write_text("{}\n")
+            with patch.object(build_packs, "PACKS", root / "packs"), \
+                    patch.object(build_packs, "sign") as sign:
+                with self.assertRaisesRegex(SystemExit, "built image digest"):
+                    build_packs.build_one(source)
+            sign.assert_not_called()
+            self.assertFalse((root / "packs").exists())
+
     def test_image_descriptor_names_only_signed_neighbors(self):
         with tempfile.TemporaryDirectory() as temporary:
             payload = Path(temporary)

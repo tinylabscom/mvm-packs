@@ -185,6 +185,11 @@ def build_one(source):
     if not COORD.match(namespace) or not COORD.match(name):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
     meta = parse_pack_toml(source / "pack.toml")
+    if meta["image"] is not None:
+        fail(
+            f"{source}: image-bearing pack cannot be published: schema v1 has no "
+            "built image digest, base-set pin, or provenance attestation"
+        )
     payload = source / "pack"
     if not payload.is_dir():
         fail(f"{source}: missing pack/ payload directory")

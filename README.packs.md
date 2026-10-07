@@ -16,22 +16,24 @@ pack-sources/runtime/python/
     └── group.toml     # the policy document (profile.toml also allowed)
 ```
 
-An image-bearing pack can also declare `[image]` in `pack.toml`:
+Image-bearing packs are not publishable yet. The current schema v1 `[image]`
+field identifies signed image *source* (`mvm.toml`, `flake.nix`, `flake.lock`),
+not a built root filesystem. It cannot bind a built image digest, the base
+image-set pin, or build provenance. `build-packs.py` rejects any source with
+`[image]`, and `validate-packs.py` rejects any published manifest with an
+`image` field. No image pack should be described as ready to run on this
+publisher path.
 
-```toml
-version = "1.1.0"
-description = "Python runtime policy and image"
-
-[image]
-manifest = "pack/image/mvm.toml"
-```
-
-The payload must then include `pack/image/mvm.toml`, `pack/image/flake.nix`,
-and `pack/image/flake.lock`. All three are hashed into the signed manifest.
-The image manifest may contain only `schema_version`, `flake`, `profile`, and
-`name`; `flake` must be `"."` (or omitted). Host grants belong to the operator's
-policy, never to a publisher's image manifest. A changed source requires a new
-pack version.
+The next image release contract needs a built-image digest and size, a base
+image-set identity (`repository`, `release_tag`, and signed root-manifest
+SHA-256), and a verifiable provenance attestation bound to the same image and
+publisher identity. Pack CI must build from the base set pinned by MVM's
+`images.lock`, compare two independent output byte streams, and only then sign
+the image and descriptor. The client must reject a base identity that its own
+lock does not accept and verify the image, descriptor, and attestation before
+installation or execution. These producer and client changes are not shipped
+by the current schema; the source-only guard is a release safety check, not
+evidence that image signing or reproducibility exists.
 
 The workflow builds the published layout under `packs/`:
 
@@ -49,7 +51,8 @@ changes. It builds manifests (SHA-256 and size per file), signs each manifest
 keyless with `cosign sign-blob` while the run's OIDC identity is
 `refs/heads/main`, validates the layout with `scripts/validate-packs.py`,
 and commits `packs/`. Published versions are immutable: change a source and
-the build refuses until the version in `pack.toml` is bumped.
+the build refuses until the version in `pack.toml` is bumped. This workflow
+currently publishes policy packs only, not prepared images.
 
 Clients verify on every use — pull, and every policy load — against the
 publisher trust policy. New packs are signed under this workflow's identity:
