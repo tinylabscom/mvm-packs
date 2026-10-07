@@ -3,6 +3,8 @@
 import hashlib
 import importlib.util
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +12,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 
 def load_script(name, module_name):
@@ -70,15 +73,46 @@ class PublisherVerificationTests(unittest.TestCase):
             manifest.with_name("manifest.sigstore.json").write_text("{}")
             with patch.object(validator, "ROOT", root), patch.object(validator.subprocess, "run") as run:
                 run.return_value.returncode = 0
-                validator.verify_signature(manifest)
+                validator.verify_signature(manifest, "agent/example@1.0.0")
                 command = run.call_args.args[0]
                 self.assertIn(validator.PUBLISHER_IDENTITY, command)
                 self.assertIn(validator.PUBLISHER_ISSUER, command)
                 self.assertFalse(validator.problems)
 
                 run.return_value.returncode = 1
-                validator.verify_signature(manifest)
+                validator.verify_signature(manifest, "agent/example@1.0.0")
             self.assertTrue(any("verification failed" in problem for problem in validator.problems))
+
+    def test_historical_signature_uses_only_the_pinned_former_identity(self):
+        manifest = sorted((ROOT / "packs").glob("*/*/*/manifest.json"))[0]
+        reference = json.loads(manifest.read_text())["reference"]
+        with patch.object(validator.subprocess, "run") as run:
+            run.side_effect = [
+                subprocess.CompletedProcess([], 1),
+                subprocess.CompletedProcess([], 0),
+            ]
+            validator.verify_signature(manifest, reference)
+        self.assertEqual(
+            [
+                call.args[0][call.args[0].index("--certificate-identity") + 1]
+                for call in run.call_args_list
+            ],
+            [validator.PUBLISHER_IDENTITY, validator.FORMER_IDENTITY],
+        )
+        self.assertFalse(validator.problems)
+
+    def test_unpinned_manifest_never_tries_the_former_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "manifest.json"
+            manifest.write_text('{}')
+            manifest.with_name("manifest.sigstore.json").write_text('{}')
+            with patch.object(validator, "ROOT", root), \
+                    patch.object(validator.subprocess, "run") as run:
+                run.return_value.returncode = 1
+                validator.verify_signature(manifest, "agent/example@1.0.0")
+            self.assertEqual(run.call_count, 1)
+            self.assertTrue(validator.problems)
 
     def make_source_and_published_pack(self, root):
         source = root / "pack-sources" / "runtime" / "example"
@@ -124,11 +158,13 @@ class PublisherVerificationTests(unittest.TestCase):
                 run.return_value.returncode = 1
                 self.assertFalse(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
 
-    def test_former_identity_is_verified_before_resigning(self):
+    def test_pinned_former_identity_is_preserved_during_overlap(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, published = self.make_source_and_published_pack(root)
             with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "is_historical_manifest", return_value=True), \
+                    patch.object(builder, "accepts_former", return_value=True), \
                     patch.object(builder, "verify_bundle", side_effect=[False, True]) as verify, \
                     patch.object(builder, "sign") as sign:
                 builder.build_one(source)
@@ -136,8 +172,20 @@ class PublisherVerificationTests(unittest.TestCase):
                 [call.args[2] for call in verify.call_args_list],
                 [builder.CURRENT_IDENTITY, builder.FORMER_IDENTITY],
             )
-            sign.assert_called_once()
+            sign.assert_not_called()
             self.assertTrue((published / "manifest.json").is_file())
+
+    def test_pinned_former_identity_is_resigned_after_cutoff(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _ = self.make_source_and_published_pack(root)
+            with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "is_historical_manifest", return_value=True), \
+                    patch.object(builder, "accepts_former", return_value=False), \
+                    patch.object(builder, "verify_bundle", side_effect=[False, True]), \
+                    patch.object(builder, "sign") as sign:
+                builder.build_one(source)
+            sign.assert_called_once()
 
     def test_untrusted_signature_is_not_resigned(self):
         with tempfile.TemporaryDirectory() as temporary:

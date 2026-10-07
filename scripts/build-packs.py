@@ -34,15 +34,20 @@ import sys
 import tomllib
 from pathlib import Path
 
+from publisher_identity import (
+    CURRENT_IDENTITY,
+    FORMER_IDENTITY,
+    PUBLISHER_ISSUER,
+    accepts_former,
+    is_historical_manifest,
+)
+
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "pack-sources"
 PACKS = ROOT / "packs"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-PUBLISHER_ISSUER = "https://token.actions.githubusercontent.com"
-CURRENT_IDENTITY = "https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main"
-FORMER_IDENTITY = "https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main"
 
 
 def fail(message):
@@ -199,8 +204,13 @@ def build_one(source):
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
             return
-        if not verify_bundle(out / "manifest.json", bundle, FORMER_IDENTITY):
+        if not is_historical_manifest(reference, existing) or not verify_bundle(
+            out / "manifest.json", bundle, FORMER_IDENTITY
+        ):
             fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
+        if accepts_former(reference, existing):
+            print(f"{reference}: unchanged")
+            return
 
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)

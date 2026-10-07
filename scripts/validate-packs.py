@@ -16,10 +16,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+from publisher_identity import (
+    CURRENT_IDENTITY,
+    FORMER_IDENTITY,
+    PUBLISHER_ISSUER,
+    accepts_former,
+)
+
 ROOT = Path(__file__).resolve().parent.parent
 PACKS = ROOT / "packs"
-PUBLISHER_IDENTITY = "https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main"
-PUBLISHER_ISSUER = "https://token.actions.githubusercontent.com"
+PUBLISHER_IDENTITY = CURRENT_IDENTITY
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -43,23 +49,33 @@ def sha256_and_size(path):
     return digest.hexdigest(), size
 
 
-def verify_signature(path):
+def verify_signature(path, reference):
     bundle = path.with_name("manifest.sigstore.json")
     if not bundle.is_file():
         problems.append(f"{path.relative_to(ROOT)}: missing signature bundle")
         return
-    command = [
-        "cosign", "verify-blob", str(path), "--bundle", str(bundle),
-        "--certificate-identity", PUBLISHER_IDENTITY,
-        "--certificate-oidc-issuer", PUBLISHER_ISSUER,
-    ]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
-        problems.append("cosign is required for signature verification")
+        manifest_bytes = path.read_bytes()
+    except OSError:
+        problems.append(f"{path.relative_to(ROOT)}: manifest cannot be read for signature verification")
         return
-    if result.returncode != 0:
-        problems.append(f"{path.relative_to(ROOT)}: publisher signature verification failed")
+    identities = [PUBLISHER_IDENTITY]
+    if accepts_former(reference, manifest_bytes):
+        identities.append(FORMER_IDENTITY)
+    for identity in identities:
+        command = [
+            "cosign", "verify-blob", str(path), "--bundle", str(bundle),
+            "--certificate-identity", identity,
+            "--certificate-oidc-issuer", PUBLISHER_ISSUER,
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            problems.append("cosign is required for signature verification")
+            return
+        if result.returncode == 0:
+            return
+    problems.append(f"{path.relative_to(ROOT)}: publisher signature verification failed")
 
 
 def validate_manifest(path, verify_signatures=False):
@@ -179,7 +195,7 @@ def validate_manifest(path, verify_signatures=False):
         elif included.is_file() and relative not in allowed:
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")
     if verify_signatures:
-        verify_signature(path)
+        verify_signature(path, reference)
 
 
 def main(argv=None):

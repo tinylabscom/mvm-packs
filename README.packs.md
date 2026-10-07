@@ -52,15 +52,27 @@ and commits `packs/`. Published versions are immutable: change a source and
 the build refuses until the version in `pack.toml` is bumped.
 
 Clients verify on every use — pull, and every policy load — against the
-publisher trust policy. With no operator policy file, mvm's built-in default
-accepts exactly this workflow's identity:
+publisher trust policy. New packs are signed under this workflow's identity:
 
 ```
 https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main
 ```
 
-under the GitHub OIDC issuer. Writing `$MVM_HOME/registry/publishers.toml`
-replaces that default wholesale.
+under the GitHub OIDC issuer. The nine versions published before the repository
+rename retain their original, verified signature bundles so released clients
+can continue to pull them. Their manifest digests are pinned in the publisher;
+new content cannot claim the former identity. The built-in MVM policy accepts
+the former exact workflow identity for these legacy namespaces only until
+2026-11-06 00:00 UTC, then rejects it. A controlled re-signing under the
+current identity must be published before that cutoff; until then, the build
+preserves verified historical signatures. An operator policy at
+`$MVM_HOME/registry/publishers.toml` replaces built-in trust wholesale.
+
+The publisher validator checks every included file and verifies each bundle
+under the current identity, or under the former identity only for the pinned
+historical manifests before the cutoff. A valid signature proves publisher
+identity and content integrity, not that a workload is safe. No `mvm/` pack is
+published or labelled official here.
 
 ## Using a pack
 
