@@ -35,6 +35,32 @@ class PublisherVerificationTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "symlink is not allowed"):
                 builder.manifest_bytes("agent/example@1.0.0", "Example", payload)
 
+    def test_resign_replaces_old_bundle_without_changing_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "pack-sources" / "agent" / "example"
+            payload = source / "pack"
+            payload.mkdir(parents=True)
+            (source / "pack.toml").write_text('version = "1.0.0"\ndescription = "Example"\n')
+            (payload / "profile.toml").write_text("schema_version = 1\n")
+            output = root / "packs" / "agent" / "example" / "1.0.0"
+            output.mkdir(parents=True)
+            manifest, _ = builder.manifest_bytes("agent/example@1.0.0", "Example", payload)
+            (output / "manifest.json").write_bytes(manifest)
+            (output / "manifest.sigstore.json").write_text('{"verificationMaterial": {"old": true}}')
+
+            def sign_new(_, bundle):
+                bundle.write_text('{"verificationMaterial": {"new": true}}')
+
+            with patch.object(builder, "PACKS", root / "packs"), patch.object(builder, "sign", side_effect=sign_new) as sign:
+                builder.build_one(source)
+                sign.assert_not_called()
+                builder.build_one(source, resign=True)
+                sign.assert_called_once()
+
+            self.assertEqual((output / "manifest.json").read_bytes(), manifest)
+            self.assertIn('"new"', (output / "manifest.sigstore.json").read_text())
+
     def test_undeclared_file_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -72,7 +98,14 @@ class PublisherVerificationTests(unittest.TestCase):
                 run.return_value.returncode = 0
                 validator.verify_signature(manifest)
                 command = run.call_args.args[0]
-                self.assertIn(validator.PUBLISHER_IDENTITY, command)
+                self.assertIn(
+                    "https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main",
+                    command,
+                )
+                self.assertNotIn(
+                    "https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main",
+                    command,
+                )
                 self.assertIn(validator.PUBLISHER_ISSUER, command)
                 self.assertFalse(validator.problems)
 

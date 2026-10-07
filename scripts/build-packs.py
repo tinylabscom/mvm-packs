@@ -22,8 +22,12 @@ The cosign bundle is produced by `cosign sign-blob` (keyless in the publish
 workflow; a test key with COSIGN_KEY locally). The mvm client verifies the
 bundle on every pull and on every policy load, against the publisher trust
 policy.
+
+--resign replaces bundles for unchanged manifests when the workflow identity
+changes. A changed manifest still requires a version bump.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -155,7 +159,7 @@ def sign(manifest_path, bundle_path):
     subprocess.run(cmd, check=True)
 
 
-def build_one(source):
+def build_one(source, resign=False):
     namespace, name = source.parent.name, source.name
     if not COORD.match(namespace) or not COORD.match(name):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
@@ -169,7 +173,7 @@ def build_one(source):
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
-        if existing == manifest and bundle_is_current(out / "manifest.sigstore.json"):
+        if existing == manifest and bundle_is_current(out / "manifest.sigstore.json") and not resign:
             print(f"{reference}: unchanged")
             return
         if existing != manifest:
@@ -231,7 +235,14 @@ def rebuild_index():
     print(f"index: {len(packs)} pack(s)")
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--resign",
+        action="store_true",
+        help="replace every bundle with a new signature without changing the manifest",
+    )
+    args = parser.parse_args(argv)
     if not SOURCES.is_dir():
         fail("pack-sources/ does not exist")
     sources = sorted(
@@ -240,7 +251,7 @@ def main():
     if not sources:
         fail("no pack sources under pack-sources/<namespace>/<name>/")
     for source in sources:
-        build_one(source)
+        build_one(source, resign=args.resign)
     rebuild_index()
 
 
