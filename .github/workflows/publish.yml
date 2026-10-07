@@ -4,10 +4,9 @@ name: Publish signed packs
 # built into signed, content-addressed packs under packs/, exactly the layout
 # `mvmctl search` and `mvmctl pull` read. Every manifest is signed keyless by
 # this workflow; the mvm client verifies the bundle on pull and on every
-# policy load against the publisher trust policy, whose built-in default
-# accepts this workflow's identity:
+# policy load against a publisher trust policy that accepts this identity:
 #
-#   https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main
+#   https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main
 #
 # Signing happens while the run's OIDC identity is refs/heads/main (a push
 # trigger), before the artifacts commit, so the identity is stable across
@@ -40,7 +39,7 @@ jobs:
       # install v3 (v3 releases ship only a sigstore bundle, no .sig), so the
       # action installs the default v2 as a bootstrap verifier and this step
       # verifies and installs v3 pinned to its release tag.
-      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
 
       - name: Install cosign v3
         env:
@@ -72,7 +71,7 @@ jobs:
           COSIGN_YES: "true"
         run: |
           python3 -m unittest discover -s tests
-          python3 scripts/build-packs.py
+          python3 scripts/build-packs.py --resign
 
       - name: Verify the registry
         run: python3 scripts/validate-packs.py --verify-signatures
@@ -94,7 +93,7 @@ jobs:
         with:
           name: signed-packs
           path: packs/
-      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Install cosign v3
         env:
           COSIGN_V3_VERSION: "v3.1.1"

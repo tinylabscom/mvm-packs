@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKS = ROOT / "packs"
-PUBLISHER_IDENTITY = "https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main"
+PUBLISHER_IDENTITY = "https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main"
 PUBLISHER_ISSUER = "https://token.actions.githubusercontent.com"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")

@@ -1,9 +1,11 @@
-# mvm-templates
+# mvm-packs
 
-Remote template registry for [`mvmctl`](https://github.com/tinylabscom/mvm).
+Signed pack publisher and remote template registry for [`mvmctl`](https://github.com/tinylabscom/mvm).
 
-This repository holds richer, community-oriented microVM templates that are
-fetched on demand by `mvmctl`'s template registry. A small core catalog
+Pack sources, signed releases, and publisher guidance are described in
+[README.packs.md](README.packs.md). The legacy template registry remains here
+for existing `mvmctl template` users. It holds community-oriented microVM
+templates that are fetched on demand. A small core catalog
 (`minimal`, `http`, `postgres`, `worker`, `python`) continues to ship inside
 `mvmctl` itself so basic scaffolding works offline.
 
@@ -140,7 +142,7 @@ repo if you are also changing `mvmctl` code.
 Point `mvmctl` at this directory with a `file://` URL:
 
 ```bash
-export MVM_TEMPLATE_REGISTRY="file:///path/to/mvm-templates"
+export MVM_TEMPLATE_REGISTRY="file:///path/to/mvm-packs"
 mvmctl template list
 mvmctl template info <name>
 mvmctl generate template <name> ./my-project
