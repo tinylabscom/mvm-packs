@@ -35,6 +35,27 @@ installation or execution. These producer and client changes are not shipped
 by the current schema; the source-only guard is a release safety check, not
 evidence that image signing or reproducibility exists.
 
+Source authors can validate the proposed built-image descriptor shape with
+`scripts/build-packs.py`, but the command still refuses to publish any
+image-bearing pack before it signs or writes one. Even when the descriptor
+passes its shape checks, the command exits nonzero with a deliberate
+`not publishable` refusal; that exit is not a successful build. This is a
+source descriptor with `schema_version = 2` inside `[image]`; it is **not** a
+published manifest schema v2. It requires `platform` (`linux/x86_64` or
+`linux/aarch64`), a `base_set` table naming `tinylabscom/mvm-images`, its
+immutable image-set release tag (for example, `image-set/v0.2.4`) and
+root-manifest SHA-256, and a `release` table naming `tinylabscom/mvm-packs`
+with the deterministic tag derived from its pack reference (for example,
+`pack-runtime-python-v1.0.0`). The `assets` table requires seven external
+release assets: `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash`,
+`mvm-meta.json`, `rootfs.signature.json`, `provenance.json`, and
+`provenance.signature.json`. Each records its fixed name, lowercase SHA-256,
+and positive byte size. Extra fields, arbitrary URLs, unsafe names, missing
+attestation references, and source-only schema-v1 images are refused. These
+checks validate metadata shape only; they do not download, verify, sign, or
+publish any image or attestation. The existing nine schema-v1 policy packs
+continue to publish unchanged.
+
 The workflow builds the published layout under `packs/`:
 
 ```

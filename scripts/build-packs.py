@@ -48,6 +48,16 @@ PACKS = ROOT / "packs"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+HEX64 = re.compile(r"^[0-9a-f]{64}$")
+BUILT_IMAGE_ASSETS = {
+    "rootfs": "rootfs.ext4",
+    "verity": "rootfs.verity",
+    "roothash": "rootfs.roothash",
+    "mvm_meta": "mvm-meta.json",
+    "rootfs_signature_bundle": "rootfs.signature.json",
+    "provenance_statement": "provenance.json",
+    "provenance_signature_bundle": "provenance.signature.json",
+}
 
 
 def fail(message):
@@ -69,13 +79,57 @@ def parse_pack_toml(path):
     if set(data) - {"version", "description", "image"}:
         fail(f"{path}: unknown pack metadata fields")
     image = data.get("image")
-    if image is not None:
-        if not isinstance(image, dict) or set(image) != {"manifest"}:
-            fail(f"{path}: [image] must contain exactly manifest")
-        manifest = image["manifest"]
-        if not isinstance(manifest, str) or not manifest.startswith("pack/"):
-            fail(f"{path}: image manifest must name an in-pack path")
+    if image is not None and not isinstance(image, dict):
+        fail(f"{path}: [image] must be a table")
     return {"version": version, "description": description, "image": image}
+
+
+def validate_built_image_descriptor(image, reference):
+    """Validate source metadata only; no image asset is fetched or trusted here."""
+    if not isinstance(image, dict) or image.get("schema_version") != 2:
+        fail(
+            f"{reference}: source-only image is not publishable: schema v1 has no "
+            "built image digest, base-set pin, or provenance attestation"
+        )
+    if set(image) != {"schema_version", "platform", "base_set", "release", "assets"}:
+        fail(f"{reference}: built image descriptor has missing or extra fields")
+    if image["platform"] not in ("linux/x86_64", "linux/aarch64"):
+        fail(f"{reference}: built image platform is unsupported")
+
+    base = image["base_set"]
+    if not isinstance(base, dict) or set(base) != {
+        "repository", "release_tag", "manifest_sha256"
+    }:
+        fail(f"{reference}: base_set must name repository, release_tag, and manifest_sha256")
+    if base["repository"] != "tinylabscom/mvm-images":
+        fail(f"{reference}: base_set repository is not the MVM image-set repository")
+    tag = base["release_tag"]
+    if not isinstance(tag, str) or not tag.startswith("image-set/v") or not SEMVER.fullmatch(tag[11:]):
+        fail(f"{reference}: base_set release_tag must be an immutable image-set version")
+    if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
+        fail(f"{reference}: base_set manifest_sha256 must be lowercase SHA-256")
+
+    release = image["release"]
+    if not isinstance(release, dict) or set(release) != {"repository", "tag"}:
+        fail(f"{reference}: release must name repository and tag")
+    namespace_name, version = reference.split("@", 1)
+    expected_tag = f"pack-{namespace_name.replace('/', '-')}-v{version}"
+    if release != {"repository": "tinylabscom/mvm-packs", "tag": expected_tag}:
+        fail(f"{reference}: release repository or tag does not match {expected_tag}")
+
+    assets = image["assets"]
+    if not isinstance(assets, dict) or set(assets) != set(BUILT_IMAGE_ASSETS):
+        fail(f"{reference}: assets must name every built image and attestation asset")
+    for role, expected_name in BUILT_IMAGE_ASSETS.items():
+        asset = assets[role]
+        if not isinstance(asset, dict) or set(asset) != {"name", "sha256", "size"}:
+            fail(f"{reference}: {role} asset must have exactly name, sha256, and size")
+        if asset["name"] != expected_name:
+            fail(f"{reference}: {role} asset name must be {expected_name}")
+        if not isinstance(asset["sha256"], str) or not HEX64.fullmatch(asset["sha256"]):
+            fail(f"{reference}: {role} sha256 must be lowercase SHA-256")
+        if type(asset["size"]) is not int or asset["size"] <= 0:
+            fail(f"{reference}: {role} size must be a positive integer")
 
 
 def sha256_of(path):
@@ -185,15 +239,13 @@ def build_one(source):
     if not COORD.match(namespace) or not COORD.match(name):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
     meta = parse_pack_toml(source / "pack.toml")
+    reference = f"{namespace}/{name}@{meta['version']}"
     if meta["image"] is not None:
-        fail(
-            f"{source}: image-bearing pack cannot be published: schema v1 has no "
-            "built image digest, base-set pin, or provenance attestation"
-        )
+        validate_built_image_descriptor(meta["image"], reference)
+        fail(f"{reference}: built image packs are not publishable until consumer verification is available")
     payload = source / "pack"
     if not payload.is_dir():
         fail(f"{source}: missing pack/ payload directory")
-    reference = f"{namespace}/{name}@{meta['version']}"
     out = PACKS / namespace / name / meta["version"]
     manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
 
