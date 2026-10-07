@@ -65,6 +65,37 @@ class PublisherVerificationTests(unittest.TestCase):
                 validator.validate_manifest(manifest_path)
             self.assertTrue(any("unsigned file" in problem for problem in validator.problems))
 
+    def test_source_only_image_manifest_is_not_releasable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pack = root / "packs" / "runtime" / "python" / "1.0.0"
+            image_dir = pack / "files" / "pack" / "image"
+            image_dir.mkdir(parents=True)
+            (image_dir / "mvm.toml").write_text('flake = "."\n')
+            (image_dir / "flake.nix").write_text("{}\n")
+            (image_dir / "flake.lock").write_text("{}\n")
+            encoded, _ = builder.manifest_bytes(
+                "runtime/python@1.0.0", "Python", pack / "files" / "pack",
+                {"manifest": "pack/image/mvm.toml"},
+            )
+            manifest = pack / "manifest.json"
+            manifest.write_bytes(encoded)
+            (pack / "manifest.sigstore.json").write_text("{}")
+            with patch.object(validator, "ROOT", root), \
+                    patch.object(validator, "PACKS", root / "packs"):
+                validator.validate_manifest(manifest)
+            self.assertTrue(any("built image digest" in problem for problem in validator.problems))
+
+    def test_policy_only_manifest_still_validates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, published = self.make_source_and_published_pack(root)
+            self.assertTrue(source.is_dir())
+            with patch.object(validator, "ROOT", root), \
+                    patch.object(validator, "PACKS", root / "packs"):
+                validator.validate_manifest(published / "manifest.json")
+            self.assertFalse(validator.problems)
+
     def test_signature_verifies_exact_release_identity_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
