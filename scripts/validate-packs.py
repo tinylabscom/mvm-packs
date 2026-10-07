@@ -12,8 +12,10 @@ import argparse
 import hashlib
 import json
 import re
+import runpy
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from publisher_identity import (
@@ -25,6 +27,8 @@ from publisher_identity import (
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKS = ROOT / "packs"
+REVOCATIONS = PACKS / "revocations.json"
+REVOCATION_BUNDLE = PACKS / "revocations.sigstore.json"
 PUBLISHER_IDENTITY = CURRENT_IDENTITY
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
@@ -205,7 +209,10 @@ def validate_manifest(path, verify_signatures=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-signatures", action="store_true", help="verify every bundle against the publisher identity")
+    parser.add_argument("--require-revocations", action="store_true", help="require a current signed revocation feed")
     args = parser.parse_args(argv)
+    if args.require_revocations and not args.verify_signatures:
+        parser.error("--require-revocations requires --verify-signatures")
     problems.clear()
     if not PACKS.is_dir():
         sys.exit("validate-packs: packs/ does not exist")
@@ -223,6 +230,18 @@ def main(argv=None):
                 (PACKS / entry["namespace"] / entry["name"] / version / "manifest.json").is_file(),
                 f"index.json: {entry['namespace']}/{entry['name']}@{version} not on disk",
             )
+    if args.require_revocations or REVOCATIONS.exists() or REVOCATION_BUNDLE.exists():
+        if (not REVOCATIONS.is_file() or not REVOCATION_BUNDLE.is_file()
+                or REVOCATIONS.is_symlink() or REVOCATION_BUNDLE.is_symlink()):
+            problems.append("revocation document or signature bundle is missing")
+        else:
+            revocations = runpy.run_path(str(ROOT / "scripts" / "build-revocations.py"))
+            try:
+                revocations["parse_document"](REVOCATIONS.read_bytes(), datetime.now(timezone.utc))
+                if args.verify_signatures:
+                    revocations["verify_bundle"](REVOCATIONS, REVOCATION_BUNDLE)
+            except (OSError, revocations["RevocationError"]) as error:
+                problems.append(f"revocations.json: {error}")
     if problems:
         for problem in problems:
             print(f"ERROR: {problem}", file=sys.stderr)

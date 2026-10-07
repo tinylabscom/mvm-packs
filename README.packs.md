@@ -63,6 +63,8 @@ packs/index.json                                  # registry index (mvmctl searc
 packs/<ns>/<name>/<version>/manifest.json         # RegistryPackManifest, schema v1
 packs/<ns>/<name>/<version>/manifest.sigstore.json# detached cosign bundle
 packs/<ns>/<name>/<version>/files/...             # payload, digest-pinned by the manifest
+packs/revocations.json                              # short-lived revocation document
+packs/revocations.sigstore.json                     # detached release-identity bundle
 ```
 
 ## Publishing
@@ -74,6 +76,22 @@ keyless with `cosign sign-blob` while the run's OIDC identity is
 and commits `packs/`. Published versions are immutable: change a source and
 the build refuses until the version in `pack.toml` is bumped. This workflow
 currently publishes policy packs only, not prepared images.
+
+The same workflow publishes a separate registry-pack revocation feed. Its
+inspectable source is `revocations.toml`: add an exact signing identity to
+`revoked_identities` or a lowercase manifest SHA-256 to `revoked_manifests`.
+Entries cannot be removed by a later release. A scheduled run refreshes the
+document every 12 hours, advancing its positive sequence and setting a 36-hour
+validity window. The sign job first verifies the previous document under the
+current release identity, then signs the new document. The separate
+contents-write job verifies the downloaded signature and checks exact sequence
+advancement against the checked-out publication before committing. The feed
+uses the existing publish workflow identity; it does not change that identity.
+An invalid, missing, expired, rolled-back, or unverifiable feed must be treated
+as unavailable trust data, not as an empty revocation list. This publisher
+change alone does not make clients enforce revocation; a client must fetch,
+verify, checkpoint, and apply the feed on install and every run before it can
+claim that guarantee.
 
 Clients verify on every use — pull, and every policy load — against the
 publisher trust policy. New packs are signed under this workflow's identity:
@@ -97,6 +115,12 @@ under the current identity, or under the former identity only for the pinned
 historical manifests before the cutoff. A valid signature proves publisher
 identity and content integrity, not that a workload is safe. No `mvm/` pack is
 published or labelled official here.
+
+Use `python3 scripts/validate-packs.py --verify-signatures --require-revocations`
+to validate a published checkout and its live revocation signature. The plain
+validator permits a checkout predating the feed, but refuses a partial feed or
+an expired feed when one is present. Do not treat an old checkout without the
+feed as revocation-aware.
 
 ## Using a pack
 

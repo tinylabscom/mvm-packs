@@ -21,13 +21,21 @@ on:
       - "scripts/build-packs.py"
       - "scripts/validate-packs.py"
       - "scripts/publisher_identity.py"
+      - "scripts/build-revocations.py"
+      - "revocations.toml"
       - ".github/workflows/publish.yml"
+  schedule:
+    - cron: "17 */12 * * *"
   workflow_dispatch:
 
 permissions: {}
+concurrency:
+  group: signed-pack-publisher
+  cancel-in-progress: false
 
 jobs:
   sign:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,9 +82,10 @@ jobs:
         run: |
           python3 -m unittest discover -s tests
           python3 scripts/build-packs.py
+          python3 scripts/build-revocations.py
 
       - name: Verify the registry
-        run: python3 scripts/validate-packs.py --verify-signatures
+        run: python3 scripts/validate-packs.py --verify-signatures --require-revocations
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -91,6 +100,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Preserve previous signed revocations
+        run: |
+          if test -f packs/revocations.json; then
+            cp packs/revocations.json "$RUNNER_TEMP/previous-revocations.json"
+            cp packs/revocations.sigstore.json "$RUNNER_TEMP/previous-revocations.sigstore.json"
+          fi
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: signed-packs
@@ -114,7 +129,16 @@ jobs:
         with:
           python-version: "3.12"
       - name: Verify downloaded packs
-        run: python3 scripts/validate-packs.py --verify-signatures
+        run: |
+          set -euo pipefail
+          python3 scripts/validate-packs.py --verify-signatures --require-revocations
+          if test -f "$RUNNER_TEMP/previous-revocations.json"; then
+            python3 scripts/build-revocations.py \
+              --check-advance-from "$RUNNER_TEMP/previous-revocations.json" \
+              --check-advance-bundle "$RUNNER_TEMP/previous-revocations.sigstore.json"
+          else
+            python3 -c 'import json; from pathlib import Path; assert json.loads(Path("packs/revocations.json").read_text())["sequence"] == 1'
+          fi
       - name: Commit published packs
         run: |
           set -euo pipefail
