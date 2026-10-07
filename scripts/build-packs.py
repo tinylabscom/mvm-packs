@@ -155,6 +155,8 @@ def verify_bundle(manifest_path, bundle_path, identity):
 
 def check_existing_payload(out, payload):
     published = out / "files" / "pack"
+    if any(path.is_symlink() for path in (out / "files").rglob("*")):
+        fail(f"{out}: published payload contains a symlink")
     source_files = {p.relative_to(payload) for p in payload.rglob("*") if p.is_file()}
     published_files = {p.relative_to(published) for p in published.rglob("*") if p.is_file()}
     if source_files != published_files:

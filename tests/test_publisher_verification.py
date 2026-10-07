@@ -163,6 +163,22 @@ class PublisherVerificationTests(unittest.TestCase):
             verify.assert_not_called()
             sign.assert_not_called()
 
+    def test_published_symlink_is_not_resigned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, published = self.make_source_and_published_pack(root)
+            (published / "files" / "pack" / "profile.toml").unlink()
+            (published / "files" / "pack" / "profile.toml").symlink_to(
+                source / "pack" / "profile.toml"
+            )
+            with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "verify_bundle") as verify, \
+                    patch.object(builder, "sign") as sign:
+                with self.assertRaisesRegex(SystemExit, "contains a symlink"):
+                    builder.build_one(source)
+            verify.assert_not_called()
+            sign.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
