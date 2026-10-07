@@ -20,6 +20,7 @@ on:
       - "pack-sources/**"
       - "scripts/build-packs.py"
       - "scripts/validate-packs.py"
+      - "scripts/publisher_identity.py"
       - ".github/workflows/publish.yml"
   workflow_dispatch:
 

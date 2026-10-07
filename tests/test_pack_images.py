@@ -2,12 +2,14 @@
 
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "build-packs.py"
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC = importlib.util.spec_from_file_location("build_packs", SCRIPT)
 build_packs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(build_packs)
