@@ -85,6 +85,9 @@ def manifest_bytes(reference, description, payload, image=None):
     # under `pack/` in the manifest, the path mvm reads policy documents
     # from (pack/profile.toml, pack/group.toml).
     files = []
+    for path in payload.rglob("*"):
+        if path.is_symlink():
+            fail(f"payload symlink is not allowed: {path.relative_to(payload)}")
     for path in sorted(p for p in payload.rglob("*") if p.is_file()):
         rel = "pack/" + path.relative_to(payload).as_posix()
         parts = rel.split("/")

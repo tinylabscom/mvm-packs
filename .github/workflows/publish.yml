@@ -19,18 +19,20 @@ on:
     paths:
       - "pack-sources/**"
       - "scripts/build-packs.py"
+      - "scripts/validate-packs.py"
       - ".github/workflows/publish.yml"
   workflow_dispatch:
 
-permissions:
-  contents: write
-  id-token: write
+permissions: {}
 
 jobs:
-  publish:
+  sign:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       # cosign v3 writes the standard sigstore bundle (verificationMaterial)
       # the mvm client's sigstore-verify stack parses; v2 writes a legacy
@@ -38,7 +40,7 @@ jobs:
       # install v3 (v3 releases ship only a sigstore bundle, no .sig), so the
       # action installs the default v2 as a bootstrap verifier and this step
       # verifies and installs v3 pinned to its release tag.
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
 
       - name: Install cosign v3
         env:
@@ -61,22 +63,65 @@ jobs:
           cosign version
 
       - name: Install Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
-      - name: Build and sign packs
+      - name: Build, sign and verify packs
         env:
           COSIGN_YES: "true"
         run: |
           python3 -m unittest discover -s tests
           python3 scripts/build-packs.py
 
-      - name: Validate the registry layout
-        run: python3 scripts/validate-packs.py
+      - name: Verify the registry
+        run: python3 scripts/validate-packs.py --verify-signatures
 
-      - name: Commit published packs
-        uses: stefanzweifel/git-auto-commit-action@v7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          commit_message: "chore(packs): publish signed pack registry [skip ci]"
-          file_pattern: "packs/"
+          name: signed-packs
+          path: packs/
+          if-no-files-found: error
+
+  publish:
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed-packs
+          path: packs/
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install cosign v3
+        env:
+          COSIGN_V3_VERSION: "v3.1.1"
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Verify downloaded packs
+        run: python3 scripts/validate-packs.py --verify-signatures
+      - name: Commit published packs
+        run: |
+          set -euo pipefail
+          git add packs/
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git -c user.name='MVM Pack Publisher' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'chore(packs): publish signed pack registry [skip ci]'
+          git push origin HEAD:main
