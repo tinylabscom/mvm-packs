@@ -1,6 +1,6 @@
 # The pack registry
 
-This repository is also the signed pack registry `mvmctl` talks to. A pack
+This repository publishes the signed pack registry `mvmctl` talks to. A pack
 ships machine-readable policy — a profile (`pack/profile.toml`), a group
 (`pack/group.toml`), or both — plus any payload files the manifest declares,
 signed keyless by the publish workflow.
@@ -44,23 +44,45 @@ packs/<ns>/<name>/<version>/files/...             # payload, digest-pinned by th
 
 ## Publishing
 
-Merging to `main` runs `.github/workflows/publish.yml` when `pack-sources/`
-changes. It builds manifests (SHA-256 and size per file), signs each manifest
-keyless with `cosign sign-blob` while the run's OIDC identity is
-`refs/heads/main`, validates the layout with `scripts/validate-packs.py`,
-and commits `packs/`. Published versions are immutable: change a source and
-the build refuses until the version in `pack.toml` is bumped.
+Merging to `main` runs `.github/workflows/publish.yml` when publisher inputs
+change. It builds manifests (SHA-256 and size per file), re-signs each
+unchanged manifest under the current release identity, and verifies every
+bundle before and after transferring the output to a separate publishing job.
+The job commits `packs/` only after both verification passes succeed. Changed
+pack contents still require a version bump in `pack.toml`.
 
-Clients verify on every use — pull, and every policy load — against the
-publisher trust policy. With no operator policy file, mvm's built-in default
-accepts exactly this workflow's identity:
+The new release identity is:
 
 ```
-https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main
+https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main
 ```
 
-under the GitHub OIDC issuer. Writing `$MVM_HOME/registry/publishers.toml`
-replaces that default wholesale.
+under the GitHub OIDC issuer. The repository rename changed this identity.
+The bundles currently checked into `packs/` were signed under the former
+`tinylabscom/mvm-templates` workflow identity. They do not verify against the
+new identity. The first publisher run after this change must re-sign and
+verify all of them; until that run completes, no checked-in pack should be
+described as verified under the new identity.
+
+The current released `mvmctl` trusts the former workflow identity by default.
+Newly signed packs will not install or run under its built-in trust policy
+until the corresponding client trust migration is released. An operator-supplied
+`$MVM_HOME/registry/publishers.toml` replaces the built-in policy wholesale.
+Do not publish under the new identity before the client migration is ready.
+
+### Migration and breaking changes
+
+- Use `tinylabscom/mvm-packs` for source links and `MVM_PACK_REGISTRY` URLs.
+  Do not rely on redirects from the former repository URL.
+- Existing signature bundles remain evidence of releases by the former
+  identity. The first new publisher run replaces those bundles while keeping
+  each unchanged manifest and its payload intact.
+- Clients that trust only the former identity reject the new bundles. Update
+  the client trust policy as part of the coordinated release.
+- Existing `agent/` and `runtime/` pack references have not been renamed here;
+  any move to a publisher namespace requires an explicit lockfile migration.
+- The unsigned template catalog remains available through `mvmctl template`.
+  It is not an official signed pack catalog.
 
 ## Using a pack
 
