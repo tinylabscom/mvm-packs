@@ -80,6 +80,89 @@ class PublisherVerificationTests(unittest.TestCase):
                 validator.verify_signature(manifest)
             self.assertTrue(any("verification failed" in problem for problem in validator.problems))
 
+    def make_source_and_published_pack(self, root):
+        source = root / "pack-sources" / "runtime" / "example"
+        payload = source / "pack"
+        payload.mkdir(parents=True)
+        (source / "pack.toml").write_text('version = "1.0.0"\ndescription = "Example"\n')
+        (payload / "profile.toml").write_text("schema_version = 1\n")
+        published = root / "packs" / "runtime" / "example" / "1.0.0"
+        (published / "files" / "pack").mkdir(parents=True)
+        (published / "files" / "pack" / "profile.toml").write_bytes(
+            (payload / "profile.toml").read_bytes()
+        )
+        manifest, _ = builder.manifest_bytes("runtime/example@1.0.0", "Example", payload)
+        (published / "manifest.json").write_bytes(manifest)
+        (published / "manifest.sigstore.json").write_text("{}")
+        return source, published
+
+    def test_current_identity_skips_resigning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _ = self.make_source_and_published_pack(root)
+            with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "verify_bundle", return_value=True) as verify, \
+                    patch.object(builder, "sign") as sign:
+                builder.build_one(source)
+            verify.assert_called_once()
+            self.assertEqual(verify.call_args.args[2], builder.CURRENT_IDENTITY)
+            sign.assert_not_called()
+
+    def test_bundle_verification_uses_exact_identity_and_issuer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = root / "manifest.json"
+            bundle = root / "manifest.sigstore.json"
+            manifest.write_text("{}")
+            bundle.write_text("{}")
+            with patch.object(builder.subprocess, "run") as run:
+                run.return_value.returncode = 0
+                self.assertTrue(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
+                command = run.call_args.args[0]
+                self.assertIn(builder.FORMER_IDENTITY, command)
+                self.assertIn(builder.PUBLISHER_ISSUER, command)
+                run.return_value.returncode = 1
+                self.assertFalse(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
+
+    def test_former_identity_is_verified_before_resigning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, published = self.make_source_and_published_pack(root)
+            with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "verify_bundle", side_effect=[False, True]) as verify, \
+                    patch.object(builder, "sign") as sign:
+                builder.build_one(source)
+            self.assertEqual(
+                [call.args[2] for call in verify.call_args_list],
+                [builder.CURRENT_IDENTITY, builder.FORMER_IDENTITY],
+            )
+            sign.assert_called_once()
+            self.assertTrue((published / "manifest.json").is_file())
+
+    def test_untrusted_signature_is_not_resigned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _ = self.make_source_and_published_pack(root)
+            with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "verify_bundle", return_value=False), \
+                    patch.object(builder, "sign") as sign:
+                with self.assertRaisesRegex(SystemExit, "signature is not trusted"):
+                    builder.build_one(source)
+            sign.assert_not_called()
+
+    def test_drifted_payload_is_not_resigned(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, published = self.make_source_and_published_pack(root)
+            (published / "files" / "pack" / "profile.toml").write_text("changed")
+            with patch.object(builder, "PACKS", root / "packs"), \
+                    patch.object(builder, "verify_bundle") as verify, \
+                    patch.object(builder, "sign") as sign:
+                with self.assertRaisesRegex(SystemExit, "published payload differs"):
+                    builder.build_one(source)
+            verify.assert_not_called()
+            sign.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

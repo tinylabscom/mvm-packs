@@ -7,7 +7,7 @@ name: Publish signed packs
 # policy load against the publisher trust policy, whose built-in default
 # accepts this workflow's identity:
 #
-#   https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main
+#   https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main
 #
 # Signing happens while the run's OIDC identity is refs/heads/main (a push
 # trigger), before the artifacts commit, so the identity is stable across

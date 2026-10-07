@@ -56,7 +56,7 @@ publisher trust policy. With no operator policy file, mvm's built-in default
 accepts exactly this workflow's identity:
 
 ```
-https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main
+https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main
 ```
 
 under the GitHub OIDC issuer. Writing `$MVM_HOME/registry/publishers.toml`

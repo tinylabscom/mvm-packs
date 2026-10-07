@@ -1,4 +1,4 @@
-# mvm-templates
+# mvm-packs
 
 Remote template registry for [`mvmctl`](https://github.com/tinylabscom/mvm).
 
@@ -140,7 +140,7 @@ repo if you are also changing `mvmctl` code.
 Point `mvmctl` at this directory with a `file://` URL:
 
 ```bash
-export MVM_TEMPLATE_REGISTRY="file:///path/to/mvm-templates"
+export MVM_TEMPLATE_REGISTRY="file:///path/to/mvm-packs"
 mvmctl template list
 mvmctl template info <name>
 mvmctl generate template <name> ./my-project

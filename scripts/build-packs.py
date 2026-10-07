@@ -40,6 +40,9 @@ PACKS = ROOT / "packs"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+PUBLISHER_ISSUER = "https://token.actions.githubusercontent.com"
+CURRENT_IDENTITY = "https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main"
+FORMER_IDENTITY = "https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main"
 
 
 def fail(message):
@@ -133,17 +136,32 @@ def manifest_bytes(reference, description, payload, image=None):
     return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
 
 
-def bundle_is_current(bundle_path):
-    """True when the bundle exists in the standard sigstore format the mvm
-    client parses (verificationMaterial); cosign v2's legacy blob bundle is
-    re-signed."""
+def verify_bundle(manifest_path, bundle_path, identity):
     if not bundle_path.is_file():
         return False
-    try:
-        bundle = json.loads(bundle_path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return False
-    return "verificationMaterial" in bundle
+    result = subprocess.run(
+        [
+            "cosign", "verify-blob", str(manifest_path),
+            "--bundle", str(bundle_path),
+            "--certificate-identity", identity,
+            "--certificate-oidc-issuer", PUBLISHER_ISSUER,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def check_existing_payload(out, payload):
+    published = out / "files" / "pack"
+    source_files = {p.relative_to(payload) for p in payload.rglob("*") if p.is_file()}
+    published_files = {p.relative_to(published) for p in published.rglob("*") if p.is_file()}
+    if source_files != published_files:
+        fail(f"{out}: published payload file set differs from source")
+    for relative in source_files:
+        if (payload / relative).read_bytes() != (published / relative).read_bytes():
+            fail(f"{out}: published payload differs from source at {relative}")
 
 
 def sign(manifest_path, bundle_path):
@@ -169,14 +187,18 @@ def build_one(source):
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
-        if existing == manifest and bundle_is_current(out / "manifest.sigstore.json"):
-            print(f"{reference}: unchanged")
-            return
         if existing != manifest:
             fail(
                 f"{reference}: version already published with different bytes; "
                 "bump the version in pack.toml"
             )
+        check_existing_payload(out, payload)
+        bundle = out / "manifest.sigstore.json"
+        if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
+            print(f"{reference}: unchanged")
+            return
+        if not verify_bundle(out / "manifest.json", bundle, FORMER_IDENTITY):
+            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
 
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
