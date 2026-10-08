@@ -109,6 +109,26 @@ guarantee. CI must pin the verifier digest outside pack source, and this
 command is not wired into publication until a released verifier supports
 selected-artifact checks. It does not make an image pack publishable.
 
+`scripts/bind-image-candidate.py` combines the two offline checks without
+publishing an image pack. Give it a schema-v2 source `pack.toml`, the exact
+pre-downloaded signed root files and four selected base artifacts, the
+reproduced application-layer directory, an independently supplied SHA-256
+for a released `mvmctl`, and a new output directory. Run
+`python3 scripts/bind-image-candidate.py --help` for the exact flags. It
+copies every input through no-follow file descriptors into private staging,
+checks the base copy with the existing verifier, validates the copied layer
+against its asset report, and atomically publishes those copies with a
+deterministic `candidate.json` recording their digests and sizes. The
+descriptor marks itself as an unsigned candidate and states that verification
+covered only the selected base artifacts. Keep all inputs quiescent while
+they are copied; this is not a race-safe snapshot of mutable source paths.
+The candidate is neither signed nor attested and closes no image-pack release
+acceptance criterion. A released verifier, image signing and attestation,
+and client pull, admission, and boot verification remain necessary before an
+image-bearing pack can be published or presented as official. A later
+composer must rehash the candidate's files when it opens them; this check
+does not establish a time-of-use guarantee or current revocation status.
+
 The workflow builds the published layout under `packs/`:
 
 ```
