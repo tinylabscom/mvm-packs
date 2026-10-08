@@ -35,6 +35,26 @@ installation or execution. These producer and client changes are not shipped
 by the current schema; the source-only guard is a release safety check, not
 evidence that image signing or reproducibility exists.
 
+An offline producer check is available as `scripts/reproduce-app-layer.py`.
+Supply a complete, trusted, quiescent staged application tree, the exact `mvmctl` binary to run,
+an independently obtained SHA-256 for that binary, and a new output directory:
+
+```sh
+python3 scripts/reproduce-app-layer.py --help
+```
+
+The check copies the selected executable through a no-follow descriptor into
+private storage, verifies the copy against the supplied digest, and invokes
+only that copy for both `mvmctl image build-layer` runs. It builds in separate
+private directories, verifies the three filesystem assets against
+each build's `asset-report.json`, compares all output bytes, and atomically
+publishes the first result without replacing an existing path. Its output is
+unsigned. It does not prove a base-image pin, build provenance, or official
+pack status, and it does not make image-bearing packs publishable.
+Do not modify the staged tree while either build runs: this check does not
+provide a race-safe source snapshot or establish reproducibility if source
+files change concurrently.
+
 Source authors can validate the proposed built-image descriptor shape with
 `scripts/build-packs.py`, but the command still refuses to publish any
 image-bearing pack before it signs or writes one. Even when the descriptor
