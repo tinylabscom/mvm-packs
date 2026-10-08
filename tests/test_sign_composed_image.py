@@ -32,11 +32,13 @@ class SigningTests(unittest.TestCase):
         self.composed = self.root / "composed"
         self.composed.mkdir()
         self.output = self.root / "signed"
+        self.images_lock = self.root / "images.lock"
         self.base = {
             "repository": "tinylabscom/mvm-images",
             "release_tag": "image-set/v0.2.4",
             "manifest_sha256": "a" * 64,
         }
+        self.write_lock()
         self.candidate_value = {
             "schema_version": 1,
             "kind": "unsigned-image-candidate",
@@ -84,13 +86,24 @@ class SigningTests(unittest.TestCase):
             "GITHUB_SHA": "c" * 40,
         }
 
+    def write_lock(self, release_tag=None, manifest_sha256=None):
+        self.images_lock.write_text(
+            'schema_version = 2\nrepository = "tinylabscom/mvm-images"\n'
+            '[image_set]\nrepository = "tinylabscom/mvm-images"\n'
+            f'release_tag = "{release_tag or self.base["release_tag"]}"\n'
+            f'manifest_sha256 = "{manifest_sha256 or self.base["manifest_sha256"]}"\n'
+        )
+
+    def prepare(self):
+        signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
+                       self.output, self.environment, self.images_lock)
+
     def fake_sign(self, path, bundle):
         bundle.write_bytes(hashlib.sha256(path.read_bytes()).hexdigest().encode())
 
     def test_signs_only_verified_bytes_and_binds_base_and_provenance(self):
         with mock.patch.object(signer, "sign_and_verify", side_effect=self.fake_sign) as called:
-            signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                           self.output, self.environment)
+            self.prepare()
         self.assertEqual(called.call_count, 3)
         self.assertEqual((self.output / "rootfs.ext4").read_bytes(), b"rootfs-bytes")
         provenance = json.loads((self.output / "provenance.json").read_text())
@@ -99,6 +112,9 @@ class SigningTests(unittest.TestCase):
         parameters = provenance["predicate"]["buildDefinition"]["externalParameters"]
         self.assertEqual(parameters["base_set"], self.base)
         self.assertEqual(parameters["reference"], "runtime/python@1.1.0")
+        dependencies = provenance["predicate"]["buildDefinition"]["resolvedDependencies"]
+        self.assertIn({"uri": "mvm/images.lock", "digest": {
+            "sha256": record(self.images_lock.read_bytes())["sha256"]}}, dependencies)
         descriptor = json.loads((self.output / "image-evidence.json").read_text())
         self.assertEqual(descriptor["base_set"], self.base)
         self.assertEqual(descriptor["assets"]["provenance.json"],
@@ -110,16 +126,14 @@ class SigningTests(unittest.TestCase):
         (self.composed / "rootfs.ext4").write_bytes(b"tampered")
         with mock.patch.object(signer, "sign_and_verify") as called:
             with self.assertRaisesRegex(signer.SigningError, "digest"):
-                signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                               self.output, self.environment)
+                self.prepare()
         called.assert_not_called()
         self.assertFalse(self.output.exists())
         (self.composed / "rootfs.ext4").write_bytes(b"rootfs-bytes")
         self.candidate.write_bytes(b"different")
         with mock.patch.object(signer, "sign_and_verify") as called:
             with self.assertRaisesRegex(signer.SigningError, "candidate"):
-                signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                               self.output, self.environment)
+                self.prepare()
         called.assert_not_called()
 
     def test_wrong_workflow_or_branch_refuses_before_signing(self):
@@ -133,15 +147,15 @@ class SigningTests(unittest.TestCase):
                 with mock.patch.object(signer, "sign_and_verify") as called:
                     with self.assertRaisesRegex(signer.SigningError, "publisher workflow"):
                         signer.prepare(self.composed, self.candidate,
-                                       "runtime/python@1.1.0", self.output, changed)
+                                       "runtime/python@1.1.0", self.output, changed,
+                                       self.images_lock)
                 called.assert_not_called()
                 self.assertFalse(self.output.exists())
 
     def test_failed_signature_verification_leaves_no_output(self):
         with mock.patch.object(signer, "sign_and_verify", side_effect=signer.SigningError("invalid signature")):
             with self.assertRaisesRegex(signer.SigningError, "invalid signature"):
-                signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                               self.output, self.environment)
+                self.prepare()
         self.assertFalse(self.output.exists())
 
     def test_wrong_asset_report_and_extra_input_refuse_before_signing(self):
@@ -150,13 +164,11 @@ class SigningTests(unittest.TestCase):
         write_json(self.composed / "composition.json", self.composition)
         with mock.patch.object(signer, "sign_and_verify") as called:
             with self.assertRaisesRegex(signer.SigningError, "asset report"):
-                signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                               self.output, self.environment)
+                self.prepare()
         called.assert_not_called()
         (self.composed / "untracked").write_bytes(b"unexpected")
         with self.assertRaisesRegex(signer.SigningError, "extra files"):
-            signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                           self.output, self.environment)
+            self.prepare()
 
     def test_symlinks_and_existing_destination_refuse(self):
         image = self.composed / "rootfs.ext4"
@@ -164,8 +176,7 @@ class SigningTests(unittest.TestCase):
         image.symlink_to(self.candidate)
         with mock.patch.object(signer, "sign_and_verify") as called:
             with self.assertRaises(signer.SigningError):
-                signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                               self.output, self.environment)
+                self.prepare()
         called.assert_not_called()
         self.assertFalse(self.output.exists())
         image.unlink()
@@ -174,10 +185,37 @@ class SigningTests(unittest.TestCase):
         (self.output / "operator-data").write_bytes(b"keep")
         with mock.patch.object(signer, "sign_and_verify") as called:
             with self.assertRaisesRegex(signer.SigningError, "new directory"):
-                signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                               self.output, self.environment)
+                self.prepare()
         called.assert_not_called()
         self.assertEqual((self.output / "operator-data").read_bytes(), b"keep")
+
+    def test_advanced_or_tampered_lock_refuses_before_signing(self):
+        for release_tag, manifest_sha256 in (
+            ("image-set/v0.2.5", None), (None, "0" * 64),
+        ):
+            with self.subTest(release_tag=release_tag, manifest_sha256=manifest_sha256):
+                self.write_lock(release_tag, manifest_sha256)
+                with mock.patch.object(signer, "sign_and_verify") as called:
+                    with self.assertRaisesRegex(signer.SigningError, "current images.lock"):
+                        self.prepare()
+                called.assert_not_called()
+                self.assertFalse(self.output.exists())
+        self.images_lock.write_text('schema_version = 2\n[image_set]\n')
+        with mock.patch.object(signer, "sign_and_verify") as called:
+            with self.assertRaisesRegex(signer.SigningError, "images.lock"):
+                self.prepare()
+        called.assert_not_called()
+
+    def test_linked_lock_refuses_before_signing(self):
+        linked = self.root / "linked.lock"
+        linked.write_bytes(self.images_lock.read_bytes())
+        self.images_lock.unlink()
+        self.images_lock.symlink_to(linked)
+        with mock.patch.object(signer, "sign_and_verify") as called:
+            with self.assertRaisesRegex(signer.SigningError, "input snapshot"):
+                self.prepare()
+        called.assert_not_called()
+        self.assertFalse(self.output.exists())
 
     def test_key_signing_is_refused(self):
         path = self.root / "blob"

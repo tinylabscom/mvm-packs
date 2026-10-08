@@ -14,6 +14,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import tomllib
 from pathlib import Path
 
 
@@ -153,7 +154,25 @@ def validate_snapshot(composed, candidate_path, reference, reproducer):
     return composition
 
 
-def provenance(reference, composition, rootfs_record, invocation, source_sha):
+def check_images_lock(path, base):
+    if path.name != "images.lock":
+        raise SigningError("mvm images.lock must retain its source name")
+    try:
+        lock = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise SigningError("mvm images.lock is unreadable or invalid") from error
+    if not isinstance(lock, dict) or lock.get("schema_version") != 2:
+        raise SigningError("mvm images.lock has an unsupported schema")
+    image_set = lock.get("image_set")
+    if (lock.get("repository") != base["repository"]
+            or not isinstance(image_set, dict)
+            or image_set.get("repository") != base["repository"]
+            or image_set.get("release_tag") != base["release_tag"]
+            or image_set.get("manifest_sha256") != base["manifest_sha256"]):
+        raise SigningError("composed base set differs from current images.lock")
+
+
+def provenance(reference, composition, rootfs_record, invocation, source_sha, lock_sha256):
     return {
         "_type": "https://in-toto.io/Statement/v1",
         "subject": [{"name": "rootfs.ext4", "digest": {"sha256": rootfs_record["sha256"]}}],
@@ -175,6 +194,7 @@ def provenance(reference, composition, rootfs_record, invocation, source_sha):
                         "sha256": composition["application_layer_sha256"]}},
                     {"uri": "image-set.json", "digest": {
                         "sha256": composition["base_set"]["manifest_sha256"]}},
+                    {"uri": "mvm/images.lock", "digest": {"sha256": lock_sha256}},
                     {"uri": f"git+https://github.com/tinylabscom/mvm-packs@{source_sha}",
                      "digest": {"gitCommit": source_sha}},
                 ],
@@ -187,10 +207,10 @@ def provenance(reference, composition, rootfs_record, invocation, source_sha):
     }
 
 
-def prepare(composition_dir, candidate_path, reference, output, environment):
+def prepare(composition_dir, candidate_path, reference, output, environment, images_lock):
     invocation = check_identity(environment)
-    composition_dir, candidate_path, output = map(
-        Path, (composition_dir, candidate_path, output)
+    composition_dir, candidate_path, output, images_lock = map(
+        Path, (composition_dir, candidate_path, output, images_lock)
     )
     if (output.name in ("", ".", "..") or output.exists() or output.is_symlink()
             or not stat.S_ISDIR(output.parent.resolve(strict=True).stat().st_mode)):
@@ -210,9 +230,13 @@ def prepare(composition_dir, candidate_path, reference, output, environment):
                 binder.copy_regular(composition_dir / name, snapshot / name)
             copied_candidate = private / "candidate.json"
             binder.copy_regular(candidate_path, copied_candidate)
+            copied_lock = private / "images.lock"
+            binder.copy_regular(images_lock, copied_lock)
         except (OSError, binder.CandidateError) as error:
             raise SigningError("input snapshot refused a missing, linked or special file") from error
         composition = validate_snapshot(snapshot, copied_candidate, reference, reproducer)
+        check_images_lock(copied_lock, composition["base_set"])
+        lock_sha256 = record(copied_lock, reproducer)["sha256"]
         # The helper expects exactly the four filesystem outputs. Check its
         # asset-report semantics against an exact-set private directory.
         exact = private / "exact-assets"
@@ -231,7 +255,7 @@ def prepare(composition_dir, candidate_path, reference, output, environment):
             shutil.copyfile(copied_candidate, staged / "candidate.json")
             (staged / "provenance.json").write_bytes(json_bytes(provenance(
                 reference, composition, record(staged / "rootfs.ext4", reproducer),
-                invocation, environment["GITHUB_SHA"],
+                invocation, environment["GITHUB_SHA"], lock_sha256,
             )))
             sign_and_verify(staged / "rootfs.ext4", staged / "rootfs.signature.json")
             sign_and_verify(staged / "provenance.json", staged / "provenance.signature.json")
@@ -265,9 +289,11 @@ def main(argv=None):
     parser.add_argument("--candidate-report", required=True, type=Path)
     parser.add_argument("--reference", required=True)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--mvm-images-lock", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
-        prepare(args.composition, args.candidate_report, args.reference, args.output, os.environ)
+        prepare(args.composition, args.candidate_report, args.reference, args.output,
+                os.environ, args.mvm_images_lock)
     except (OSError, ValueError, SigningError) as error:
         parser.exit(1, f"sign-composed-image: {error}\n")
 

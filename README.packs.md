@@ -154,7 +154,14 @@ force.
 release; it is not wired into the publisher. It accepts the composed directory,
 the exact `candidate.json` that produced it, a versioned pack reference, and a
 new output directory (`--composition`, `--candidate-report`, `--reference`,
-`--output`). It snapshots input files without following symlinks, rechecks
+`--output`). It also requires `--mvm-images-lock` naming the `images.lock` file
+from an independently pinned mvm checkout. It snapshots input files without
+following symlinks, refuses a composed base set that differs from that lock's
+current signed-root pin, and records the lock-file SHA-256 in provenance. When
+mvm advances its base lock, an old candidate cannot be signed as a new release:
+rebuild against the new base, or keep the existing release immutable. This
+local comparison does not authenticate the mvm checkout; the future publisher
+must pin its source commit independently. The helper rechecks
 the composition and asset-report digests and their candidate/base bindings,
 then writes an in-toto/SLSA v1 provenance statement naming the rootfs digest,
 base-set pin, application layer, verifier digest, and publisher run. It signs
