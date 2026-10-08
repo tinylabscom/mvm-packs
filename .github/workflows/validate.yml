@@ -20,5 +20,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Install ext4 inspection tools
+        run: sudo apt-get update && sudo apt-get install --yes e2fsprogs
       - run: python3 -m unittest discover -s tests
       - run: python3 scripts/validate-packs.py
