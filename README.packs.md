@@ -150,6 +150,42 @@ image or descriptor, attest provenance, establish revocation freshness, or
 make an image pack publishable. The existing publisher refusal remains in
 force.
 
+`scripts/sign-composed-image.py` prepares signed *evidence* for a later image
+release; it is not wired into the publisher. It accepts the composed directory,
+the exact `candidate.json` that produced it, a versioned pack reference, and a
+new output directory (`--composition`, `--candidate-report`, `--reference`,
+`--output`). It snapshots input files without following symlinks, rechecks
+the composition and asset-report digests and their candidate/base bindings,
+then writes an in-toto/SLSA v1 provenance statement naming the rootfs digest,
+base-set pin, application layer, verifier digest, and publisher run. It signs
+the rootfs, statement, and a separate image-evidence descriptor with cosign,
+then verifies each bundle under the exact `publish.yml@refs/heads/main` OIDC
+identity before atomically exposing the output. A different branch, workflow,
+failed verification, or changed input leaves no output. The output explicitly
+identifies itself as `signed-image-evidence-not-published`; it contains no
+boot sidecar or signed registry manifest. A publisher workflow must perform
+the actual keyless signing in that identity, verify the complete image release
+and client contract, and keep the existing image-publication refusal until
+those gates are implemented. Unit tests mock cosign and do not establish an
+actual signed image.
+
+### Pack image composition v1
+
+The build type named in that statement is the `compose-pack-image.py` operation
+followed by `sign-composed-image.py` in the same publisher run. Its external
+parameters are the exact versioned `reference` and the immutable `base_set`
+(`repository`, `release_tag`, signed root-manifest SHA-256). Its internal
+parameter is the SHA-256 of the verifier executable. The resolved dependencies
+are the copied `candidate.json`, application-layer `rootfs.ext4`, and signed
+base root manifest by SHA-256, plus the publisher repository's exact git
+commit. The publisher must obtain the base files
+from the named release, verify them with the released verifier whose own
+compiled `images.lock` accepts that base, reproduce the application layer,
+bind the candidate, and compose the full rootfs twice before invoking the
+signer. The statement's subject is the resulting `rootfs.ext4`; the Sigstore
+certificate must identify the main publish workflow. This build type does not
+claim a SLSA level while the publisher and consumer gates remain unfinished.
+
 The workflow builds the published layout under `packs/`:
 
 ```
