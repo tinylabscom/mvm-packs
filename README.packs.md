@@ -35,6 +35,11 @@ installation or execution. These producer and client changes are not shipped
 by the current schema; the source-only guard is a release safety check, not
 evidence that image signing or reproducibility exists.
 
+The first planned runnable environment is Claude Code. Its
+[delivery plan](CLAUDE-ENVIRONMENT.md) links the SDK, terminal/authentication and
+publication issues and defines the release evidence. It is not a published image
+or a replacement for the existing policy-only `agent/claude` pack.
+
 ### Advancing the base-image lock
 
 A published pack version is immutable, including its base-set tag and signed
