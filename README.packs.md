@@ -35,6 +35,20 @@ installation or execution. These producer and client changes are not shipped
 by the current schema; the source-only guard is a release safety check, not
 evidence that image signing or reproducibility exists.
 
+### Advancing the base-image lock
+
+A published pack version is immutable, including its base-set tag and signed
+root-manifest digest. When MVM advances `images.lock` to a base set that no
+longer accepts a pack's recorded pin, that pack version stays available for
+clients whose lock still accepts it, but new clients must refuse both pull and
+launch. Do not rewrite, re-sign with changed bytes, or silently rebuild the
+existing version against the new base set. Build and reproduce a new pack
+version against the new lock, sign its new image, descriptor, and provenance,
+then publish it under a new versioned release tag. A client upgrade does not
+implicitly select that new version: operators must pull and pin it explicitly.
+The consumer and publisher gates described here are not yet implemented for
+image-bearing packs; this is the compatibility rule they must enforce.
+
 An offline producer check is available as `scripts/reproduce-app-layer.py`.
 Supply a complete, trusted, quiescent staged application tree, the exact `mvmctl` binary to run,
 an independently obtained SHA-256 for that binary, and a new output directory:
