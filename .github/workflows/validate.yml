@@ -6,6 +6,7 @@ on:
       - "pack-sources/**"
       - "scripts/**"
       - "tests/**"
+      - "README.packs.md"
       - ".github/workflows/validate.yml"
 
 permissions:
