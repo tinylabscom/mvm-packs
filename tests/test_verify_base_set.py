@@ -107,7 +107,11 @@ class VerifyBaseSetTests(unittest.TestCase):
             stdout=json.dumps(self.report if report is None else report) if stdout is None else stdout,
             stderr="",
         )
-        with patch.object(verify_base_set.subprocess, "run", return_value=result) as invoked:
+        def run(command, **_kwargs):
+            self.invoked_binary_bytes = Path(command[0]).read_bytes()
+            return result
+
+        with patch.object(verify_base_set.subprocess, "run", side_effect=run) as invoked:
             verify_base_set.verify_base_set(
                 self.pack_source,
                 self.mvmctl,
@@ -120,7 +124,10 @@ class VerifyBaseSetTests(unittest.TestCase):
 
     def test_exact_selected_files_are_checked_without_lock_override(self):
         command = self.call()
-        self.assertEqual(command[:4], [str(self.mvmctl.resolve()), "image", "boot", "verify"])
+        self.assertNotEqual(command[0], str(self.mvmctl.resolve()))
+        self.assertEqual(Path(command[0]).name, "mvmctl")
+        self.assertEqual(self.invoked_binary_bytes, self.mvmctl.read_bytes())
+        self.assertEqual(command[1:4], ["image", "boot", "verify"])
         self.assertIn("--require-complete", command)
         self.assertIn("--json", command)
         self.assertNotIn("--lock", command)
@@ -193,6 +200,30 @@ class VerifyBaseSetTests(unittest.TestCase):
                 )
         finally:
             os.chdir(original_directory)
+
+    def test_replacing_selected_path_after_pinning_cannot_change_verifier(self):
+        report = json.dumps(self.report)
+        self.mvmctl.write_text(f"#!/bin/sh\nprintf '%s\\n' '{report}'\n")
+        self.mvmctl.chmod(0o700)
+        pinned_sha256 = digest(self.mvmctl.read_bytes())
+        original_run = subprocess.run
+        replaced = False
+
+        def replace_before_invocation(command, **kwargs):
+            nonlocal replaced
+            if not replaced:
+                self.mvmctl.rename(self.root / "original-verifier")
+                self.mvmctl.write_text("#!/bin/sh\nexit 9\n")
+                self.mvmctl.chmod(0o700)
+                replaced = True
+            return original_run(command, **kwargs)
+
+        with patch.object(verify_base_set.subprocess, "run", side_effect=replace_before_invocation):
+            verify_base_set.verify_base_set(
+                self.pack_source, self.mvmctl, pinned_sha256,
+                self.manifest, self.bundle, self.artifacts,
+            )
+        self.assertTrue(replaced)
 
     def test_refuses_source_outside_pack_sources(self):
         wrong = self.root / "other" / "runtime" / "python" / "pack.toml"

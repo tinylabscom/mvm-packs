@@ -81,8 +81,10 @@ requires a source `pack.toml`, the exact `image-set.json` and
 `image-set.json.bundle` release files, and an artifact directory containing
 only the default-tenant kernel, root filesystem, verity tree, and root hash
 for the declared architecture. It also requires an explicit `mvmctl` binary
-and its independently supplied SHA-256. The command invokes `mvmctl image
-boot verify` with the binary's compiled image lock, four selected artifacts,
+and its independently supplied SHA-256. It invokes a private, SHA-checked copy
+so replacing the selected path cannot change the verifier after the check.
+The command invokes the pinned verifier's `image boot verify` command with its
+compiled image lock, four selected artifacts,
 `--require-complete`, and JSON output; it checks the reported role, target,
 name, digest, size, release tag, and signed root digest against the source
 descriptor and local files. Run `python3 scripts/verify-base-set.py --help`

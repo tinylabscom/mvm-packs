@@ -12,6 +12,7 @@ import json
 import re
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 
@@ -116,10 +117,6 @@ def check_inputs(mvmctl, expected_mvmctl_sha256, manifest, bundle, artifacts, ex
         refuse("signed root files must retain their release asset names")
     if manifest == bundle:
         refuse("manifest and signature bundle must be distinct files")
-    if digest_and_size(mvmctl)[0] != expected_mvmctl_sha256:
-        refuse("verifier binary differs from its independently supplied SHA-256 pin")
-    if not mvmctl.stat().st_mode & 0o111:
-        refuse("verifier binary is not executable")
     require_directory(artifacts, "artifact directory")
     actual = {entry.name for entry in artifacts.iterdir()}
     if actual != set(expected):
@@ -170,6 +167,22 @@ def check_report(report, image, manifest, artifacts, expected, arch):
             refuse(f"verifier reported bytes that differ from staged artifact {name}")
 
 
+def pin_verifier(binary, expected_sha256, private_directory):
+    script = Path(__file__).with_name("reproduce-app-layer.py")
+    spec = importlib.util.spec_from_file_location("reproduce_app_layer", script)
+    if spec is None or spec.loader is None:
+        refuse("executable pinning helper is unavailable")
+    helper = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(helper)
+    except (OSError, ImportError) as error:
+        refuse(f"executable pinning helper is unavailable: {error}")
+    try:
+        return helper.pin_binary(binary, expected_sha256, private_directory)
+    except (OSError, helper.ReproductionError) as error:
+        refuse(f"verifier binary cannot be pinned: {error}")
+
+
 def verify_base_set(pack_source, mvmctl, mvmctl_sha256, manifest, bundle, artifacts):
     pack_source, mvmctl, manifest, bundle, artifacts = map(
         Path, (pack_source, mvmctl, manifest, bundle, artifacts)
@@ -184,19 +197,21 @@ def verify_base_set(pack_source, mvmctl, mvmctl_sha256, manifest, bundle, artifa
     check_inputs(mvmctl, mvmctl_sha256, manifest, bundle, artifacts, expected)
     if digest_and_size(manifest)[0] != image["base_set"]["manifest_sha256"]:
         refuse("image-set manifest bytes differ from the source descriptor pin")
-    command = [
-        str(mvmctl), "image", "boot", "verify",
-        "--manifest", str(manifest), "--bundle", str(bundle),
-        "--artifacts", str(artifacts), "--require-complete", "--json",
-    ]
-    for name in sorted(expected):
-        command.extend(("--artifact", name))
-    try:
-        result = subprocess.run(
-            command, capture_output=True, text=True, check=False, timeout=600
-        )
-    except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired) as error:
-        refuse(f"verifier could not complete: {error}")
+    with tempfile.TemporaryDirectory(prefix="mvm-base-verifier-") as private:
+        pinned = pin_verifier(mvmctl, mvmctl_sha256, Path(private))
+        command = [
+            str(pinned), "image", "boot", "verify",
+            "--manifest", str(manifest), "--bundle", str(bundle),
+            "--artifacts", str(artifacts), "--require-complete", "--json",
+        ]
+        for name in sorted(expected):
+            command.extend(("--artifact", name))
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, check=False, timeout=600
+            )
+        except (OSError, UnicodeDecodeError, subprocess.TimeoutExpired) as error:
+            refuse(f"verifier could not complete: {error}")
     if result.returncode != 0:
         refuse("signed image-set verifier refused the selected base files")
     try:
