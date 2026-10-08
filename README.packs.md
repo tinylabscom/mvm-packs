@@ -125,9 +125,30 @@ they are copied; this is not a race-safe snapshot of mutable source paths.
 The candidate is neither signed nor attested and closes no image-pack release
 acceptance criterion. A released verifier, image signing and attestation,
 and client pull, admission, and boot verification remain necessary before an
-image-bearing pack can be published or presented as official. A later
-composer must rehash the candidate's files when it opens them; this check
-does not establish a time-of-use guarantee or current revocation status.
+image-bearing pack can be published or presented as official. The binding
+step does not establish a time-of-use guarantee or current revocation status.
+
+`scripts/compose-pack-image.py` is an offline, unsigned composition check for
+that candidate. Run it inside the project builder VM with `--candidate`, the
+versioned `--reference`, the same released `--mvmctl` and independently pinned
+`--mvmctl-sha256`, and a new `--output` directory. The command snapshots the
+candidate through no-follow descriptors, rechecks its recorded bytes, and
+re-runs the released verifier against the signed selected base files. It then
+extracts the base and application ext4 images with `debugfs`, adds application
+entries without replacing base entries or accepting application symlinks or
+special files, and builds the combined tree twice with the pinned client's
+`image build-layer` command. It refuses to publish the output directory if any
+of the three filesystem assets or the asset report differ byte-for-byte.
+The output contains those four files and `composition.json`, marked
+`unsigned-composed-image`, binding the copied candidate digest, base-set pin,
+layer digest, verifier digest, and composed asset digests. Run
+`python3 scripts/compose-pack-image.py --help` for the exact invocation.
+The source images must remain quiescent while the initial private snapshot is
+copied. This check has not been exercised against a released verifier or a
+real published base image yet; it does not generate `mvm-meta.json`, sign an
+image or descriptor, attest provenance, establish revocation freshness, or
+make an image pack publishable. The existing publisher refusal remains in
+force.
 
 The workflow builds the published layout under `packs/`:
 
