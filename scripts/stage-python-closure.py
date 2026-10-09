@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -16,6 +17,9 @@ from pathlib import Path
 IMAGE_FLAKE = Path(__file__).resolve().parents[1] / "pack-sources/runtime/python/image"
 STORE_ROOT = Path("/nix/store")
 STORE_NAME = re.compile(r"[0-9a-z]{32}-[A-Za-z0-9+._-]+\Z")
+GLIBC_LOADER = re.compile(
+    r"/nix/store/([0-9a-z]{32}-glibc(?:-[A-Za-z0-9+._-]+)?)/lib/ld-linux-x86-64\.so\.2\Z"
+)
 
 
 class StageError(Exception):
@@ -45,6 +49,49 @@ def store_member(path, store_root):
     return path
 
 
+def python_loader(executable, store_root, closure):
+    """Read the x86-64 ELF interpreter and require its loader in the closure."""
+    try:
+        with executable.open("rb") as source:
+            header = source.read(64)
+            if (len(header) != 64 or header[:6] != b"\x7fELF\x02\x01"
+                    or struct.unpack_from("<H", header, 18)[0] != 62):
+                raise StageError("Python executable is not x86-64 ELF")
+            program_offset = struct.unpack_from("<Q", header, 32)[0]
+            entry_size, entry_count = struct.unpack_from("<HH", header, 54)
+            if entry_size < 56 or not 1 <= entry_count <= 128:
+                raise StageError("Python ELF program headers are invalid")
+            interpreters = []
+            for index in range(entry_count):
+                source.seek(program_offset + index * entry_size)
+                entry = source.read(56)
+                if len(entry) != 56:
+                    raise StageError("Python ELF program header is truncated")
+                if struct.unpack_from("<I", entry)[0] == 3:
+                    offset = struct.unpack_from("<Q", entry, 8)[0]
+                    size = struct.unpack_from("<Q", entry, 32)[0]
+                    if not 2 <= size <= 512:
+                        raise StageError("Python ELF interpreter length is invalid")
+                    source.seek(offset)
+                    value = source.read(size)
+                    if len(value) != size or not value.endswith(b"\x00") or b"\x00" in value[:-1]:
+                        raise StageError("Python ELF interpreter is malformed")
+                    interpreters.append(value[:-1].decode("ascii"))
+    except (OSError, UnicodeError, struct.error) as error:
+        raise StageError("Python ELF interpreter could not be inspected") from error
+    if len(interpreters) != 1 or not (match := GLIBC_LOADER.fullmatch(interpreters[0])):
+        raise StageError("Python interpreter must use one pinned x86-64 glibc loader")
+    member = store_root / match.group(1)
+    loader = member / "lib/ld-linux-x86-64.so.2"
+    try:
+        loader_mode = loader.lstat().st_mode
+    except OSError as error:
+        raise StageError("Python glibc loader is absent from the pinned closure") from error
+    if member not in closure or not stat.S_ISREG(loader_mode) or not os.access(loader, os.X_OK):
+        raise StageError("Python glibc loader is absent from the pinned closure")
+    return interpreters[0]
+
+
 def stage_closure(python_out, requisites, output, store_root=STORE_ROOT):
     store_root, output = Path(store_root), Path(output)
     python_out = store_member(python_out, store_root)
@@ -57,6 +104,7 @@ def stage_closure(python_out, requisites, output, store_root=STORE_ROOT):
     if (not executable.is_file() or not os.access(executable, os.X_OK)
             or store_root.resolve(strict=True) not in executable.resolve(strict=True).parents):
         raise StageError("Python executable is missing or not executable")
+    loader = python_loader(executable.resolve(strict=True), store_root, paths)
     if output.name in ("", ".", "..") or output.exists() or output.is_symlink():
         raise StageError("output already exists or has no name")
     parent = output.parent.resolve(strict=True)
@@ -73,6 +121,8 @@ def stage_closure(python_out, requisites, output, store_root=STORE_ROOT):
                 shutil.copy2(path, destination / path.name, follow_symlinks=False)
         (tree / "bin").mkdir()
         (tree / "bin/python3").symlink_to(f"/nix/store/{python_out.name}/bin/python3")
+        (tree / "lib64").mkdir()
+        (tree / "lib64/ld-linux-x86-64.so.2").symlink_to(loader)
         reproducer = reproducer_helper()
         try:
             reproducer.publish_noclobber(tree, parent / output.name)

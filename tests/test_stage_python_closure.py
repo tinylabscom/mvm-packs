@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import struct
 import subprocess
 import tempfile
 import tomllib
@@ -15,6 +16,20 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "stage-python-closure
 SPEC = importlib.util.spec_from_file_location("stage_python_closure", SCRIPT)
 stage = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(stage)
+
+
+def elf_with_interpreter(interpreter):
+    value = interpreter.encode("ascii") + b"\0"
+    result = bytearray(120 + len(value))
+    result[:6] = b"\x7fELF\x02\x01"
+    struct.pack_into("<H", result, 18, 62)
+    struct.pack_into("<Q", result, 32, 64)
+    struct.pack_into("<HH", result, 54, 56, 1)
+    struct.pack_into("<I", result, 64, 3)
+    struct.pack_into("<Q", result, 72, 120)
+    struct.pack_into("<Q", result, 96, len(value))
+    result[120:] = value
+    return result
 
 
 class StagePythonClosureTests(unittest.TestCase):
@@ -48,12 +63,15 @@ class StagePythonClosureTests(unittest.TestCase):
         self.python = self.store / f"{'a' * 32}-python3-3.12"
         (self.python / "bin").mkdir(parents=True)
         executable = self.python / "bin" / "python3.12"
-        executable.write_bytes(b"python executable")
-        executable.chmod(0o755)
-        (self.python / "bin" / "python3").symlink_to("python3.12")
         self.libc = self.store / f"{'b' * 32}-glibc"
         (self.libc / "lib").mkdir(parents=True)
-        (self.libc / "lib" / "ld.so").write_bytes(b"loader")
+        self.loader = self.libc / "lib" / "ld-linux-x86-64.so.2"
+        self.loader.write_bytes(b"loader")
+        self.loader.chmod(0o755)
+        self.interpreter = f"/nix/store/{self.libc.name}/lib/ld-linux-x86-64.so.2"
+        executable.write_bytes(elf_with_interpreter(self.interpreter))
+        executable.chmod(0o755)
+        (self.python / "bin" / "python3").symlink_to("python3.12")
         self.data = self.store / f"{'e' * 32}-runtime-data"
         self.data.write_bytes(b"runtime data")
         self.output = self.root / "staged"
@@ -61,7 +79,7 @@ class StagePythonClosureTests(unittest.TestCase):
     def test_stages_complete_closure_and_guest_interpreter_link(self):
         stage.stage_closure(self.python, [self.data, self.libc, self.python], self.output, self.store)
         self.assertEqual(
-            (self.output / "nix" / "store" / self.libc.name / "lib" / "ld.so").read_bytes(),
+            (self.output / "nix" / "store" / self.libc.name / "lib" / "ld-linux-x86-64.so.2").read_bytes(),
             b"loader",
         )
         self.assertEqual(
@@ -71,6 +89,10 @@ class StagePythonClosureTests(unittest.TestCase):
         self.assertEqual(
             os.readlink(self.output / "bin" / "python3"),
             f"/nix/store/{self.python.name}/bin/python3",
+        )
+        self.assertEqual(
+            os.readlink(self.output / "lib64" / "ld-linux-x86-64.so.2"),
+            self.interpreter,
         )
         self.assertEqual(
             (self.output / "nix" / "store" / self.data.name).read_bytes(),
@@ -97,6 +119,30 @@ class StagePythonClosureTests(unittest.TestCase):
         (self.python / "bin" / "python3").unlink()
         with self.assertRaisesRegex(stage.StageError, "Python executable"):
             stage.stage_closure(self.python, [self.python], self.output, self.store)
+        self.assertFalse(self.output.exists())
+
+    def test_refuses_unknown_or_unavailable_python_loader(self):
+        executable = self.python / "bin/python3.12"
+        for image, message in (
+            (b"not ELF", "not x86-64 ELF"),
+            (elf_with_interpreter("/lib64/ld-linux-x86-64.so.2"), "pinned x86-64 glibc"),
+            (elf_with_interpreter(f"/nix/store/{'c' * 32}-glibc/lib/ld-linux-x86-64.so.2"),
+             "absent from the pinned closure"),
+        ):
+            with self.subTest(message=message):
+                executable.write_bytes(image)
+                with self.assertRaisesRegex(stage.StageError, message):
+                    stage.stage_closure(self.python, [self.python, self.libc], self.output, self.store)
+                self.assertFalse(self.output.exists())
+
+    def test_refuses_a_loader_link_even_when_it_points_to_a_file(self):
+        self.loader.unlink()
+        outside = self.root / "outside-loader"
+        outside.write_bytes(b"loader")
+        outside.chmod(0o755)
+        self.loader.symlink_to(outside)
+        with self.assertRaisesRegex(stage.StageError, "absent from the pinned closure"):
+            stage.stage_closure(self.python, [self.python, self.libc], self.output, self.store)
         self.assertFalse(self.output.exists())
 
     def test_nix_build_uses_the_checked_in_lock_and_queries_requisites(self):

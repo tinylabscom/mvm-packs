@@ -88,7 +88,11 @@ builder shell-job output disk. Its
 `pack-sources/runtime/python/image/flake.lock` pins the Nixpkgs revision and
 content hash; the command refuses a lock update, queries the resulting Nix
 store requisites, copies the complete closure without following links, and
-adds `/bin/python3` as a guest link to the pinned interpreter. The staged tree
+adds `/bin/python3` as a guest link to the pinned interpreter. Staging reads
+that executable's x86-64 ELF interpreter, requires its executable glibc
+loader in the same closure, and adds `/lib64/ld-linux-x86-64.so.2` as a link
+to that exact loader. An absent, unrecognized, or out-of-closure loader
+refuses staging. The staged tree
 is only input to the byte-identical layer rebuild above. It is not a signed
 image, a published pack, or evidence of a successful boot.
 
