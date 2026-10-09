@@ -38,10 +38,13 @@ class PythonPublishWorkflowTests(unittest.TestCase):
             "__builder-shell-job",
             "check-python-base-entrypoint.py",
             "sign-composed-image.py",
+            "check-python-composed-runtime.py",
         )
         positions = [runner.index(item) for item in ordered]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("pack-sources/runtime/python/mvm-meta.json", runner)
+        self.assertIn('"$evidence/rootfs.ext4"', runner)
+        self.assertIn('"$evidence/mvm-meta.json"', runner)
         self.assertIn("assert_current_lock", runner)
         self.assertNotIn("upload-image-release.py", runner)
         self.assertNotIn("publish-image-pack.py", runner)

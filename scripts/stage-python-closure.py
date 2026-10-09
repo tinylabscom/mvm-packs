@@ -49,8 +49,8 @@ def store_member(path, store_root):
     return path
 
 
-def python_loader(executable, store_root, closure):
-    """Read the x86-64 ELF interpreter and require its loader in the closure."""
+def elf_interpreter(executable):
+    """Read the one interpreter requested by an x86-64 ELF executable."""
     try:
         with executable.open("rb") as source:
             header = source.read(64)
@@ -79,7 +79,15 @@ def python_loader(executable, store_root, closure):
                     interpreters.append(value[:-1].decode("ascii"))
     except (OSError, UnicodeError, struct.error) as error:
         raise StageError("Python ELF interpreter could not be inspected") from error
-    if len(interpreters) != 1 or not (match := GLIBC_LOADER.fullmatch(interpreters[0])):
+    if len(interpreters) != 1:
+        raise StageError("Python executable must name one ELF interpreter")
+    return interpreters[0]
+
+
+def python_loader(executable, store_root, closure):
+    """Require the Python executable's glibc loader in the pinned closure."""
+    interpreter = elf_interpreter(executable)
+    if not (match := GLIBC_LOADER.fullmatch(interpreter)):
         raise StageError("Python interpreter must use one pinned x86-64 glibc loader")
     member = store_root / match.group(1)
     loader = member / "lib/ld-linux-x86-64.so.2"
@@ -89,7 +97,7 @@ def python_loader(executable, store_root, closure):
         raise StageError("Python glibc loader is absent from the pinned closure") from error
     if member not in closure or not stat.S_ISREG(loader_mode) or not os.access(loader, os.X_OK):
         raise StageError("Python glibc loader is absent from the pinned closure")
-    return interpreters[0]
+    return interpreter
 
 
 def stage_closure(python_out, requisites, output, store_root=STORE_ROOT):

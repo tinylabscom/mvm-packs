@@ -235,6 +235,16 @@ measured and reviewed. This gate does not prove the composed image boots,
 that Python runs through the declared command path, or that the sidecar's
 libc declaration is correct; those remain live publication checks.
 
+After the signer creates its private evidence snapshot, the publisher runs
+`scripts/check-python-composed-runtime.py` against the copied `rootfs.ext4`
+and `mvm-meta.json` before the evidence artifact can be uploaded. The check
+requires the sidecar to declare glibc, follows the composed `/bin/python3`
+links inside the ext4, reads the final Python ELF interpreter, and requires
+the same executable x86_64 glibc loader behind the composed `/lib64` link.
+Missing, mismatched, malformed, or non-executable members refuse the lane.
+Synthetic ext4 tests cover this check; a real hosted x86_64 builder run and
+live boot remain necessary before publication acceptance.
+
 The signer accepts the composed directory,
 the exact `candidate.json` that produced it, a versioned pack reference, its
 `[image_build]` pack source, a `mvm-meta.json` beside that source, and a new
