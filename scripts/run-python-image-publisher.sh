@@ -7,10 +7,6 @@ set -euo pipefail
 [[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
 [[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
 [[ -d "$RUNNER_TEMP" ]]
-if ! test -s pack-sources/runtime/python/mvm-meta.json; then
-  echo 'a source-adjacent sealed Python boot sidecar is required before signing' >&2
-  exit 1
-fi
 
 release_dir="$RUNNER_TEMP/mvmctl-release"
 base_dir="$RUNNER_TEMP/image-set-release"
@@ -65,7 +61,8 @@ gh release download "$set_tag" --repo tinylabscom/mvm-images --dir "$base_dir" \
   -p default-microvm-vmlinux-x86_64 \
   -p default-microvm-rootfs-x86_64.ext4 \
   -p default-microvm-rootfs-x86_64.verity \
-  -p default-microvm-rootfs-x86_64.roothash
+  -p default-microvm-rootfs-x86_64.roothash \
+  -p default-microvm-meta-x86_64.json
 
 cp -R scripts "$work_dir/scripts"
 cp -R pack-sources/runtime/python "$work_dir/pack-sources/runtime/python"
@@ -89,10 +86,13 @@ candidate="$output_dir/python-image"
 test -s "$candidate/candidate.json"
 test -s "$candidate/composition/rootfs.ext4"
 test -s "$candidate/composition/composition.json"
-python3 scripts/check-python-base-entrypoint.py \
-  --rootfs "$base_dir/default-microvm-rootfs-x86_64.ext4" \
+sidecar="$RUNNER_TEMP/python-mvm-meta.json"
+python3 scripts/build-python-sidecar.py \
+  --base-meta "$base_dir/default-microvm-meta-x86_64.json" \
+  --base-rootfs "$base_dir/default-microvm-rootfs-x86_64.ext4" \
+  --composed-rootfs "$candidate/composition/rootfs.ext4" \
   --pack-source pack-sources/runtime/python/pack.toml \
-  --mvm-meta pack-sources/runtime/python/mvm-meta.json
+  --output "$sidecar"
 reference=$(python3 -c 'import pathlib,tomllib; p=pathlib.Path("pack-sources/runtime/python/pack.toml"); print("runtime/python@" + tomllib.loads(p.read_text())["version"])')
 [[ "$reference" =~ ^runtime/python@[0-9]+\.[0-9]+\.[0-9]+$ ]]
 assert_current_lock
@@ -104,7 +104,7 @@ python3 scripts/sign-composed-image.py \
   --reference "$reference" \
   --mvm-images-lock "$RUNNER_TEMP/images.lock" \
   --pack-source pack-sources/runtime/python/pack.toml \
-  --mvm-meta pack-sources/runtime/python/mvm-meta.json \
+  --mvm-meta "$sidecar" \
   --output "$evidence"
 test -s "$evidence/image-evidence.sigstore.json"
 python3 scripts/check-python-composed-runtime.py \
