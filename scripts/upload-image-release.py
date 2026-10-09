@@ -145,16 +145,7 @@ def tag_points_to(tag_ref, sha):
             and obj.get("sha") == sha)
 
 
-def publish_verified(staged, descriptor, reference, environment, client):
-    try:
-        signer.check_identity(environment)
-    except signer.SigningError as error:
-        raise UploadError(str(error)) from error
-    tag = descriptor["release"]["tag"]
-    expected = f"pack-{reference.partition('@')[0].replace('/', '-')}-v{reference.partition('@')[2]}"
-    if (descriptor["release"] != {"repository": REPOSITORY, "tag": expected}
-            or tag != expected):
-        raise UploadError("release tag differs from the exact pack reference")
+def staged_assets(staged):
     staged = Path(staged)
     if (not stat.S_ISDIR(staged.lstat().st_mode)
             or {entry.name for entry in staged.iterdir()} != ASSET_NAMES
@@ -163,14 +154,10 @@ def publish_verified(staged, descriptor, reference, environment, client):
     assets = {name: stager.record(staged / name) for name in ASSET_NAMES}
     if any(value["size"] <= 0 for value in assets.values()):
         raise UploadError("staged release contains an empty asset")
-    if client.get_tag(tag) is not None or client.get_release_by_tag(tag) is not None:
-        raise UploadError("versioned release tag or release already exists")
-    sha = environment["GITHUB_SHA"]
-    draft = client.create_draft(tag, sha, reference)
-    release_id = require_release(draft, tag, sha, reference, True)
-    client.upload(tag, [staged / name for name in sorted(ASSET_NAMES)])
-    draft = client.get_release(release_id)
-    require_release(draft, tag, sha, reference, True, assets)
+    return staged, assets
+
+
+def verify_download(client, tag, assets):
     with tempfile.TemporaryDirectory(prefix="mvm-pack-downloaded-", dir="/tmp") as temporary:
         downloaded = Path(temporary)
         client.download(tag, downloaded)
@@ -181,6 +168,32 @@ def publish_verified(staged, descriptor, reference, environment, client):
             if (not stat.S_ISREG(path.lstat().st_mode)
                     or stager.record(path) != expected_asset):
                 raise UploadError(f"downloaded asset {name} differs from staged bytes")
+
+
+def release_identity(descriptor, reference, environment):
+    try:
+        signer.check_identity(environment)
+    except signer.SigningError as error:
+        raise UploadError(str(error)) from error
+    tag = descriptor["release"]["tag"]
+    expected = f"pack-{reference.partition('@')[0].replace('/', '-')}-v{reference.partition('@')[2]}"
+    if (descriptor["release"] != {"repository": REPOSITORY, "tag": expected}
+            or tag != expected):
+        raise UploadError("release tag differs from the exact pack reference")
+    return tag, environment["GITHUB_SHA"]
+
+
+def publish_verified(staged, descriptor, reference, environment, client):
+    tag, sha = release_identity(descriptor, reference, environment)
+    staged, assets = staged_assets(staged)
+    if client.get_tag(tag) is not None or client.get_release_by_tag(tag) is not None:
+        raise UploadError("versioned release tag or release already exists")
+    draft = client.create_draft(tag, sha, reference)
+    release_id = require_release(draft, tag, sha, reference, True)
+    client.upload(tag, [staged / name for name in sorted(ASSET_NAMES)])
+    draft = client.get_release(release_id)
+    require_release(draft, tag, sha, reference, True, assets)
+    verify_download(client, tag, assets)
     tag_ref = client.get_tag(tag)
     if not tag_points_to(tag_ref, sha):
         raise UploadError("release tag does not point to the verified source commit")
@@ -191,6 +204,18 @@ def publish_verified(staged, descriptor, reference, environment, client):
     if not tag_points_to(published_tag, sha):
         raise UploadError("published release tag does not point to the verified source commit")
     return published
+
+
+def verify_published(staged, descriptor, reference, environment, client):
+    """Recheck an existing public release before signing a registry manifest."""
+    tag, sha = release_identity(descriptor, reference, environment)
+    _, assets = staged_assets(staged)
+    release = client.get_release_by_tag(tag)
+    require_release(release, tag, sha, reference, False, assets)
+    verify_download(client, tag, assets)
+    if not tag_points_to(client.get_tag(tag), sha):
+        raise UploadError("published release tag does not point to the verified source commit")
+    return release
 
 
 def upload(evidence, reference, pack_source, images_lock, environment, client):

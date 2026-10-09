@@ -95,6 +95,20 @@ class PackImageTests(unittest.TestCase):
             self.built_image(), "runtime/python@1.0.0"
         )
 
+    def test_measured_built_descriptor_is_serialized_in_signed_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            payload = Path(temporary) / "pack"
+            payload.mkdir()
+            (payload / "group.toml").write_text('description = "Python"\n')
+            image = self.built_image()
+            encoded, files = build_packs.manifest_bytes(
+                "runtime/python@1.0.0", "Python", payload, image,
+            )
+            manifest = json.loads(encoded)
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(manifest["image"], image)
+            self.assertEqual(len(files), 1)
+
     def test_built_descriptor_refuses_missing_or_unpinned_attestation(self):
         for role in ("provenance_statement", "provenance_signature_bundle"):
             descriptor = self.built_image()

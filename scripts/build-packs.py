@@ -195,6 +195,10 @@ def manifest_bytes(reference, description, payload, image=None):
         "files": files,
     }
     if image is not None:
+        if isinstance(image, dict) and image.get("schema_version") == 2:
+            validate_built_image_descriptor(image, reference)
+            manifest["image"] = image
+            return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
         manifest_path = image["manifest"]
         parts = manifest_path.split("/")
         if (

@@ -224,6 +224,18 @@ still pin and authenticate its mvm checkout and released verifier, run the
 builder-VM composition/signing workflow, wire this command into that workflow,
 and verify the resulting live client path before lifting the registry guard.
 
+Before a signed registry manifest can name an uploaded image, the producer
+must independently recheck the published release. The
+`upload-image-release.py` module's `verify_published` gate checks the main
+publisher workflow identity, release tag and source commit, exact remote asset
+metadata, every downloaded byte, and the tag target without modifying the
+release. `build-packs.py` can serialize a measured schema-v2 descriptor into
+the signed manifest shape, but the normal publisher and registry validator
+still refuse image publication. The next publisher integration must pass
+verified signed evidence and the independently pinned mvm base lock through
+that readback gate before signing and committing the manifest; serialization
+alone is not release authorization.
+
 ### Pack image composition v1
 
 The build type named in that statement is the `compose-pack-image.py` operation

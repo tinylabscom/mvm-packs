@@ -107,6 +107,31 @@ class UploadTests(unittest.TestCase):
                         self.client.calls.index("publish"))
         self.assertEqual(self.client.calls.count("get_tag"), 3)
 
+    def test_published_release_is_rechecked_without_mutation(self):
+        self.publish()
+        self.client.calls.clear()
+        result = uploader.verify_published(
+            self.staged, self.descriptor, "runtime/python@1.1.0",
+            self.environment, self.client,
+        )
+        self.assertFalse(result["draft"])
+        self.assertEqual(self.client.calls,
+                         ["get_release_by_tag", "download", "get_tag"])
+
+    def test_published_release_recheck_refuses_draft_or_changed_bytes(self):
+        self.publish()
+        self.client.release["draft"] = True
+        with self.assertRaisesRegex(uploader.UploadError, "release identity"):
+            uploader.verify_published(self.staged, self.descriptor,
+                                      "runtime/python@1.1.0", self.environment,
+                                      self.client)
+        self.client.release["draft"] = False
+        self.client.download_tamper = "provenance.json"
+        with self.assertRaisesRegex(uploader.UploadError, "downloaded asset"):
+            uploader.verify_published(self.staged, self.descriptor,
+                                      "runtime/python@1.1.0", self.environment,
+                                      self.client)
+
     def test_existing_tag_or_release_refuses_without_mutation(self):
         self.client.tag = {"object": {"type": "commit", "sha": "b" * 40}}
         with self.assertRaisesRegex(uploader.UploadError, "already exists"):
