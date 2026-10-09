@@ -36,6 +36,7 @@ class PythonPublishWorkflowTests(unittest.TestCase):
             "checksums-sha256.txt.bundle",
             "crates/mvm-core/images.lock",
             "__builder-shell-job",
+            "check-python-base-entrypoint.py",
             "sign-composed-image.py",
         )
         positions = [runner.index(item) for item in ordered]
@@ -46,6 +47,10 @@ class PythonPublishWorkflowTests(unittest.TestCase):
         self.assertNotIn("publish-image-pack.py", runner)
         self.assertNotIn("git push", runner)
         self.assertNotIn("git commit", runner)
+
+    def test_entrypoint_inspection_tool_is_installed_for_the_signing_job(self):
+        image_job = PUBLISH.read_text().split("  sign_python_image:\n", 1)[1]
+        self.assertIn("apt-get install --yes e2fsprogs", image_job)
 
     def test_workflow_changes_trigger_pull_request_validation(self):
         self.assertIn('".github/workflows/publish.yml"', VALIDATE.read_text())
