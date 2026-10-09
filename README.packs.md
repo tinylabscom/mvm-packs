@@ -180,6 +180,20 @@ image or descriptor, attest provenance, establish revocation freshness, or
 make an image pack publishable. The existing publisher refusal remains in
 force.
 
+`scripts/build-python-image.py` is the builder-VM entry point for the
+unpublished `runtime/python@1.1.0` x86_64 intent. Give it the checked-in
+`pack.toml`, a verified released `mvmctl` binary and a separate file containing
+that binary's lowercase SHA-256, the signed `image-set.json` and bundle, exactly
+the four selected x86_64 base artifacts, and a new output directory. Run
+`python3 scripts/build-python-image.py --help` for the flags. It stages the
+locked CPython closure, compares two application-layer builds byte-for-byte,
+binds the selected base files with the released verifier, and compares two
+complete composed images byte-for-byte. Only after rechecking the candidate
+and composition bindings does it atomically export `candidate.json` and the
+`composition/` directory. It must run inside the project Linux builder VM;
+failures leave no exported directory. The output is unsigned candidate evidence,
+not a pack release, attestation, signed descriptor, or boot witness.
+
 `scripts/sign-composed-image.py` prepares signed *evidence* for a later image
 release; it is not wired into the publisher. It accepts the composed directory,
 the exact `candidate.json` that produced it, a versioned pack reference, its
