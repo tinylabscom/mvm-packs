@@ -121,6 +121,14 @@ class PublisherVerificationTests(unittest.TestCase):
                     validator.validate_manifest(manifest, verify_signatures=True)
                 self.assertTrue(any("release bytes differ" in problem
                                     for problem in validator.problems))
+                validator.problems.clear()
+                public.reset_mock(side_effect=True)
+                with patch.object(validator, "verify_signature",
+                                  side_effect=lambda *_: validator.problems.append(
+                                      "publisher signature invalid")):
+                    validator.validate_manifest(manifest, verify_signatures=True)
+                public.assert_not_called()
+                self.assertIn("publisher signature invalid", validator.problems)
 
     def test_policy_only_manifest_still_validates(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -178,6 +178,12 @@ def validate_manifest(path, verify_signatures=False):
                 f"{rel}: {rel_path!r} digest/size drift from the manifest",
             )
 
+    signature_trusted = True
+    if verify_signatures:
+        previous_problems = len(problems)
+        verify_signature(path, reference)
+        signature_trusted = len(problems) == previous_problems
+
     image = manifest.get("image")
     if image is not None:
         if isinstance(image, dict) and image.get("schema_version") == 2:
@@ -191,7 +197,7 @@ def validate_manifest(path, verify_signatures=False):
                     problems.append(
                         f"{rel}: built image requires publisher signature and public release verification"
                     )
-                else:
+                elif signature_trusted:
                     try:
                         verify_published_image(image, reference)
                     except ImageReleaseError as error:
@@ -237,8 +243,6 @@ def validate_manifest(path, verify_signatures=False):
             problems.append(f"{rel}: symlink is not allowed: {relative}")
         elif included.is_file() and relative not in allowed:
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")
-    if verify_signatures:
-        verify_signature(path, reference)
 
 
 def main(argv=None):
