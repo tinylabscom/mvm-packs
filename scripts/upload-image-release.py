@@ -1,0 +1,217 @@
+#!/usr/bin/env python3
+"""Publish a verified pack image only after draft assets round-trip byte-for-byte."""
+
+import argparse
+import importlib.util
+import json
+import os
+import stat
+import subprocess
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+class UploadError(Exception):
+    """The release cannot safely be published."""
+
+
+def helper(filename, name):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(filename))
+    if spec is None or spec.loader is None:
+        raise UploadError(f"required helper {filename} is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+stager = helper("stage-image-release.py", "stage_image_release_upload")
+signer = helper("sign-composed-image.py", "sign_composed_image_upload")
+reproducer = helper("reproduce-app-layer.py", "reproduce_app_layer_upload")
+RELEASE_NAMES = stager.RELEASE_NAMES
+ASSET_NAMES = RELEASE_NAMES | {"image-descriptor.json"}
+REPOSITORY = "tinylabscom/mvm-packs"
+API_ROOT = f"https://api.github.com/repos/{REPOSITORY}"
+
+
+class GithubReleaseClient:
+    """Small authenticated REST client; gh streams large assets."""
+
+    def __init__(self, token):
+        if not token:
+            raise UploadError("GITHUB_TOKEN is required for image release upload")
+        self.token = token
+
+    def request(self, method, path, payload=None, missing_ok=False):
+        body = None if payload is None else json.dumps(payload).encode()
+        request = urllib.request.Request(
+            API_ROOT + path,
+            data=body,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {self.token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "Content-Type": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as error:
+            if missing_ok and error.code == 404:
+                return None
+            raise UploadError(f"GitHub API {method} {path} failed with HTTP {error.code}") from error
+        except (OSError, ValueError) as error:
+            raise UploadError(f"GitHub API {method} {path} did not return valid JSON") from error
+
+    def get_tag(self, tag):
+        encoded = urllib.parse.quote(tag, safe="")
+        return self.request("GET", f"/git/ref/tags/{encoded}", missing_ok=True)
+
+    def get_release_by_tag(self, tag):
+        encoded = urllib.parse.quote(tag, safe="")
+        return self.request("GET", f"/releases/tags/{encoded}", missing_ok=True)
+
+    def create_draft(self, tag, sha, reference):
+        return self.request("POST", "/releases", {
+            "tag_name": tag,
+            "target_commitish": sha,
+            "name": reference,
+            "body": "Signed, provenance-attested pack image release assets.",
+            "draft": True,
+            "prerelease": False,
+            "make_latest": "false",
+        })
+
+    def get_release(self, release_id):
+        return self.request("GET", f"/releases/{release_id}")
+
+    def publish(self, release_id):
+        return self.request("PATCH", f"/releases/{release_id}", {"draft": False})
+
+    def gh(self, args):
+        environment = os.environ.copy()
+        environment["GH_TOKEN"] = self.token
+        try:
+            subprocess.run(
+                ["gh", *args, "--repo", REPOSITORY],
+                check=True, capture_output=True, timeout=1800, env=environment,
+            )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            raise UploadError("GitHub release asset transfer failed") from error
+
+    def upload(self, tag, assets):
+        self.gh(["release", "upload", tag, *(str(asset) for asset in assets)])
+
+    def download(self, tag, directory):
+        self.gh(["release", "download", tag, "--dir", str(directory)])
+
+
+def require_release(release, tag, sha, reference, draft, assets=None):
+    if (not isinstance(release, dict)
+            or type(release.get("id")) is not int
+            or release.get("draft") is not draft
+            or release.get("tag_name") != tag
+            or release.get("target_commitish") != sha
+            or release.get("name") != reference):
+        raise UploadError("draft release identity differs from the verified source")
+    if assets is not None:
+        published = release.get("assets")
+        if (not isinstance(published, list)
+                or len(published) != len(assets)
+                or {item.get("name") for item in published if isinstance(item, dict)}
+                    != set(assets)):
+            raise UploadError("release asset set differs from staged assets")
+        for item in published:
+            if (not isinstance(item, dict)
+                    or item.get("size") != assets[item["name"]]["size"]
+                    or item.get("state", "uploaded") != "uploaded"):
+                raise UploadError("release asset metadata differs from staged bytes")
+            digest = item.get("digest")
+            if digest is not None and digest != f"sha256:{assets[item['name']]['sha256']}":
+                raise UploadError("release asset digest differs from staged bytes")
+    return release["id"]
+
+
+def publish_verified(staged, descriptor, reference, environment, client):
+    try:
+        signer.check_identity(environment)
+    except signer.SigningError as error:
+        raise UploadError(str(error)) from error
+    tag = descriptor["release"]["tag"]
+    expected = f"pack-{reference.partition('@')[0].replace('/', '-')}-v{reference.partition('@')[2]}"
+    if (descriptor["release"] != {"repository": REPOSITORY, "tag": expected}
+            or tag != expected):
+        raise UploadError("release tag differs from the exact pack reference")
+    staged = Path(staged)
+    if (not stat.S_ISDIR(staged.lstat().st_mode)
+            or {entry.name for entry in staged.iterdir()} != ASSET_NAMES
+            or any(not stat.S_ISREG(entry.lstat().st_mode) for entry in staged.iterdir())):
+        raise UploadError("staged release has missing, linked or extra assets")
+    assets = {name: stager.record(staged / name) for name in ASSET_NAMES}
+    if any(value["size"] <= 0 for value in assets.values()):
+        raise UploadError("staged release contains an empty asset")
+    if client.get_tag(tag) is not None or client.get_release_by_tag(tag) is not None:
+        raise UploadError("versioned release tag or release already exists")
+    sha = environment["GITHUB_SHA"]
+    draft = client.create_draft(tag, sha, reference)
+    release_id = require_release(draft, tag, sha, reference, True)
+    client.upload(tag, [staged / name for name in sorted(ASSET_NAMES)])
+    draft = client.get_release(release_id)
+    require_release(draft, tag, sha, reference, True, assets)
+    with tempfile.TemporaryDirectory(prefix="mvm-pack-downloaded-", dir="/tmp") as temporary:
+        downloaded = Path(temporary)
+        client.download(tag, downloaded)
+        if {entry.name for entry in downloaded.iterdir()} != ASSET_NAMES:
+            raise UploadError("downloaded asset set differs from staged release")
+        for name, expected_asset in assets.items():
+            path = downloaded / name
+            if (not stat.S_ISREG(path.lstat().st_mode)
+                    or stager.record(path) != expected_asset):
+                raise UploadError(f"downloaded asset {name} differs from staged bytes")
+    tag_ref = client.get_tag(tag)
+    if (not isinstance(tag_ref, dict)
+            or tag_ref.get("object") != {"type": "commit", "sha": sha}):
+        raise UploadError("release tag does not point to the verified source commit")
+    client.publish(release_id)
+    published = client.get_release(release_id)
+    require_release(published, tag, sha, reference, False, assets)
+    published_tag = client.get_tag(tag)
+    if (not isinstance(published_tag, dict)
+            or published_tag.get("object") != {"type": "commit", "sha": sha}):
+        raise UploadError("published release tag does not point to the verified source commit")
+    return published
+
+
+def upload(evidence, reference, pack_source, images_lock, environment, client):
+    with tempfile.TemporaryDirectory(prefix="mvm-pack-upload-", dir="/tmp") as temporary:
+        staged = Path(temporary) / "staged"
+        try:
+            stager.stage(evidence, reference, pack_source, images_lock, staged)
+        except stager.StageError as error:
+            raise UploadError(str(error)) from error
+        descriptor = stager.read_json(staged / "image-descriptor.json")
+        return publish_verified(staged, descriptor, reference, environment, client)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--evidence", required=True, type=Path)
+    parser.add_argument("--reference", required=True)
+    parser.add_argument("--pack-source", required=True, type=Path)
+    parser.add_argument("--mvm-images-lock", required=True, type=Path)
+    args = parser.parse_args(argv)
+    try:
+        client = GithubReleaseClient(os.environ.get("GITHUB_TOKEN"))
+        result = upload(args.evidence, args.reference, args.pack_source,
+                        args.mvm_images_lock, os.environ, client)
+        print(f"published verified image release {result['tag_name']}")
+    except (OSError, KeyError, TypeError, ValueError, UploadError) as error:
+        parser.exit(1, f"upload-image-release: {error}\n")
+
+
+if __name__ == "__main__":
+    main()

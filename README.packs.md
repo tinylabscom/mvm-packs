@@ -208,6 +208,22 @@ and signed. This command does not authenticate the caller-supplied mvm checkout,
 upload a GitHub release, publish a registry manifest, or prove a live boot.
 The image-publication refusal remains in force.
 
+`scripts/upload-image-release.py` consumes the signed evidence through that
+staging gate under the main `publish.yml` workflow identity. It requires the
+workflow's `GITHUB_TOKEN` with release write permission and refuses an existing
+versioned tag or release. It creates a draft release at the workflow's exact
+source commit, uploads the eight staged assets (the seven image assets plus
+`image-descriptor.json`), checks the remote asset names, sizes and any reported
+SHA-256 values, downloads every asset and compares its bytes to the staged
+copy, then verifies the tag target before publishing. A failed upload or
+comparison leaves the release as a draft; it never overwrites a published
+version. The command reads the published release back before reporting
+success. It does not run automatically yet, does not publish the signed
+registry manifest, and does not make the image pullable. The publisher must
+still pin and authenticate its mvm checkout and released verifier, run the
+builder-VM composition/signing workflow, wire this command into that workflow,
+and verify the resulting live client path before lifting the registry guard.
+
 ### Pack image composition v1
 
 The build type named in that statement is the `compose-pack-image.py` operation
