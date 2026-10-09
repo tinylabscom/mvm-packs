@@ -11,6 +11,7 @@ digest and length, and that a signature bundle sits beside each manifest.
 import argparse
 import hashlib
 import json
+import os
 import re
 import runpy
 import subprocess
@@ -26,6 +27,7 @@ from publisher_identity import (
 )
 
 ROOT = Path(__file__).resolve().parent.parent
+SCRIPTS = Path(__file__).resolve().parent
 PACKS = ROOT / "packs"
 REVOCATIONS = PACKS / "revocations.json"
 REVOCATION_BUNDLE = PACKS / "revocations.sigstore.json"
@@ -36,6 +38,10 @@ COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
 problems = []
+
+
+class ImageReleaseError(Exception):
+    """The published image release did not pass authentication."""
 
 
 def check(condition, message):
@@ -80,6 +86,18 @@ def verify_signature(path, reference):
         if result.returncode == 0:
             return
     problems.append(f"{path.relative_to(ROOT)}: publisher signature verification failed")
+
+
+def verify_published_image(image, reference):
+    """Require public release bytes and both image signatures before acceptance."""
+    uploader = runpy.run_path(str(SCRIPTS / "upload-image-release.py"))
+    try:
+        client = uploader["GithubReleaseClient"](os.environ.get("GITHUB_TOKEN"))
+        uploader["verify_public_image"](image, reference, client)
+    except uploader["UploadError"] as error:
+        raise ImageReleaseError(str(error)) from error
+    except Exception as error:
+        raise ImageReleaseError("public image verifier could not complete") from error
 
 
 def validate_manifest(path, verify_signatures=False):
@@ -162,33 +180,50 @@ def validate_manifest(path, verify_signatures=False):
 
     image = manifest.get("image")
     if image is not None:
-        problems.append(
-            f"{rel}: image-bearing pack cannot be published: schema v1 has no "
-            "built image digest, base-set pin, or provenance attestation"
-        )
-        check(
-            isinstance(image, dict) and set(image) == {"manifest"},
-            f"{rel}: image must contain exactly manifest",
-        )
-        image_path = image.get("manifest") if isinstance(image, dict) else None
-        if isinstance(image_path, str):
-            parts = image_path.split("/")
-            safe = (
-                len(parts) >= 3
-                and parts[0] == "pack"
-                and parts[-1] == "mvm.toml"
-                and all(parts)
-                and ".." not in parts
-                and "\\" not in image_path
-            )
-            check(safe, f"{rel}: unsafe image manifest path {image_path!r}")
-            if safe:
-                parent = "/".join(parts[:-1])
-                for name in ("mvm.toml", "flake.nix", "flake.lock"):
-                    required = f"{parent}/{name}"
-                    check(required in seen, f"{rel}: image file {required!r} is not signed")
+        if isinstance(image, dict) and image.get("schema_version") == 2:
+            builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
+            try:
+                builder["validate_built_image_descriptor"](image, reference)
+            except SystemExit as error:
+                problems.append(f"{rel}: {error}")
+            else:
+                if not verify_signatures:
+                    problems.append(
+                        f"{rel}: built image requires publisher signature and public release verification"
+                    )
+                else:
+                    try:
+                        verify_published_image(image, reference)
+                    except ImageReleaseError as error:
+                        problems.append(f"{rel}: public image verification failed: {error}")
         else:
-            problems.append(f"{rel}: image manifest must be a path string")
+            problems.append(
+                f"{rel}: image-bearing pack cannot be published: schema v1 has no "
+                "built image digest, base-set pin, or provenance attestation"
+            )
+            check(
+                isinstance(image, dict) and set(image) == {"manifest"},
+                f"{rel}: image must contain exactly manifest",
+            )
+            image_path = image.get("manifest") if isinstance(image, dict) else None
+            if isinstance(image_path, str):
+                parts = image_path.split("/")
+                safe = (
+                    len(parts) >= 3
+                    and parts[0] == "pack"
+                    and parts[-1] == "mvm.toml"
+                    and all(parts)
+                    and ".." not in parts
+                    and "\\" not in image_path
+                )
+                check(safe, f"{rel}: unsafe image manifest path {image_path!r}")
+                if safe:
+                    parent = "/".join(parts[:-1])
+                    for name in ("mvm.toml", "flake.nix", "flake.lock"):
+                        required = f"{parent}/{name}"
+                        check(required in seen, f"{rel}: image file {required!r} is not signed")
+            else:
+                problems.append(f"{rel}: image manifest must be a path string")
 
     check(
         path.with_name("manifest.sigstore.json").is_file(),

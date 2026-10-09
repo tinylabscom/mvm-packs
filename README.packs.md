@@ -16,13 +16,14 @@ pack-sources/runtime/python/
     └── group.toml     # the policy document (profile.toml also allowed)
 ```
 
-Image-bearing packs are not publishable yet. The current schema v1 `[image]`
+No image-bearing pack is published yet. The current schema v1 `[image]`
 field identifies signed image *source* (`mvm.toml`, `flake.nix`, `flake.lock`),
 not a built root filesystem. It cannot bind a built image digest, the base
 image-set pin, or build provenance. `build-packs.py` rejects any source with
-`[image]`, and `validate-packs.py` rejects any published manifest with an
-`image` field. No image pack should be described as ready to run on this
-publisher path.
+`[image]`. A built schema-v2 descriptor passes registry validation only after
+publisher-signature and public release byte/signature verification; the normal
+publisher still refuses `[image_build]`. No image pack should be described as
+ready to run on this path.
 
 The next image release contract needs a built-image digest and size, a base
 image-set identity (`repository`, `release_tag`, and signed root-manifest
@@ -230,11 +231,18 @@ must independently recheck the published release. The
 publisher workflow identity, release tag and source commit, exact remote asset
 metadata, every downloaded byte, and the tag target without modifying the
 release. `build-packs.py` can serialize a measured schema-v2 descriptor into
-the signed manifest shape, but the normal publisher and registry validator
-still refuse image publication. The next publisher integration must pass
-verified signed evidence and the independently pinned mvm base lock through
-that readback gate before signing and committing the manifest; serialization
-alone is not release authorization.
+the signed manifest shape. `scripts/publish-image-pack.py` is an explicit
+keyless publication gate: it restages signed evidence against the current
+independently supplied mvm base lock, rechecks the public release, copies the
+source policy payload without following links, signs and verifies the manifest
+under the main publisher workflow identity, then creates a new immutable
+registry version without replacing an existing one. The validator refuses
+built images unless publisher-signature verification is enabled; with it,
+validation downloads and hashes every public release asset, verifies the
+rootfs and provenance signatures and their image/base/source bindings, and
+checks release metadata and tag target. The command is not wired into the
+publisher workflow yet, so serialization or a local command run is not
+evidence of a published pack or live client acceptance.
 
 ### Pack image composition v1
 

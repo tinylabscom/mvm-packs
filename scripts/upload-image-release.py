@@ -5,6 +5,7 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -216,6 +217,127 @@ def verify_published(staged, descriptor, reference, environment, client):
     if not tag_points_to(client.get_tag(tag), sha):
         raise UploadError("published release tag does not point to the verified source commit")
     return release
+
+
+def verify_public_image(descriptor, reference, client):
+    """Authenticate the published release without relying on producer staging."""
+    builder = helper("build-packs.py", "build_packs_public_image_verify")
+    try:
+        builder.validate_built_image_descriptor(descriptor, reference)
+    except SystemExit as error:
+        raise UploadError("published image descriptor is invalid") from error
+    tag = descriptor["release"]["tag"]
+    with tempfile.TemporaryDirectory(prefix="mvm-pack-public-", dir="/tmp") as temporary:
+        downloaded = Path(temporary)
+        client.download(tag, downloaded)
+        if {entry.name for entry in downloaded.iterdir()} != ASSET_NAMES:
+            raise UploadError("published image asset set has missing or extra files")
+        if any(not stat.S_ISREG(entry.lstat().st_mode) for entry in downloaded.iterdir()):
+            raise UploadError("published image contains a linked or special asset")
+        try:
+            released_descriptor = stager.read_json(downloaded / "image-descriptor.json")
+        except stager.StageError as error:
+            raise UploadError(str(error)) from error
+        if released_descriptor != descriptor:
+            raise UploadError("published descriptor differs from the signed manifest")
+        for asset in descriptor["assets"].values():
+            name = asset["name"]
+            if asset != {"name": name, **stager.record(downloaded / name)}:
+                raise UploadError(f"published image asset {name} differs from descriptor")
+        try:
+            signer.check_boot_sidecar(downloaded / "mvm-meta.json", reproducer)
+        except signer.SigningError as error:
+            raise UploadError(str(error)) from error
+        try:
+            provenance = stager.read_json(downloaded / "provenance.json")
+        except stager.StageError as error:
+            raise UploadError(str(error)) from error
+        source_sha = verify_provenance(provenance, descriptor, reference)
+        try:
+            stager.verify_bundle(downloaded / "rootfs.ext4",
+                                 downloaded / "rootfs.signature.json")
+            stager.verify_bundle(downloaded / "provenance.json",
+                                 downloaded / "provenance.signature.json")
+        except stager.StageError as error:
+            raise UploadError(str(error)) from error
+        assets = {name: stager.record(downloaded / name) for name in ASSET_NAMES}
+        release = client.get_release_by_tag(tag)
+        require_release(release, tag, source_sha, reference, False, assets)
+        if not tag_points_to(client.get_tag(tag), source_sha):
+            raise UploadError("published image tag does not point to the attested source")
+        require_release(client.get_release(release["id"]), tag, source_sha,
+                        reference, False, assets)
+        return source_sha
+
+
+def verify_provenance(statement, descriptor, reference):
+    """Require the signed statement to bind image, base, workflow and source."""
+    try:
+        subject = statement["subject"]
+        predicate = statement["predicate"]
+        definition = predicate["buildDefinition"]
+        dependencies = definition["resolvedDependencies"]
+        details = predicate["runDetails"]
+        invocation = details["metadata"]["invocationId"]
+        builder_id = details["builder"]["id"]
+    except (KeyError, IndexError, TypeError, AttributeError) as error:
+        raise UploadError("published image provenance is incomplete") from error
+    base = descriptor["base_set"]
+    if (not isinstance(statement, dict)
+            or set(statement) != {"_type", "subject", "predicateType", "predicate"}
+            or statement["_type"] != "https://in-toto.io/Statement/v1"
+            or statement["predicateType"] != "https://slsa.dev/provenance/v1"
+            or subject != [{"name": "rootfs.ext4", "digest": {
+                "sha256": descriptor["assets"]["rootfs"]["sha256"]}}]
+            or not isinstance(definition, dict)
+            or definition.get("buildType") != (
+                "https://github.com/tinylabscom/mvm-packs/blob/main/"
+                "README.packs.md#pack-image-composition-v1")
+            or definition.get("externalParameters") != {
+                "reference": reference, "base_set": base}
+            or not isinstance(definition.get("internalParameters"), dict)
+            or set(definition["internalParameters"]) != {"verifier_sha256"}
+            or not isinstance(definition["internalParameters"]["verifier_sha256"], str)
+            or not re.fullmatch(r"[0-9a-f]{64}",
+                                definition["internalParameters"]["verifier_sha256"])
+            or not isinstance(invocation, str)
+            or not invocation.startswith(
+                "https://github.com/tinylabscom/mvm-packs/actions/runs/")
+            or builder_id != signer.PUBLISHER_IDENTITY
+            or not isinstance(dependencies, list)
+            or len(dependencies) != 5):
+        raise UploadError("published image provenance does not bind its release")
+    required = {
+        "image-set.json": {"sha256": base["manifest_sha256"]},
+    }
+    found = {}
+    source_sha = None
+    for item in dependencies:
+        if (not isinstance(item, dict) or set(item) != {"uri", "digest"}
+                or not isinstance(item["uri"], str)
+                or not isinstance(item["digest"], dict)
+                or len(item["digest"]) != 1
+                or item["uri"] in found):
+            raise UploadError("published image provenance dependency is ambiguous")
+        found[item["uri"]] = item["digest"]
+        prefix = "git+https://github.com/tinylabscom/mvm-packs@"
+        if item["uri"].startswith(prefix):
+            source_sha = item["uri"][len(prefix):]
+            if (not re.fullmatch(r"[0-9a-f]{40}", source_sha)
+                    or item["digest"] != {"gitCommit": source_sha}):
+                raise UploadError("published image source commit is invalid")
+    if (source_sha is None
+            or found.get("image-set.json") != required["image-set.json"]
+            or set(found) != {
+                "candidate.json", "application-layer/rootfs.ext4",
+                "image-set.json", "mvm/images.lock",
+                f"git+https://github.com/tinylabscom/mvm-packs@{source_sha}"}
+            or any(not isinstance(found[uri].get("sha256"), str)
+                   or not re.fullmatch(r"[0-9a-f]{64}", found[uri]["sha256"])
+                   for uri in ("candidate.json", "application-layer/rootfs.ext4",
+                               "mvm/images.lock"))):
+        raise UploadError("published image provenance dependencies are invalid")
+    return source_sha
 
 
 def upload(evidence, reference, pack_source, images_lock, environment, client):
