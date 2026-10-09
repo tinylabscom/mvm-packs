@@ -251,6 +251,9 @@ requires the sidecar to declare glibc, follows the composed `/bin/python3`
 links inside the ext4, reads the final Python ELF interpreter, and requires
 the same executable x86_64 glibc loader behind the composed `/lib64` link.
 Missing, mismatched, malformed, or non-executable members refuse the lane.
+It also requires the final `/init` and `/etc/mvm/entrypoint` bytes to match
+the measured signed base, requires the sidecar's boot argv to match that
+entrypoint, and refuses an alternate `/etc/mvm/boot` that would override it.
 Synthetic ext4 tests cover this check; a real hosted x86_64 builder run and
 live boot remain necessary before publication acceptance.
 

@@ -1,6 +1,7 @@
 """The signing lane measures Python and glibc from the final ext4 bytes."""
 
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -50,6 +51,18 @@ class ComposedRuntimeTests(unittest.TestCase):
         )
         (self.tree / "lib64").mkdir()
         (self.tree / "lib64/ld-linux-x86-64.so.2").symlink_to(self.loader_path)
+        self.init = b"#!/bin/sh\nexec /etc/mvm/entrypoint\n"
+        self.marker = b"#!/bin/sh\nexec /bin/sleep infinity\n"
+        (self.tree / "init").write_bytes(self.init)
+        (self.tree / "init").chmod(0o755)
+        (self.tree / "etc/mvm").mkdir(parents=True)
+        (self.tree / "etc/mvm/entrypoint").write_bytes(self.marker)
+        (self.tree / "etc/mvm/entrypoint").chmod(0o755)
+        self.boot_pin = runtime.FinalBootPin(
+            init_sha256=hashlib.sha256(self.init).hexdigest(),
+            marker_sha256=hashlib.sha256(self.marker).hexdigest(),
+            argv=("/bin/sleep", "infinity"),
+        )
         self.metadata = {
             "name": "mvm-default-microvm", "accessible": False, "sealed": True,
             "entrypointKind": "command", "entrypointArgv": ["/bin/sleep", "infinity"],
@@ -74,7 +87,7 @@ class ComposedRuntimeTests(unittest.TestCase):
     def verify(self):
         directory = str(Path(e2fs_tool("debugfs")).parent)
         with patch.dict(os.environ, {"PATH": f"{directory}:{os.environ['PATH']}"}):
-            runtime.verify(self.image, self.sidecar)
+            runtime.verify(self.image, self.sidecar, self.boot_pin)
 
     def test_accepts_matching_composed_python_and_glibc(self):
         self.build_ext4()
@@ -118,6 +131,45 @@ class ComposedRuntimeTests(unittest.TestCase):
         self.build_ext4()
         with self.assertRaisesRegex(runtime.RuntimeCheckError, "declare the measured glibc"):
             self.verify()
+
+    def test_refuses_changed_final_entrypoint(self):
+        (self.tree / "etc/mvm/entrypoint").write_bytes(b"#!/bin/sh\nexec /bin/python3\n")
+        self.build_ext4()
+        with self.assertRaisesRegex(runtime.RuntimeCheckError, "entrypoint differs"):
+            self.verify()
+
+    def test_refuses_alternate_boot_file(self):
+        (self.tree / "etc/mvm/boot").write_bytes(b"#!/bin/sh\nexec /bin/python3\n")
+        self.build_ext4()
+        with self.assertRaisesRegex(runtime.RuntimeCheckError, "alternate boot"):
+            self.verify()
+
+    def test_refuses_changed_final_init(self):
+        (self.tree / "init").write_bytes(b"#!/bin/sh\nexec /bin/python3\n")
+        self.build_ext4()
+        with self.assertRaisesRegex(runtime.RuntimeCheckError, "init differs"):
+            self.verify()
+
+    def test_refuses_nonexecutable_final_init(self):
+        (self.tree / "init").chmod(0o644)
+        self.build_ext4()
+        with self.assertRaisesRegex(runtime.RuntimeCheckError, "init is not executable"):
+            self.verify()
+
+    def test_refuses_sidecar_boot_argv_mismatch(self):
+        self.metadata["entrypointArgv"] = ["/bin/python3"]
+        self.sidecar.write_text(json.dumps(self.metadata), encoding="utf-8")
+        self.build_ext4()
+        with self.assertRaisesRegex(runtime.RuntimeCheckError, "entrypoint argv"):
+            self.verify()
+
+    def test_refuses_ambiguous_alternate_boot_absence(self):
+        result = subprocess.CompletedProcess(
+            args=["debugfs"], returncode=0, stdout="", stderr="unexpected diagnostic",
+        )
+        with patch.object(runtime.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(runtime.RuntimeCheckError, "absence could not be established"):
+                runtime.refuse_alternate_boot(self.image)
 
 
 if __name__ == "__main__":

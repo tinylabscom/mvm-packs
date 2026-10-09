@@ -2,6 +2,7 @@
 """Refuse signed Python evidence whose final ext4 lacks its measured glibc runtime."""
 
 import argparse
+import hashlib
 import importlib.util
 import re
 import stat
@@ -9,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
+from typing import NamedTuple
 
 
 PYTHON_BIN = re.compile(r"/nix/store/[0-9a-z]{32}-[A-Za-z0-9+._-]+/bin/[A-Za-z0-9+._-]+\Z")
@@ -16,6 +18,13 @@ STAT_HEADER = re.compile(r"^Inode:\s+\d+\s+Type:\s+(regular|symlink)\s+Mode:\s+(
 STAT_SIZE = re.compile(r"^User:.*\bSize:\s+(\d+)\s*$", re.M)
 FAST_LINK = re.compile(r'^Fast link dest: "([^"]+)"$', re.M)
 MAX_FILE_SIZE = 32 << 20
+BASE_INIT_SHA256 = "7cd9e304a82f7d0674d2caa3113b3dee733c1790100f8b48dbe0ef8222a4cf5e"
+
+
+class FinalBootPin(NamedTuple):
+    init_sha256: str
+    marker_sha256: str
+    argv: tuple[str, ...]
 
 
 class RuntimeCheckError(Exception):
@@ -116,7 +125,42 @@ def python_executable(rootfs):
     raise RuntimeCheckError("composed Python link chain is too deep")
 
 
-def verify(rootfs, sidecar):
+def locked_boot_pin():
+    base = helper("check-python-base-entrypoint.py", "base_entrypoint_for_runtime_check")
+    return FinalBootPin(BASE_INIT_SHA256, base.PIN.marker_sha256, base.PIN.argv)
+
+
+def refuse_alternate_boot(rootfs):
+    path = "/etc/mvm/boot"
+    try:
+        result = subprocess.run(
+            ["debugfs", "-R", f"stat {path}", str(rootfs)],
+            capture_output=True, text=True, check=False, timeout=60,
+        )
+    except (OSError, UnicodeError, subprocess.TimeoutExpired) as error:
+        raise RuntimeCheckError("alternate boot path could not be inspected") from error
+    if result.returncode != 0 or result.stdout.strip():
+        raise RuntimeCheckError("composed rootfs carries an alternate boot path")
+    if not result.stderr.strip().endswith(f"{path}: File not found by ext2_lookup"):
+        raise RuntimeCheckError("alternate boot absence could not be established")
+
+
+def verify_final_boot(rootfs, metadata, pin):
+    if metadata["entrypointArgv"] != list(pin.argv):
+        raise RuntimeCheckError("Python sidecar entrypoint argv differs from the pinned base")
+    for path, expected, label in (
+        ("/init", pin.init_sha256, "init"),
+        ("/etc/mvm/entrypoint", pin.marker_sha256, "entrypoint"),
+    ):
+        kind, mode, length, _ = inode(rootfs, path)
+        if kind != "regular" or mode & 0o111 == 0:
+            raise RuntimeCheckError(f"composed {label} is not executable")
+        if hashlib.sha256(dump(rootfs, path, length)).hexdigest() != expected:
+            raise RuntimeCheckError(f"composed {label} differs from the pinned base")
+    refuse_alternate_boot(rootfs)
+
+
+def verify(rootfs, sidecar, boot_pin=None):
     rootfs, sidecar = Path(rootfs), Path(sidecar)
     if not stat.S_ISREG(rootfs.lstat().st_mode) or rootfs.stat().st_size == 0:
         raise RuntimeCheckError("composed rootfs must be a nonempty regular file")
@@ -129,6 +173,7 @@ def verify(rootfs, sidecar):
         raise RuntimeCheckError("Python boot sidecar is invalid") from error
     if metadata["libc"] != "glibc":
         raise RuntimeCheckError("Python sidecar must declare the measured glibc ABI")
+    verify_final_boot(rootfs, metadata, boot_pin if boot_pin is not None else locked_boot_pin())
     stage = helper("stage-python-closure.py", "stage_for_runtime_check")
     kind, _, length, output = inode(rootfs, "/lib64/ld-linux-x86-64.so.2")
     if kind != "symlink":
