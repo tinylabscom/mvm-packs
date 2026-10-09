@@ -313,14 +313,17 @@ The image-publication refusal remains in force.
 
 `scripts/upload-image-release.py` consumes the signed evidence through that
 staging gate under the main `publish.yml` workflow identity. It requires the
-workflow's `GITHUB_TOKEN` with release write permission and refuses an existing
-versioned tag or release. It creates a draft release at the workflow's exact
-source commit, uploads the eight staged assets (the seven image assets plus
+workflow's `GITHUB_TOKEN` with release write permission. It creates a draft
+release at the workflow's exact source commit, uploads the eight staged assets
+(the seven image assets plus
 `image-descriptor.json`), checks the remote asset names, sizes and any reported
 SHA-256 values, downloads every asset and compares its bytes to the staged
-copy, then verifies the tag target before publishing. A failed upload or
-comparison leaves the release as a draft; it never overwrites a published
-version. The command reads the published release back before reporting
+copy, then verifies the tag target before publishing. A retry can publish an
+existing complete draft or reverify an existing public release only when its
+source commit, asset metadata, downloaded bytes and tag target still match the
+signed staging input. An orphan tag/release, partial draft or mismatch refuses
+without modifying remote state; no asset is overwritten. The command reads
+the published release back before reporting
 success. It is not wired into the signing job, does not publish the signed
 registry manifest, and does not make the image pullable. A separate publication
 lane still needs a truthful live boot check, release and registry readback,

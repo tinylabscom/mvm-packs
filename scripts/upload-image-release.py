@@ -187,11 +187,28 @@ def release_identity(descriptor, reference, environment):
 def publish_verified(staged, descriptor, reference, environment, client):
     tag, sha = release_identity(descriptor, reference, environment)
     staged, assets = staged_assets(staged)
-    if client.get_tag(tag) is not None or client.get_release_by_tag(tag) is not None:
-        raise UploadError("versioned release tag or release already exists")
-    draft = client.create_draft(tag, sha, reference)
-    release_id = require_release(draft, tag, sha, reference, True)
-    client.upload(tag, [staged / name for name in sorted(ASSET_NAMES)])
+    tag_ref = client.get_tag(tag)
+    existing = client.get_release_by_tag(tag)
+    if (tag_ref is None) != (existing is None):
+        raise UploadError("incomplete existing release cannot be resumed")
+    if existing is None:
+        draft = client.create_draft(tag, sha, reference)
+        release_id = require_release(draft, tag, sha, reference, True)
+        client.upload(tag, [staged / name for name in sorted(ASSET_NAMES)])
+    else:
+        if type(existing.get("draft")) is not bool:
+            raise UploadError("existing release draft state is invalid")
+        release_id = require_release(existing, tag, sha, reference,
+                                     existing["draft"], assets)
+        verify_download(client, tag, assets)
+        if not tag_points_to(tag_ref, sha):
+            raise UploadError("existing release tag does not point to the verified source commit")
+        if not existing["draft"]:
+            published = client.get_release(release_id)
+            require_release(published, tag, sha, reference, False, assets)
+            if not tag_points_to(client.get_tag(tag), sha):
+                raise UploadError("published release tag does not point to the verified source commit")
+            return published
     draft = client.get_release(release_id)
     require_release(draft, tag, sha, reference, True, assets)
     verify_download(client, tag, assets)
