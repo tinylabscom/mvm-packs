@@ -39,27 +39,49 @@ class PackImageTests(unittest.TestCase):
             with self.subTest(changed=changed), self.assertRaises(SystemExit):
                 build_packs.validate_image_build_intent(changed, "runtime/python@1.0.0")
 
-    def test_image_build_intent_cannot_be_published_before_signed_assets(self):
+    def test_image_build_intent_is_deferred_without_unsigned_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = root / "pack-sources" / "runtime" / "python"
             (source / "pack").mkdir(parents=True)
             (source / "pack.toml").write_text(
-                'version = "1.0.0"\ndescription = "Python"\n'
+                'version = "1.1.0"\ndescription = "Python"\n'
                 '[image_build]\nschema_version = 1\nplatform = "linux/x86_64"\n'
                 '[image_build.base_set]\nrepository = "tinylabscom/mvm-images"\n'
                 'release_tag = "image-set/v0.2.4"\n'
                 f'manifest_sha256 = "{"a" * 64}"\n'
                 '[image_build.release]\nrepository = "tinylabscom/mvm-packs"\n'
-                'tag = "pack-runtime-python-v1.0.0"\n'
+                'tag = "pack-runtime-python-v1.1.0"\n'
             )
             (source / "pack" / "profile.toml").write_text("schema_version = 1\n")
             with patch.object(build_packs, "PACKS", root / "packs"), \
                     patch.object(build_packs, "sign") as sign:
-                with self.assertRaisesRegex(SystemExit, "not publishable"):
-                    build_packs.build_one(source)
+                build_packs.build_one(source)
             sign.assert_not_called()
             self.assertFalse((root / "packs").exists())
+
+    def test_python_image_intent_does_not_replace_published_policy_version(self):
+        source = SCRIPT.parent.parent / "pack-sources" / "runtime" / "python"
+        metadata = build_packs.parse_pack_toml(source / "pack.toml")
+        self.assertEqual(metadata["version"], "1.1.0")
+        self.assertIsNotNone(metadata["image_build"])
+        with tempfile.TemporaryDirectory() as temporary:
+            packs = Path(temporary) / "packs"
+            previous = packs / "runtime" / "python" / "1.0.0"
+            previous.mkdir(parents=True)
+            manifest = b'{"description":"Existing signed Python policy"}\n'
+            (previous / "manifest.json").write_bytes(manifest)
+            (previous / "manifest.sigstore.json").write_bytes(b"signed bundle")
+            with patch.object(build_packs, "PACKS", packs), \
+                    patch.object(build_packs, "sign") as sign:
+                build_packs.build_one(source)
+                build_packs.rebuild_index()
+            sign.assert_not_called()
+            self.assertEqual((previous / "manifest.json").read_bytes(), manifest)
+            self.assertEqual((previous / "manifest.sigstore.json").read_bytes(), b"signed bundle")
+            self.assertFalse((packs / "runtime" / "python" / "1.1.0").exists())
+            index = json.loads((packs / "index.json").read_text())
+            self.assertEqual(index["packs"][0]["versions"], ["1.0.0"])
 
     def built_image(self):
         digest = "a" * 64

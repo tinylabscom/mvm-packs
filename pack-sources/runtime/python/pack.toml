@@ -1,2 +1,15 @@
-version = "1.0.0"
+version = "1.1.0"
 description = "Python runtime policy: package registries and common API hosts a Python workload needs."
+
+[image_build]
+schema_version = 1
+platform = "linux/aarch64"
+
+[image_build.base_set]
+repository = "tinylabscom/mvm-images"
+release_tag = "image-set/v0.2.4"
+manifest_sha256 = "5033520a59514f5d206d76d13db8c9b7e5841f068c83dd8585ef141879a1bb24"
+
+[image_build.release]
+repository = "tinylabscom/mvm-packs"
+tag = "pack-runtime-python-v1.1.0"

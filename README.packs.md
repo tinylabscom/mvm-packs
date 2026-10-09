@@ -11,7 +11,7 @@ Sources live under `pack-sources/<namespace>/<name>/`:
 
 ```
 pack-sources/runtime/python/
-├── pack.toml          # version = "1.0.0", description = "..."
+├── pack.toml          # version = "1.1.0", pinned image-build intent
 └── pack/
     └── group.toml     # the policy document (profile.toml also allowed)
 ```
@@ -22,8 +22,10 @@ not a built root filesystem. It cannot bind a built image digest, the base
 image-set pin, or build provenance. `build-packs.py` rejects any source with
 `[image]`. A built schema-v2 descriptor passes registry validation only after
 publisher-signature and public release byte/signature verification; the normal
-publisher still refuses `[image_build]`. No image pack should be described as
-ready to run on this path.
+publisher defers `[image_build]` without signing or publishing it. The existing
+signed `runtime/python@1.0.0` policy pack remains available while the
+`runtime/python@1.1.0` image intent awaits a measured release. No image pack
+should be described as ready to run on this path.
 
 The next image release contract needs a built-image digest and size, a base
 image-set identity (`repository`, `release_tag`, and signed root-manifest
@@ -80,8 +82,9 @@ intent, not a registry descriptor: it records `schema_version = 1`, `platform`,
 `base_set`, and `release`, without claiming digests or sizes for assets that
 have not yet been built and signed. `verify-base-set.py`,
 `bind-image-candidate.py`, and `compose-pack-image.py` consume that intent.
-`build-packs.py` refuses to publish it. A later publisher must generate the
-final `[image]` from measured, signed outputs.
+`build-packs.py` defers it without touching the registry. The separate image
+publisher generates the final `[image]` from measured, signed outputs only
+after rechecking the published release.
 
 The generated built-image descriptor has `schema_version = 2` inside
 `[image]`; it is **not** a published manifest schema v2. It requires

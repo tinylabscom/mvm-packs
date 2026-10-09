@@ -276,7 +276,8 @@ def build_one(source):
     meta = parse_pack_toml(source / "pack.toml")
     reference = f"{namespace}/{name}@{meta['version']}"
     if meta["image_build"] is not None:
-        fail(f"{reference}: image build intent is not publishable without signed release assets")
+        print(f"{reference}: image build intent deferred to signed image publisher")
+        return
     if meta["image"] is not None:
         validate_built_image_descriptor(meta["image"], reference)
         fail(f"{reference}: built image packs are not publishable until consumer verification is available")
