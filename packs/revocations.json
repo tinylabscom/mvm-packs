@@ -1,8 +1,8 @@
 {
-  "issued_at": "2026-10-09T04:43:54Z",
-  "not_after": "2026-10-10T16:43:54Z",
+  "issued_at": "2026-10-09T04:58:45Z",
+  "not_after": "2026-10-10T16:58:45Z",
   "revoked_identities": [],
   "revoked_manifests": [],
   "schema_version": 1,
-  "sequence": 6
+  "sequence": 7
 }
