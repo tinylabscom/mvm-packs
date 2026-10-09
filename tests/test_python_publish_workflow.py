@@ -27,6 +27,8 @@ class PythonPublishWorkflowTests(unittest.TestCase):
         self.assertNotIn("contents: write", image_job)
         self.assertIn("run-python-image-publisher.sh", image_job)
         self.assertIn("actions/upload-artifact@", image_job)
+        self.assertIn("path: ${{ runner.temp }}/signed-python-image/", image_job)
+        self.assertNotIn("path: ${{ runner.temp }}/python-image-release-stage/", image_job)
         self.assertNotIn("git push origin HEAD:main", image_job)
         self.assertNotIn("python-candidate.yml", image_job)
 
@@ -39,6 +41,7 @@ class PythonPublishWorkflowTests(unittest.TestCase):
             "build-python-sidecar.py",
             "sign-composed-image.py",
             "check-python-composed-runtime.py",
+            "stage-image-release.py",
         )
         positions = [runner.index(item) for item in ordered]
         self.assertEqual(positions, sorted(positions))
@@ -47,6 +50,11 @@ class PythonPublishWorkflowTests(unittest.TestCase):
         self.assertIn('--mvm-meta "$sidecar"', runner)
         self.assertIn('"$evidence/rootfs.ext4"', runner)
         self.assertIn('"$evidence/mvm-meta.json"', runner)
+        self.assertIn('--evidence "$evidence"', runner)
+        self.assertIn('--output "$release_stage"', runner)
+        self.assertEqual(runner.count("stage-image-release.py"), 1)
+        self.assertGreater(runner.rindex("assert_current_lock"),
+                           runner.index("stage-image-release.py"))
         self.assertIn("assert_current_lock", runner)
         self.assertNotIn("upload-image-release.py", runner)
         self.assertNotIn("publish-image-pack.py", runner)
