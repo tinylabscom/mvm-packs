@@ -213,6 +213,15 @@ not a GitHub release or a registry pack. A successful manual run and its
 recorded digests are still required before any image-reproduction acceptance
 is claimed.
 
+The separate manual `Diagnose Python image with source client` workflow is a
+read-only diagnostic while a compatible signed release is unavailable. It
+pins one mvm source commit, compares that source client’s `images.lock` with
+the current mvm main lock, builds a static x86_64 client on a hosted runner,
+and runs the same unsigned producer inside the project Firecracker builder
+VM. It uploads an unsigned candidate for three days without signing or
+publishing anything. A source-built client is not a released-client witness;
+this run cannot satisfy image publication or PS-06 acceptance.
+
 `scripts/sign-composed-image.py` prepares signed *evidence* for a later image
 release. The manual `sign_python_image` job in the main `publish.yml` workflow
 verifies a release-tagged Linux x86_64 mvmctl archive and its signed checksum,
