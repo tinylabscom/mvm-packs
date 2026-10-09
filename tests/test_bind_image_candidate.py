@@ -66,19 +66,13 @@ class BindImageCandidateTests(unittest.TestCase):
         self.binary_sha = sha(self.binary.read_bytes())
         lines = [
             'version = "1.0.0"', 'description = "Python runtime"',
-            '[image]', 'schema_version = 2', 'platform = "linux/x86_64"',
-            '[image.base_set]', 'repository = "tinylabscom/mvm-images"',
+            '[image_build]', 'schema_version = 1', 'platform = "linux/x86_64"',
+            '[image_build.base_set]', 'repository = "tinylabscom/mvm-images"',
             'release_tag = "image-set/v0.2.4"',
             f'manifest_sha256 = "{sha(self.manifest.read_bytes())}"',
-            '[image.release]', 'repository = "tinylabscom/mvm-packs"',
+            '[image_build.release]', 'repository = "tinylabscom/mvm-packs"',
             'tag = "pack-runtime-python-v1.0.0"',
         ]
-        for role, name in {
-            "rootfs": "rootfs.ext4", "verity": "rootfs.verity", "roothash": "rootfs.roothash",
-            "mvm_meta": "mvm-meta.json", "rootfs_signature_bundle": "rootfs.signature.json",
-            "provenance_statement": "provenance.json", "provenance_signature_bundle": "provenance.signature.json",
-        }.items():
-            lines += [f"[image.assets.{role}]", f'name = "{name}"', f'sha256 = "{"a" * 64}"', 'size = 1']
         self.pack_source = self.source / "pack.toml"
         self.pack_source.write_text("\n".join(lines) + "\n")
         self.output = self.root / "candidate"

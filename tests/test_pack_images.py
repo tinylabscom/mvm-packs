@@ -17,6 +17,50 @@ SPEC.loader.exec_module(build_packs)
 
 
 class PackImageTests(unittest.TestCase):
+    def image_build(self):
+        image = self.built_image()
+        return {key: image[key] for key in (
+            "schema_version", "platform", "base_set", "release"
+        )} | {"schema_version": 1}
+
+    def test_image_build_intent_needs_no_future_asset_digests(self):
+        intent = self.image_build()
+        build_packs.validate_image_build_intent(intent, "runtime/python@1.0.0")
+        self.assertNotIn("assets", intent)
+        for mutation in (
+            lambda value: value["base_set"].update(manifest_sha256="0"),
+            lambda value: value["base_set"].update(release_tag="image-set/v0.2.5+mutable"),
+            lambda value: value["release"].update(tag="pack-runtime-python-v1.0.1"),
+            lambda value: value.update(assets={}),
+            lambda value: value.update(schema_version=True),
+        ):
+            changed = json.loads(json.dumps(intent))
+            mutation(changed)
+            with self.subTest(changed=changed), self.assertRaises(SystemExit):
+                build_packs.validate_image_build_intent(changed, "runtime/python@1.0.0")
+
+    def test_image_build_intent_cannot_be_published_before_signed_assets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "pack-sources" / "runtime" / "python"
+            (source / "pack").mkdir(parents=True)
+            (source / "pack.toml").write_text(
+                'version = "1.0.0"\ndescription = "Python"\n'
+                '[image_build]\nschema_version = 1\nplatform = "linux/x86_64"\n'
+                '[image_build.base_set]\nrepository = "tinylabscom/mvm-images"\n'
+                'release_tag = "image-set/v0.2.4"\n'
+                f'manifest_sha256 = "{"a" * 64}"\n'
+                '[image_build.release]\nrepository = "tinylabscom/mvm-packs"\n'
+                'tag = "pack-runtime-python-v1.0.0"\n'
+            )
+            (source / "pack" / "profile.toml").write_text("schema_version = 1\n")
+            with patch.object(build_packs, "PACKS", root / "packs"), \
+                    patch.object(build_packs, "sign") as sign:
+                with self.assertRaisesRegex(SystemExit, "not publishable"):
+                    build_packs.build_one(source)
+            sign.assert_not_called()
+            self.assertFalse((root / "packs").exists())
+
     def built_image(self):
         digest = "a" * 64
         names = {

@@ -48,37 +48,20 @@ class VerifyBaseSetTests(unittest.TestCase):
         self.mvmctl = self.root / "mvmctl"
         self.mvmctl.write_bytes(b"pinned verifier")
         self.mvmctl.chmod(0o700)
-        sha = "a" * 64
         lines = [
             'version = "1.0.0"',
             'description = "Python runtime"',
-            '[image]',
-            'schema_version = 2',
+            '[image_build]',
+            'schema_version = 1',
             'platform = "linux/x86_64"',
-            '[image.base_set]',
+            '[image_build.base_set]',
             'repository = "tinylabscom/mvm-images"',
             'release_tag = "image-set/v0.2.4"',
             f'manifest_sha256 = "{digest(self.manifest.read_bytes())}"',
-            '[image.release]',
+            '[image_build.release]',
             'repository = "tinylabscom/mvm-packs"',
             'tag = "pack-runtime-python-v1.0.0"',
         ]
-        assets = {
-            "rootfs": "rootfs.ext4",
-            "verity": "rootfs.verity",
-            "roothash": "rootfs.roothash",
-            "mvm_meta": "mvm-meta.json",
-            "rootfs_signature_bundle": "rootfs.signature.json",
-            "provenance_statement": "provenance.json",
-            "provenance_signature_bundle": "provenance.signature.json",
-        }
-        for role, name in assets.items():
-            lines += [
-                f"[image.assets.{role}]",
-                f'name = "{name}"',
-                f'sha256 = "{sha}"',
-                'size = 1',
-            ]
         self.pack_source = self.source / "pack.toml"
         self.pack_source.write_text("\n".join(lines) + "\n")
         self.report = {
