@@ -36,13 +36,15 @@ class PythonPublishWorkflowTests(unittest.TestCase):
             "checksums-sha256.txt.bundle",
             "crates/mvm-core/images.lock",
             "__builder-shell-job",
-            "check-python-base-entrypoint.py",
+            "build-python-sidecar.py",
             "sign-composed-image.py",
             "check-python-composed-runtime.py",
         )
         positions = [runner.index(item) for item in ordered]
         self.assertEqual(positions, sorted(positions))
-        self.assertIn("pack-sources/runtime/python/mvm-meta.json", runner)
+        self.assertIn("default-microvm-meta-x86_64.json", runner)
+        self.assertIn('sidecar="$RUNNER_TEMP/python-mvm-meta.json"', runner)
+        self.assertIn('--mvm-meta "$sidecar"', runner)
         self.assertIn('"$evidence/rootfs.ext4"', runner)
         self.assertIn('"$evidence/mvm-meta.json"', runner)
         self.assertIn("assert_current_lock", runner)
@@ -58,13 +60,13 @@ class PythonPublishWorkflowTests(unittest.TestCase):
     def test_workflow_changes_trigger_pull_request_validation(self):
         self.assertIn('".github/workflows/publish.yml"', VALIDATE.read_text())
 
-    def test_missing_boot_sidecar_refuses_before_release_download(self):
+    def test_invalid_release_tag_refuses_before_release_download(self):
         with tempfile.TemporaryDirectory() as directory:
             environment = os.environ.copy()
             environment.update({
                 "GITHUB_REF": "refs/heads/main",
                 "GITHUB_EVENT_NAME": "workflow_dispatch",
-                "MVMCTL_TAG": "v0.23.1",
+                "MVMCTL_TAG": "not-a-release",
                 "MVMCTL_ARCHIVE_SHA256": "a" * 64,
                 "RUNNER_TEMP": directory,
             })
@@ -73,7 +75,7 @@ class PythonPublishWorkflowTests(unittest.TestCase):
                 capture_output=True, text=True, check=False,
             )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("boot sidecar is required before signing", result.stderr)
+        self.assertNotIn("Could not resolve", result.stderr)
 
 
 if __name__ == "__main__":

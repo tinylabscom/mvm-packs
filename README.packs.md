@@ -228,14 +228,20 @@ verifies a release-tagged Linux x86_64 mvmctl archive and its signed checksum,
 fetches the current mvm base lock and selected signed base assets, reproduces
 the image inside the builder VM, and calls this signer under the main publisher
 OIDC identity. It re-fetches the current base lock before and after signing
-and uploads only a seven-day signed-evidence workflow artifact. The job
-requires a source-adjacent sealed `mvm-meta.json`; runtime/python does not yet
-have one, so it refuses before building. It does not upload an image release,
-create a registry pack, or prove a live boot. No successful signed-image run
-has been established.
+and uploads only a seven-day signed-evidence workflow artifact. After the
+builder completes, `build-python-sidecar.py` requires the reviewed SHA-256 of
+the image-set/v0.2.4 base metadata asset and its exact known claims, then adds
+only the boot argv and libc measured from the pinned base and final composed
+ext4. The base metadata asset is not a member of the signed image-set root;
+its reviewed digest is a separate producer-code pin, not a claim that the
+image-set signature covers it. A different base release needs a new reviewed
+pin and fresh measurements. The job does not upload an image release, create
+a registry pack, or prove a live boot. No successful signed-image run has
+been established.
 
-Before signing, `scripts/check-python-base-entrypoint.py` snapshots the
-selected rootfs, pack intent, and proposed sidecar without following links.
+Before signing, the sidecar producer calls
+`scripts/check-python-base-entrypoint.py`, which snapshots the selected
+rootfs, pack intent, and proposed sidecar without following links.
 It requires the image-set/v0.2.4 rootfs digest and the exact
 `/etc/mvm/entrypoint` bytes observed in that signed base, then requires the
 sidecar to declare the actual `/bin/sleep infinity` boot argv. A different
@@ -254,12 +260,13 @@ Missing, mismatched, malformed, or non-executable members refuse the lane.
 It also requires the final `/init` and `/etc/mvm/entrypoint` bytes to match
 the measured signed base, requires the sidecar's boot argv to match that
 entrypoint, and refuses an alternate `/etc/mvm/boot` that would override it.
-Synthetic ext4 tests cover this check; a real hosted x86_64 builder run and
-live boot remain necessary before publication acceptance.
+Synthetic ext4 tests and the unsigned source-client diagnostic cover this
+check; a signed publisher run and released-client live boot remain necessary
+before publication acceptance.
 
 The signer accepts the composed directory,
 the exact `candidate.json` that produced it, a versioned pack reference, its
-`[image_build]` pack source, a `mvm-meta.json` beside that source, and a new
+`[image_build]` pack source, the measured `mvm-meta.json` output, and a new
 output directory (`--composition`, `--candidate-report`, `--reference`,
 `--pack-source`, `--mvm-meta`, `--output`). It also requires
 `--mvm-images-lock` naming the `images.lock` file
