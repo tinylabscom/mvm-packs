@@ -132,6 +132,24 @@ class PublisherVerificationTests(unittest.TestCase):
                 validator.validate_manifest(published / "manifest.json")
             self.assertFalse(validator.problems)
 
+    def test_pr_validation_checks_signatures_and_public_release_bytes(self):
+        workflow = (ROOT / ".github" / "workflows" / "validate.yml").read_text()
+        self.assertIn("cosign verify-blob cosign-linux-amd64", workflow)
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", workflow)
+        self.assertIn(
+            "scripts/validate-packs.py --verify-signatures --require-revocations",
+            workflow,
+        )
+
+    def test_public_image_verifier_requires_authenticated_release_access(self):
+        from tests.test_pack_images import PackImageTests
+
+        image = PackImageTests().built_image()
+        with patch.dict(validator.os.environ, {"GITHUB_TOKEN": ""}):
+            with self.assertRaisesRegex(validator.ImageReleaseError,
+                                        "GITHUB_TOKEN is required"):
+                validator.verify_published_image(image, "runtime/python@1.0.0")
+
     def test_signature_verifies_exact_release_identity_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
