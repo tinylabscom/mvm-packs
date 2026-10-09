@@ -86,12 +86,15 @@ def source_image(pack_source):
         metadata = builder.parse_pack_toml(pack_source)
     except (OSError, UnicodeError, ValueError) as error:
         refuse(f"pack source is invalid: {error}")
+    reference = f"{namespace}/{name}@{metadata['version']}"
+    intent = metadata["image_build"]
+    if intent is not None:
+        builder.validate_image_build_intent(intent, reference)
+        return intent
     image = metadata["image"]
     if image is None:
-        refuse("pack source has no built-image descriptor")
-    builder.validate_built_image_descriptor(
-        image, f"{namespace}/{name}@{metadata['version']}"
-    )
+        refuse("pack source has no image build intent or built-image descriptor")
+    builder.validate_built_image_descriptor(image, reference)
     return image
 
 

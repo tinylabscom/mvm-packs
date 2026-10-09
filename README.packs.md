@@ -74,13 +74,17 @@ Do not modify the staged tree while either build runs: this check does not
 provide a race-safe source snapshot or establish reproducibility if source
 files change concurrently.
 
-Source authors can validate the proposed built-image descriptor shape with
-`scripts/build-packs.py`, but the command still refuses to publish any
-image-bearing pack before it signs or writes one. Even when the descriptor
-passes its shape checks, the command exits nonzero with a deliberate
-`not publishable` refusal; that exit is not a successful build. This is a
-source descriptor with `schema_version = 2` inside `[image]`; it is **not** a
-published manifest schema v2. It requires `platform` (`linux/x86_64` or
+An image producer starts with `[image_build]` in `pack.toml`. This is build
+intent, not a registry descriptor: it records `schema_version = 1`, `platform`,
+`base_set`, and `release`, without claiming digests or sizes for assets that
+have not yet been built and signed. `verify-base-set.py`,
+`bind-image-candidate.py`, and `compose-pack-image.py` consume that intent.
+`build-packs.py` refuses to publish it. A later publisher must generate the
+final `[image]` from measured, signed outputs.
+
+The generated built-image descriptor has `schema_version = 2` inside
+`[image]`; it is **not** a published manifest schema v2. It requires
+`platform` (`linux/x86_64` or
 `linux/aarch64`), a `base_set` table naming `tinylabscom/mvm-images`, its
 immutable image-set release tag (for example, `image-set/v0.2.4`) and
 root-manifest SHA-256, and a `release` table naming `tinylabscom/mvm-packs`
@@ -90,13 +94,13 @@ release assets: `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash`,
 `mvm-meta.json`, `rootfs.signature.json`, `provenance.json`, and
 `provenance.signature.json`. Each records its fixed name, lowercase SHA-256,
 and positive byte size. Extra fields, arbitrary URLs, unsafe names, missing
-attestation references, and source-only schema-v1 images are refused. These
-checks validate metadata shape only; they do not download, verify, sign, or
-publish any image or attestation. The existing nine schema-v1 policy packs
-continue to publish unchanged.
+attestation references, and source-only schema-v1 images are refused.
+`build-packs.py` validates a supplied `[image]` but still refuses its
+publication. The existing nine schema-v1 policy packs continue to publish
+unchanged.
 
 `scripts/verify-base-set.py` checks a pre-downloaded base set locally. It
-requires a source `pack.toml`, the exact `image-set.json` and
+requires a source `pack.toml` with `[image_build]`, the exact `image-set.json` and
 `image-set.json.bundle` release files, and an artifact directory containing
 only the default-tenant kernel, root filesystem, verity tree, and root hash
 for the declared architecture. It also requires an explicit `mvmctl` binary
@@ -115,7 +119,7 @@ command is not wired into publication until a released verifier supports
 selected-artifact checks. It does not make an image pack publishable.
 
 `scripts/bind-image-candidate.py` combines the two offline checks without
-publishing an image pack. Give it a schema-v2 source `pack.toml`, the exact
+publishing an image pack. Give it a source `pack.toml` with `[image_build]`, the exact
 pre-downloaded signed root files and four selected base artifacts, the
 reproduced application-layer directory, an independently supplied SHA-256
 for a released `mvmctl`, and a new output directory. Run

@@ -49,6 +49,7 @@ PACKS = ROOT / "packs"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_SET_TAG = re.compile(r"image-set/v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 BUILT_IMAGE_ASSETS = {
     "rootfs": "rootfs.ext4",
     "verity": "rootfs.verity",
@@ -76,12 +77,42 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image"}:
+    if set(data) - {"version", "description", "image", "image_build"}:
         fail(f"{path}: unknown pack metadata fields")
     image = data.get("image")
     if image is not None and not isinstance(image, dict):
         fail(f"{path}: [image] must be a table")
-    return {"version": version, "description": description, "image": image}
+    image_build = data.get("image_build")
+    if image_build is not None:
+        validate_image_build_intent(image_build, f"{path.parent.parent.name}/{path.parent.name}@{version}")
+    if image is not None and image_build is not None:
+        fail(f"{path}: [image] and [image_build] cannot both be present")
+    return {"version": version, "description": description, "image": image,
+            "image_build": image_build}
+
+
+def validate_image_build_intent(intent, reference):
+    """Validate pre-build inputs without claiming digests for future outputs."""
+    if not isinstance(intent, dict) or set(intent) != {
+        "schema_version", "platform", "base_set", "release"
+    } or type(intent["schema_version"]) is not int or intent["schema_version"] != 1:
+        fail(f"{reference}: image build intent has missing, extra or unsupported fields")
+    if intent["platform"] not in ("linux/x86_64", "linux/aarch64"):
+        fail(f"{reference}: image build platform is unsupported")
+    base = intent["base_set"]
+    if not isinstance(base, dict) or set(base) != {
+        "repository", "release_tag", "manifest_sha256"
+    } or base["repository"] != "tinylabscom/mvm-images":
+        fail(f"{reference}: image build base set is invalid")
+    tag = base["release_tag"]
+    if not isinstance(tag, str) or not IMAGE_SET_TAG.fullmatch(tag):
+        fail(f"{reference}: image build base release tag is invalid")
+    if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
+        fail(f"{reference}: image build base root digest is invalid")
+    namespace_name, version = reference.split("@", 1)
+    expected_tag = f"pack-{namespace_name.replace('/', '-')}-v{version}"
+    if intent["release"] != {"repository": "tinylabscom/mvm-packs", "tag": expected_tag}:
+        fail(f"{reference}: image build release identity is invalid")
 
 
 def validate_built_image_descriptor(image, reference):
@@ -104,7 +135,7 @@ def validate_built_image_descriptor(image, reference):
     if base["repository"] != "tinylabscom/mvm-images":
         fail(f"{reference}: base_set repository is not the MVM image-set repository")
     tag = base["release_tag"]
-    if not isinstance(tag, str) or not tag.startswith("image-set/v") or not SEMVER.fullmatch(tag[11:]):
+    if not isinstance(tag, str) or not IMAGE_SET_TAG.fullmatch(tag):
         fail(f"{reference}: base_set release_tag must be an immutable image-set version")
     if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
         fail(f"{reference}: base_set manifest_sha256 must be lowercase SHA-256")
@@ -240,6 +271,8 @@ def build_one(source):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
     meta = parse_pack_toml(source / "pack.toml")
     reference = f"{namespace}/{name}@{meta['version']}"
+    if meta["image_build"] is not None:
+        fail(f"{reference}: image build intent is not publishable without signed release assets")
     if meta["image"] is not None:
         validate_built_image_descriptor(meta["image"], reference)
         fail(f"{reference}: built image packs are not publishable until consumer verification is available")
