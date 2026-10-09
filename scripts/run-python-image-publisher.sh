@@ -107,4 +107,7 @@ python3 scripts/sign-composed-image.py \
   --mvm-meta pack-sources/runtime/python/mvm-meta.json \
   --output "$evidence"
 test -s "$evidence/image-evidence.sigstore.json"
+python3 scripts/check-python-composed-runtime.py \
+  --rootfs "$evidence/rootfs.ext4" \
+  --mvm-meta "$evidence/mvm-meta.json"
 assert_current_lock
