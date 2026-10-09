@@ -136,6 +136,15 @@ def require_release(release, tag, sha, reference, draft, assets=None):
     return release["id"]
 
 
+def tag_points_to(tag_ref, sha):
+    if not isinstance(tag_ref, dict):
+        return False
+    obj = tag_ref.get("object")
+    return (isinstance(obj, dict)
+            and obj.get("type") == "commit"
+            and obj.get("sha") == sha)
+
+
 def publish_verified(staged, descriptor, reference, environment, client):
     try:
         signer.check_identity(environment)
@@ -173,15 +182,13 @@ def publish_verified(staged, descriptor, reference, environment, client):
                     or stager.record(path) != expected_asset):
                 raise UploadError(f"downloaded asset {name} differs from staged bytes")
     tag_ref = client.get_tag(tag)
-    if (not isinstance(tag_ref, dict)
-            or tag_ref.get("object") != {"type": "commit", "sha": sha}):
+    if not tag_points_to(tag_ref, sha):
         raise UploadError("release tag does not point to the verified source commit")
     client.publish(release_id)
     published = client.get_release(release_id)
     require_release(published, tag, sha, reference, False, assets)
     published_tag = client.get_tag(tag)
-    if (not isinstance(published_tag, dict)
-            or published_tag.get("object") != {"type": "commit", "sha": sha}):
+    if not tag_points_to(published_tag, sha):
         raise UploadError("published release tag does not point to the verified source commit")
     return published
 

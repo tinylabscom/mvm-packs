@@ -34,7 +34,10 @@ class FakeClient:
 
     def create_draft(self, tag, sha, reference):
         self.calls.append("create_draft")
-        self.tag = {"object": {"type": "commit", "sha": sha}}
+        self.tag = {"ref": f"refs/tags/{tag}", "object": {
+            "type": "commit", "sha": sha,
+            "url": f"https://api.github.com/repos/tinylabscom/mvm-packs/git/commits/{sha}",
+        }}
         self.release = {
             "id": 42, "draft": True, "tag_name": tag,
             "target_commitish": sha, "assets": [], "name": reference,
