@@ -132,17 +132,65 @@ class UploadTests(unittest.TestCase):
                                       "runtime/python@1.1.0", self.environment,
                                       self.client)
 
-    def test_existing_tag_or_release_refuses_without_mutation(self):
+    def test_orphan_tag_or_release_refuses_without_mutation(self):
         self.client.tag = {"object": {"type": "commit", "sha": "b" * 40}}
-        with self.assertRaisesRegex(uploader.UploadError, "already exists"):
+        with self.assertRaisesRegex(uploader.UploadError, "incomplete existing release"):
             self.publish()
         self.assertNotIn("create_draft", self.client.calls)
         self.client.tag = None
         self.client.calls.clear()
         self.client.release = {"id": 10}
-        with self.assertRaisesRegex(uploader.UploadError, "already exists"):
+        with self.assertRaisesRegex(uploader.UploadError, "incomplete existing release"):
             self.publish()
         self.assertNotIn("create_draft", self.client.calls)
+
+    def test_matching_complete_draft_is_reverified_and_published_on_retry(self):
+        self.client.create_draft("pack-runtime-python-v1.1.0", "a" * 40,
+                                 "runtime/python@1.1.0")
+        self.client.upload("pack-runtime-python-v1.1.0", [])
+        self.client.calls.clear()
+        self.publish()
+        self.assertFalse(self.client.release["draft"])
+        self.assertNotIn("create_draft", self.client.calls)
+        self.assertNotIn("upload", self.client.calls)
+        self.assertLess(self.client.calls.index("download"),
+                        self.client.calls.index("publish"))
+
+    def test_matching_public_release_is_idempotently_reverified(self):
+        self.publish()
+        self.client.calls.clear()
+        self.publish()
+        self.assertNotIn("create_draft", self.client.calls)
+        self.assertNotIn("upload", self.client.calls)
+        self.assertNotIn("publish", self.client.calls)
+        self.assertIn("download", self.client.calls)
+
+    def test_partial_or_tampered_draft_refuses_without_publication(self):
+        self.client.create_draft("pack-runtime-python-v1.1.0", "a" * 40,
+                                 "runtime/python@1.1.0")
+        self.client.calls.clear()
+        with self.assertRaisesRegex(uploader.UploadError, "asset set"):
+            self.publish()
+        self.assertTrue(self.client.release["draft"])
+        self.assertNotIn("publish", self.client.calls)
+        self.client.upload("pack-runtime-python-v1.1.0", [])
+        self.client.download_tamper = "rootfs.ext4"
+        self.client.calls.clear()
+        with self.assertRaisesRegex(uploader.UploadError, "downloaded asset"):
+            self.publish()
+        self.assertTrue(self.client.release["draft"])
+        self.assertNotIn("publish", self.client.calls)
+
+    def test_existing_draft_at_wrong_source_commit_refuses_without_mutation(self):
+        self.client.create_draft("pack-runtime-python-v1.1.0", "b" * 40,
+                                 "runtime/python@1.1.0")
+        self.client.upload("pack-runtime-python-v1.1.0", [])
+        self.client.calls.clear()
+        with self.assertRaisesRegex(uploader.UploadError, "release identity"):
+            self.publish()
+        self.assertTrue(self.client.release["draft"])
+        self.assertNotIn("publish", self.client.calls)
+        self.assertNotIn("upload", self.client.calls)
 
     def test_tampered_download_leaves_draft(self):
         self.client.download_tamper = "rootfs.ext4"
