@@ -77,6 +77,18 @@ Do not modify the staged tree while either build runs: this check does not
 provide a race-safe source snapshot or establish reproducibility if source
 files change concurrently.
 
+The `runtime/python@1.1.0` producer stages a real CPython 3.12 application
+tree with `scripts/build-python-layer.sh` inside the Linux builder VM. The
+wrapper invokes `scripts/stage-python-closure.py` with the pinned CPython
+interpreter and exports a regular `python-tree.tar` artifact through the
+builder shell-job output disk. Its
+`pack-sources/runtime/python/image/flake.lock` pins the Nixpkgs revision and
+content hash; the command refuses a lock update, queries the resulting Nix
+store requisites, copies the complete closure without following links, and
+adds `/bin/python3` as a guest link to the pinned interpreter. The staged tree
+is only input to the byte-identical layer rebuild above. It is not a signed
+image, a published pack, or evidence of a successful boot.
+
 An image producer starts with `[image_build]` in `pack.toml`. This is build
 intent, not a registry descriptor: it records `schema_version = 1`, `platform`,
 `base_set`, and `release`, without claiming digests or sizes for assets that
