@@ -86,6 +86,50 @@ class PublisherVerificationTests(unittest.TestCase):
                 validator.validate_manifest(manifest)
             self.assertTrue(any("built image digest" in problem for problem in validator.problems))
 
+    def test_built_image_requires_signature_and_public_release_verification(self):
+        from tests.test_pack_images import PackImageTests
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pack = root / "packs" / "runtime" / "python" / "1.0.0"
+            payload = pack / "files" / "pack"
+            payload.mkdir(parents=True)
+            (payload / "group.toml").write_text('description = "Python"\n')
+            image = PackImageTests().built_image()
+            encoded, _ = builder.manifest_bytes(
+                "runtime/python@1.0.0", "Python", payload, image,
+            )
+            manifest = pack / "manifest.json"
+            manifest.write_bytes(encoded)
+            (pack / "manifest.sigstore.json").write_text("bundle")
+            with patch.object(validator, "ROOT", root), \
+                    patch.object(validator, "PACKS", root / "packs"), \
+                    patch.object(validator, "verify_published_image") as public:
+                validator.validate_manifest(manifest)
+                self.assertTrue(any("requires publisher signature" in problem
+                                    for problem in validator.problems))
+                public.assert_not_called()
+                validator.problems.clear()
+                with patch.object(validator, "verify_signature") as signature:
+                    validator.validate_manifest(manifest, verify_signatures=True)
+                signature.assert_called_once()
+                public.assert_called_once_with(image, "runtime/python@1.0.0")
+                self.assertFalse(validator.problems)
+                validator.problems.clear()
+                public.side_effect = validator.ImageReleaseError("release bytes differ")
+                with patch.object(validator, "verify_signature"):
+                    validator.validate_manifest(manifest, verify_signatures=True)
+                self.assertTrue(any("release bytes differ" in problem
+                                    for problem in validator.problems))
+                validator.problems.clear()
+                public.reset_mock(side_effect=True)
+                with patch.object(validator, "verify_signature",
+                                  side_effect=lambda *_: validator.problems.append(
+                                      "publisher signature invalid")):
+                    validator.validate_manifest(manifest, verify_signatures=True)
+                public.assert_not_called()
+                self.assertIn("publisher signature invalid", validator.problems)
+
     def test_policy_only_manifest_still_validates(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -95,6 +139,24 @@ class PublisherVerificationTests(unittest.TestCase):
                     patch.object(validator, "PACKS", root / "packs"):
                 validator.validate_manifest(published / "manifest.json")
             self.assertFalse(validator.problems)
+
+    def test_pr_validation_checks_signatures_and_public_release_bytes(self):
+        workflow = (ROOT / ".github" / "workflows" / "validate.yml").read_text()
+        self.assertIn("cosign verify-blob cosign-linux-amd64", workflow)
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", workflow)
+        self.assertIn(
+            "scripts/validate-packs.py --verify-signatures --require-revocations",
+            workflow,
+        )
+
+    def test_public_image_verifier_requires_authenticated_release_access(self):
+        from tests.test_pack_images import PackImageTests
+
+        image = PackImageTests().built_image()
+        with patch.dict(validator.os.environ, {"GITHUB_TOKEN": ""}):
+            with self.assertRaisesRegex(validator.ImageReleaseError,
+                                        "GITHUB_TOKEN is required"):
+                validator.verify_published_image(image, "runtime/python@1.0.0")
 
     def test_signature_verifies_exact_release_identity_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
