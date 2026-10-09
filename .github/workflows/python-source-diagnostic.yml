@@ -43,10 +43,14 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$MVM_SOURCE_SHA"
           cargo zigbuild --profile release-min --target x86_64-unknown-linux-musl --features dev
+          cargo zigbuild --profile release-min --target x86_64-unknown-linux-musl -p mvm-hostd --bin mvm-network-endpoint
           binary=target/x86_64-unknown-linux-musl/release-min/mvmctl
+          endpoint=target/x86_64-unknown-linux-musl/release-min/mvm-network-endpoint
           test -x "$binary"
+          test -x "$endpoint"
           "$binary" --version
           sha256sum "$binary"
+          sha256sum "$endpoint"
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
@@ -101,6 +105,8 @@ jobs:
           cp -R packs/scripts "$work_dir/scripts"
           cp -R packs/pack-sources/runtime/python "$work_dir/pack-sources/runtime/python"
           binary=target/x86_64-unknown-linux-musl/release-min/mvmctl
+          endpoint=target/x86_64-unknown-linux-musl/release-min/mvm-network-endpoint
+          test -x "$endpoint"
           install -m 0755 "$binary" "$work_dir/mvmctl"
           sha256sum "$work_dir/mvmctl" | cut -d ' ' -f 1 > "$work_dir/mvmctl.sha256"
           cp crates/mvm-core/images.lock "$work_dir/images.lock"
@@ -112,7 +118,7 @@ jobs:
             default-microvm-rootfs-x86_64.roothash; do
             cp "$release_dir/$name" "$work_dir/base/$name"
           done
-          MVM_HOME="$RUNNER_TEMP/mvm-home" "$binary" \
+          MVM_HOME="$RUNNER_TEMP/mvm-home" MVM_SUBSTITUTION_ENDPOINT_PATH="$GITHUB_WORKSPACE/$endpoint" "$binary" \
             --builder firecracker __builder-shell-job \
             --script "$GITHUB_WORKSPACE/packs/scripts/run-python-image-builder.sh" \
             --work-dir "$work_dir" --artifact-out "$output"

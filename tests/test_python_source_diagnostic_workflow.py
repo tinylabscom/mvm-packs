@@ -39,6 +39,19 @@ class PythonSourceDiagnosticWorkflowTests(unittest.TestCase):
             workflow.index(item) for item in ordered
         ))
 
+    def test_source_endpoint_is_built_and_explicitly_selected(self):
+        workflow = WORKFLOW.read_text()
+        helper_build = (
+            "cargo zigbuild --profile release-min --target x86_64-unknown-linux-musl "
+            "-p mvm-hostd --bin mvm-network-endpoint"
+        )
+        helper = "target/x86_64-unknown-linux-musl/release-min/mvm-network-endpoint"
+        self.assertIn(helper_build, workflow)
+        self.assertIn(f'endpoint={helper}', workflow)
+        self.assertIn('test -x "$endpoint"', workflow)
+        self.assertIn('MVM_SUBSTITUTION_ENDPOINT_PATH="$GITHUB_WORKSPACE/$endpoint"', workflow)
+        self.assertLess(workflow.index(helper_build), workflow.index('__builder-shell-job'))
+
     def test_unsigned_diagnostic_cannot_sign_or_publish(self):
         workflow = WORKFLOW.read_text()
         self.assertIn("unsigned-source-python-image-", workflow)
