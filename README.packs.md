@@ -79,6 +79,9 @@ files change concurrently.
 
 The `runtime/python@1.1.0` producer stages a real CPython 3.12 application
 tree with `scripts/build-python-layer.sh` inside the Linux builder VM. The
+current unpublished image intent targets `linux/x86_64`, matching the hosted
+KVM runner used for its builder-VM staging lane; the flake retains an aarch64
+package output for a future separately versioned image. The
 wrapper invokes `scripts/stage-python-closure.py` with the pinned CPython
 interpreter and exports a regular `python-tree.tar` artifact through the
 builder shell-job output disk. Its
