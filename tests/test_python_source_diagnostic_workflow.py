@@ -52,6 +52,18 @@ class PythonSourceDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn('MVM_SUBSTITUTION_ENDPOINT_PATH="$GITHUB_WORKSPACE/$endpoint"', workflow)
         self.assertLess(workflow.index(helper_build), workflow.index('__builder-shell-job'))
 
+    def test_pinned_firecracker_is_verified_before_source_build(self):
+        workflow = WORKFLOW.read_text()
+        install = workflow.index("- name: Install verified Firecracker")
+        build = workflow.index("- name: Build pinned static source client")
+        self.assertLess(install, build)
+        self.assertIn("FC_VERSION: v1.17.0", workflow)
+        self.assertIn("06094a1108ae9e82aa4c23a775aa92758f53f1175d422270d9d6162cb9ade558", workflow)
+        self.assertIn("sha256sum -c -", workflow)
+        self.assertLess(workflow.index("sha256sum -c -"), workflow.index("tar -xzf"))
+        self.assertIn('"$RUNNER_TEMP/mvm-host-bin" >> "$GITHUB_PATH"', workflow)
+        self.assertIn("firecracker --version", workflow)
+
     def test_unsigned_diagnostic_cannot_sign_or_publish(self):
         workflow = WORKFLOW.read_text()
         self.assertIn("unsigned-source-python-image-", workflow)
