@@ -2,7 +2,7 @@
 """Sign a reproduced pack image and its provenance under the main publisher identity.
 
 The output is evidence for a later image release, not a published pack. It
-contains no boot sidecar or registry manifest and must not be served by pull.
+contains no registry manifest and must not be served by pull.
 """
 
 import argparse
@@ -172,6 +172,60 @@ def check_images_lock(path, base):
         raise SigningError("composed base set differs from current images.lock")
 
 
+def check_boot_sidecar(path, reproducer):
+    sidecar = strict_json(path, reproducer)
+    if not isinstance(sidecar, dict):
+        raise SigningError("boot sidecar must be an object")
+    required = {
+        "name", "accessible", "sealed", "entrypointKind", "entrypointArgv",
+        "initSystem", "expectedBootMs", "agentBinary", "rootlessEntrypoint",
+        "hypervisor", "overlayAware", "runtimeLean", "protocolVersion", "libc",
+    }
+    if not required <= set(sidecar):
+        raise SigningError("boot sidecar omits required runtime metadata")
+    argv = sidecar["entrypointArgv"]
+    if (sidecar["accessible"] is not False or sidecar["sealed"] is not True
+            or sidecar["overlayAware"] is not True or sidecar["runtimeLean"] is not True
+            or sidecar["rootlessEntrypoint"] is not True
+            or not isinstance(sidecar["name"], str) or not sidecar["name"]
+            or sidecar["initSystem"] != "busybox"
+            or type(sidecar["expectedBootMs"]) is not int
+            or sidecar["expectedBootMs"] <= 0
+            or sidecar["agentBinary"] != "real"
+            or sidecar["entrypointKind"] != "command"
+            or sidecar["hypervisor"] != "firecracker"
+            or type(sidecar["protocolVersion"]) is not int
+            or sidecar["protocolVersion"] != 2
+            or sidecar["libc"] not in ("musl", "glibc")
+            or not isinstance(argv, list) or not argv
+            or not all(isinstance(value, str) and value and "\x00" not in value for value in argv)
+            or not argv[0].startswith("/") or ".." in Path(argv[0]).parts):
+        raise SigningError("boot sidecar does not declare a sealed, known entrypoint")
+
+
+def check_source_intent(path, candidate, reference, composition):
+    builder = helper("build-packs.py", "build_packs_sign")
+    parts = reference.partition("@")
+    coordinates = parts[0].split("/")
+    if (parts[1] != "@" or len(coordinates) != 2
+            or not all(builder.COORD.fullmatch(part) for part in coordinates)
+            or path.name != "pack.toml"
+            or path.parent.name != coordinates[1]
+            or path.parent.parent.name != coordinates[0]
+            or path.parent.parent.parent.name != "pack-sources"):
+        raise SigningError("pack source path differs from the versioned reference")
+    try:
+        metadata = builder.parse_pack_toml(path)
+    except SystemExit as error:
+        raise SigningError("pack source build intent is invalid") from error
+    intent = metadata["image_build"]
+    if (metadata["version"] != parts[2] or intent is None
+            or intent["platform"] != candidate["platform"]
+            or intent["base_set"] != composition["base_set"]):
+        raise SigningError("pack source build intent differs from the reproduced candidate")
+    return intent
+
+
 def provenance(reference, composition, rootfs_record, invocation, source_sha, lock_sha256):
     return {
         "_type": "https://in-toto.io/Statement/v1",
@@ -207,10 +261,11 @@ def provenance(reference, composition, rootfs_record, invocation, source_sha, lo
     }
 
 
-def prepare(composition_dir, candidate_path, reference, output, environment, images_lock):
+def prepare(composition_dir, candidate_path, reference, output, environment, images_lock,
+            pack_source, mvm_meta):
     invocation = check_identity(environment)
-    composition_dir, candidate_path, output, images_lock = map(
-        Path, (composition_dir, candidate_path, output, images_lock)
+    composition_dir, candidate_path, output, images_lock, pack_source, mvm_meta = map(
+        Path, (composition_dir, candidate_path, output, images_lock, pack_source, mvm_meta)
     )
     if (output.name in ("", ".", "..") or output.exists() or output.is_symlink()
             or not stat.S_ISDIR(output.parent.resolve(strict=True).stat().st_mode)):
@@ -232,9 +287,21 @@ def prepare(composition_dir, candidate_path, reference, output, environment, ima
             binder.copy_regular(candidate_path, copied_candidate)
             copied_lock = private / "images.lock"
             binder.copy_regular(images_lock, copied_lock)
+            copied_source = private / "pack-sources" / pack_source.parent.parent.name / pack_source.parent.name / "pack.toml"
+            copied_source.parent.mkdir(parents=True, mode=0o700)
+            binder.copy_regular(pack_source, copied_source)
+            copied_meta = private / "mvm-meta.json"
+            if mvm_meta.name != "mvm-meta.json" or mvm_meta.parent != pack_source.parent:
+                raise SigningError("boot sidecar must be beside the pack source")
+            binder.copy_regular(mvm_meta, copied_meta)
         except (OSError, binder.CandidateError) as error:
             raise SigningError("input snapshot refused a missing, linked or special file") from error
         composition = validate_snapshot(snapshot, copied_candidate, reference, reproducer)
+        candidate = strict_json(copied_candidate, reproducer)
+        if record(copied_source, reproducer) != candidate["pack_source"]:
+            raise SigningError("pack source bytes differ from the reproduced candidate")
+        intent = check_source_intent(copied_source, candidate, reference, composition)
+        check_boot_sidecar(copied_meta, reproducer)
         check_images_lock(copied_lock, composition["base_set"])
         lock_sha256 = record(copied_lock, reproducer)["sha256"]
         # The helper expects exactly the four filesystem outputs. Check its
@@ -253,12 +320,36 @@ def prepare(composition_dir, candidate_path, reference, output, environment, ima
             for name in sorted(INPUT_ASSETS | {"composition.json"}):
                 shutil.copyfile(snapshot / name, staged / name)
             shutil.copyfile(copied_candidate, staged / "candidate.json")
+            shutil.copyfile(copied_meta, staged / "mvm-meta.json")
             (staged / "provenance.json").write_bytes(json_bytes(provenance(
                 reference, composition, record(staged / "rootfs.ext4", reproducer),
                 invocation, environment["GITHUB_SHA"], lock_sha256,
             )))
             sign_and_verify(staged / "rootfs.ext4", staged / "rootfs.signature.json")
             sign_and_verify(staged / "provenance.json", staged / "provenance.signature.json")
+            asset_names = {
+                "rootfs": "rootfs.ext4", "verity": "rootfs.verity",
+                "roothash": "rootfs.roothash", "mvm_meta": "mvm-meta.json",
+                "rootfs_signature_bundle": "rootfs.signature.json",
+                "provenance_statement": "provenance.json",
+                "provenance_signature_bundle": "provenance.signature.json",
+            }
+            descriptor = {
+                "schema_version": 2,
+                "platform": intent["platform"],
+                "base_set": composition["base_set"],
+                "release": intent["release"],
+                "assets": {
+                    role: {"name": name, **record(staged / name, reproducer)}
+                    for role, name in asset_names.items()
+                },
+            }
+            builder = helper("build-packs.py", "build_packs_descriptor")
+            try:
+                builder.validate_built_image_descriptor(descriptor, reference)
+            except SystemExit as error:
+                raise SigningError("generated image descriptor is invalid") from error
+            (staged / "image-descriptor.json").write_bytes(json_bytes(descriptor))
             evidence = {
                 "schema_version": 1,
                 "kind": "signed-image-evidence-not-published",
@@ -269,7 +360,8 @@ def prepare(composition_dir, candidate_path, reference, output, environment, ima
                     name: record(staged / name, reproducer)
                     for name in (
                         "rootfs.ext4", "rootfs.verity", "rootfs.roothash",
-                        "asset-report.json", "composition.json", "candidate.json",
+                        "mvm-meta.json", "image-descriptor.json", "asset-report.json",
+                        "composition.json", "candidate.json",
                         "rootfs.signature.json",
                         "provenance.json", "provenance.signature.json",
                     )
@@ -290,10 +382,12 @@ def main(argv=None):
     parser.add_argument("--reference", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--mvm-images-lock", required=True, type=Path)
+    parser.add_argument("--pack-source", required=True, type=Path)
+    parser.add_argument("--mvm-meta", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
         prepare(args.composition, args.candidate_report, args.reference, args.output,
-                os.environ, args.mvm_images_lock)
+                os.environ, args.mvm_images_lock, args.pack_source, args.mvm_meta)
     except (OSError, ValueError, SigningError) as error:
         parser.exit(1, f"sign-composed-image: {error}\n")
 
