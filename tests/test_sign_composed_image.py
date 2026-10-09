@@ -15,6 +15,11 @@ sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("sign_composed_image", SCRIPT)
 signer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(signer)
+stage_spec = importlib.util.spec_from_file_location(
+    "stage_image_release", SCRIPT.with_name("stage-image-release.py")
+)
+stager = importlib.util.module_from_spec(stage_spec)
+stage_spec.loader.exec_module(stager)
 
 
 def record(body):
@@ -124,6 +129,86 @@ class SigningTests(unittest.TestCase):
 
     def fake_sign(self, path, bundle):
         bundle.write_bytes(hashlib.sha256(path.read_bytes()).hexdigest().encode())
+
+    def signed_stage(self):
+        with mock.patch.object(signer, "sign_and_verify", side_effect=self.fake_sign):
+            self.prepare()
+        release = self.root / "release"
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                         self.images_lock, release)
+        return release
+
+    def fake_verify(self, blob, bundle):
+        if bundle.read_bytes() != hashlib.sha256(blob.read_bytes()).hexdigest().encode():
+            raise stager.StageError("publisher signature verification failed")
+
+    def test_signed_image_release_stages_exact_measured_assets(self):
+        release = self.signed_stage()
+        self.assertEqual({path.name for path in release.iterdir()},
+                         stager.RELEASE_NAMES | {"image-descriptor.json"})
+        self.assertEqual((release / "rootfs.ext4").read_bytes(), b"rootfs-bytes")
+        descriptor = json.loads((release / "image-descriptor.json").read_text())
+        self.assertEqual(descriptor["base_set"], self.base)
+
+    def test_stage_refuses_tampered_asset_or_signature(self):
+        with mock.patch.object(signer, "sign_and_verify", side_effect=self.fake_sign):
+            self.prepare()
+        (self.output / "rootfs.ext4").write_bytes(b"tampered")
+        release = self.root / "release"
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            with self.assertRaisesRegex(stager.StageError, "digest"):
+                stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                             self.images_lock, release)
+        self.assertFalse(release.exists())
+        (self.output / "rootfs.ext4").write_bytes(b"rootfs-bytes")
+        (self.output / "provenance.signature.json").write_bytes(b"wrong")
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            with self.assertRaisesRegex(stager.StageError, "signature"):
+                stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                             self.images_lock, release)
+        self.assertFalse(release.exists())
+
+    def test_stage_refuses_advanced_lock_and_existing_output(self):
+        release = self.signed_stage()
+        (release / "operator-data").write_bytes(b"keep")
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            with self.assertRaisesRegex(stager.StageError, "new directory"):
+                stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                             self.images_lock, release)
+        self.assertEqual((release / "operator-data").read_bytes(), b"keep")
+        self.write_lock(release_tag="image-set/v0.2.5")
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            with self.assertRaisesRegex(stager.StageError, "current images.lock"):
+                stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                             self.images_lock, self.root / "second-release")
+        self.assertFalse((self.root / "second-release").exists())
+
+    def test_stage_refuses_changed_source_and_linked_evidence(self):
+        with mock.patch.object(signer, "sign_and_verify", side_effect=self.fake_sign):
+            self.prepare()
+        release = self.root / "release"
+        self.pack_source.write_text(self.pack_source.read_text().replace(
+            'description = "Python runtime"', 'description = "Changed runtime"'
+        ))
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            with self.assertRaisesRegex(stager.StageError, "pack source bytes"):
+                stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                             self.images_lock, release)
+        self.assertFalse(release.exists())
+        self.pack_source.write_text(self.pack_source.read_text().replace(
+            'description = "Changed runtime"', 'description = "Python runtime"'
+        ))
+        original = self.output / "rootfs.ext4"
+        target = self.root / "rootfs-copy"
+        target.write_bytes(original.read_bytes())
+        original.unlink()
+        original.symlink_to(target)
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            with self.assertRaisesRegex(stager.StageError, "linked or special"):
+                stager.stage(self.output, "runtime/python@1.1.0", self.pack_source,
+                             self.images_lock, release)
+        self.assertFalse(release.exists())
 
     def test_signs_only_verified_bytes_and_binds_base_and_provenance(self):
         with mock.patch.object(signer, "sign_and_verify", side_effect=self.fake_sign) as called:
