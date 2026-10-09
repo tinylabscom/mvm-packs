@@ -1,4 +1,4 @@
-name: Validate arm64 pack builder
+name: Validate Python pack builder VM
 
 on:
   pull_request:
@@ -7,22 +7,23 @@ on:
       - "scripts/build-python-layer.sh"
       - "scripts/stage-python-closure.py"
       - "tests/test_stage_python_closure.py"
-      - ".github/workflows/arm-builder.yml"
+      - ".github/workflows/builder-vm.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  probe-x86-kvm:
+  stage-python:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 45
     steps:
-      - name: Check hosted x86_64 KVM availability
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Require usable KVM for the project builder VM
         run: |
           set -euo pipefail
           if [ ! -e /dev/kvm ]; then
-            echo '::error::x86_64 runner has no /dev/kvm device'
+            echo '::error::runner has no /dev/kvm device'
             exit 1
           fi
           ls -l /dev/kvm
@@ -32,44 +33,25 @@ jobs:
             sudo -n setfacl -m "u:$(id -un):rw" /dev/kvm
           fi
           if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo '::error::x86_64 runner cannot use /dev/kvm'
-            exit 1
-          fi
-
-  stage-python:
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Require usable KVM for the project builder VM
-        run: |
-          set -euo pipefail
-          if [ ! -e /dev/kvm ]; then
-            echo '::error::arm64 runner has no /dev/kvm device'
-            exit 1
-          fi
-          ls -l /dev/kvm
-          id
-          if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
-            echo '::error::arm64 runner cannot use /dev/kvm'
+            echo '::error::runner cannot use /dev/kvm'
             exit 1
           fi
 
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
-      - name: Install verified cosign v3 for arm64
+      - name: Install verified cosign v3
         env:
           COSIGN_V3_VERSION: "v3.1.1"
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
           base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
-          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-arm64 "${base}/cosign-linux-arm64"
-          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-arm64.sigstore.json "${base}/cosign-linux-arm64.sigstore.json"
-          cosign verify-blob cosign-linux-arm64 \
-            --bundle cosign-linux-arm64.sigstore.json \
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64 "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64.sigstore.json "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
             --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
             --certificate-oidc-issuer https://accounts.google.com
-          install -m 0755 cosign-linux-arm64 "$HOME/.cosign/cosign"
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
           hash -r
           cosign version
 
@@ -77,12 +59,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           BUILDER_CLIENT_TAG: "v0.22.0"
-          BUILDER_CLIENT_SHA256: "dafb1d9ebb9480b26841c772bee6322015b727b8cc2bc67d82056631101122f9"
+          BUILDER_CLIENT_SHA256: "502e84ea3fa1ff04b0138fb6c3cb47b3a72c730d72c8f468df55e01d99c94d64"
         run: |
           set -euo pipefail
           release_dir="$RUNNER_TEMP/mvm-release"
           mkdir -p "$release_dir"
-          archive=mvmctl-aarch64-unknown-linux-gnu.tar.gz
+          archive=mvmctl-x86_64-unknown-linux-gnu.tar.gz
           gh release download "$BUILDER_CLIENT_TAG" --repo tinylabscom/mvm --dir "$release_dir" \
             -p "$archive" -p "${archive}.bundle" \
             -p checksums-sha256.txt -p checksums-sha256.txt.bundle
@@ -100,7 +82,7 @@ jobs:
           test "$actual" = "$expected"
           test "$actual" = "$BUILDER_CLIENT_SHA256"
           tar -C "$RUNNER_TEMP" -xzf "$release_dir/$archive"
-          "$RUNNER_TEMP/mvmctl-aarch64-unknown-linux-gnu/mvmctl" --version | \
+          "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" --version | \
             grep -F "mvmctl ${BUILDER_CLIENT_TAG#v}"
 
       - name: Stage pinned Python closure inside the builder VM
@@ -109,7 +91,7 @@ jobs:
           output="$RUNNER_TEMP/mvm-python-stage"
           mkdir -p "$output"
           MVM_HOME="$RUNNER_TEMP/mvm-home" \
-            "$RUNNER_TEMP/mvmctl-aarch64-unknown-linux-gnu/mvmctl" \
+            "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" \
             --builder firecracker __builder-shell-job \
             --script "$GITHUB_WORKSPACE/scripts/build-python-layer.sh" \
             --work-dir "$GITHUB_WORKSPACE" \
