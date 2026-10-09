@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import call, patch
@@ -27,6 +28,15 @@ class StagePythonClosureTests(unittest.TestCase):
         self.assertEqual(
             nixpkgs["locked"]["narHash"],
             "sha256-Ti+ZBvW6yrWWAg2szExVTwCd4qOJ3KlVr1tFHfyfi8Q=",
+        )
+
+    def test_python_image_intent_matches_hosted_builder_architecture(self):
+        source = stage.IMAGE_FLAKE.parent / "pack.toml"
+        intent = tomllib.loads(source.read_text())["image_build"]
+        self.assertEqual(intent["platform"], "linux/x86_64")
+        self.assertIn(
+            "packages.x86_64-linux.default",
+            (stage.IMAGE_FLAKE / "flake.nix").read_text(),
         )
 
     def setUp(self):
