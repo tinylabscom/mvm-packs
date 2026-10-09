@@ -94,8 +94,48 @@ class MergeTreesTests(unittest.TestCase):
             base.mkdir()
             app.mkdir()
             (app / "escape").symlink_to(root)
-            with self.assertRaisesRegex(compose.CompositionError, "regular file"):
+            with self.assertRaisesRegex(compose.CompositionError, "symlink target"):
                 compose.merge_additive(app, base)
+
+    def test_nix_closure_links_are_preserved_without_following_host_targets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base"
+            app = root / "app"
+            base.mkdir()
+            (app / "nix" / "store" / "python" / "bin").mkdir(parents=True)
+            (app / "nix" / "store" / "python" / "bin" / "python3.12").write_bytes(b"binary")
+            (app / "nix" / "store" / "python" / "bin" / "python3").symlink_to("python3.12")
+            (app / "bin").mkdir()
+            (app / "bin" / "python3").symlink_to("/nix/store/python/bin/python3")
+            compose.merge_additive(app, base)
+            self.assertEqual(os.readlink(base / "nix" / "store" / "python" / "bin" / "python3"), "python3.12")
+            self.assertEqual(os.readlink(base / "bin" / "python3"), "/nix/store/python/bin/python3")
+            self.assertEqual((base / "nix" / "store" / "python" / "bin" / "python3.12").read_bytes(), b"binary")
+
+    def test_relative_symlink_cannot_escape_the_guest_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base"
+            app = root / "app"
+            base.mkdir()
+            (app / "bin").mkdir(parents=True)
+            (app / "bin" / "escape").symlink_to("../../../host-secret")
+            with self.assertRaisesRegex(compose.CompositionError, "symlink target"):
+                compose.merge_additive(app, base)
+            self.assertFalse((base / "bin" / "escape").is_symlink())
+
+    def test_absolute_nix_link_cannot_traverse_out_of_store(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base = root / "base"
+            app = root / "app"
+            base.mkdir()
+            app.mkdir()
+            (app / "escape").symlink_to("/nix/store/../../etc/passwd")
+            with self.assertRaisesRegex(compose.CompositionError, "symlink target"):
+                compose.merge_additive(app, base)
+            self.assertFalse((base / "escape").is_symlink())
 
 
 class SnapshotTests(unittest.TestCase):

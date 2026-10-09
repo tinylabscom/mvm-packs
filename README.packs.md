@@ -148,8 +148,10 @@ versioned `--reference`, the same released `--mvmctl` and independently pinned
 candidate through no-follow descriptors, rechecks its recorded bytes, and
 re-runs the released verifier against the signed selected base files. It then
 extracts the base and application ext4 images with `debugfs`, adds application
-entries without replacing base entries or accepting application symlinks or
-special files, and builds the combined tree twice with the pinned client's
+entries without replacing base entries. It preserves relative symlinks whose
+targets stay within the guest tree and absolute links into `/nix/store`, without
+following either on the host; other absolute links, guest-root escapes, and
+special files are refused. It builds the combined tree twice with the pinned client's
 `image build-layer` command. It refuses to publish the output directory if any
 of the three filesystem assets or the asset report differ byte-for-byte.
 The output contains those four files and `composition.json`, marked
