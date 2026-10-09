@@ -1,0 +1,5 @@
+name = "kubernetes"
+description = "Single-node Kubernetes cluster (k3s, rootless) in one microVM"
+default_vcpus = 4
+default_memory_mib = 4096
+tags = ["kubernetes", "k3s", "k8s", "cluster"]

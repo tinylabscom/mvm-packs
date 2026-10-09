@@ -18,6 +18,12 @@
       "description": "Slack webhook bot worker with curl-based health checks",
       "path": "templates/slack",
       "mvm_version": ">=0.18.0"
+    },
+    {
+      "name": "kubernetes",
+      "description": "Single-node Kubernetes cluster (k3s, rootless) in one microVM",
+      "path": "templates/kubernetes",
+      "mvm_version": ">=0.18.0"
     }
   ]
 }
