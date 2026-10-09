@@ -27,6 +27,10 @@ jobs:
           fi
           ls -l /dev/kvm
           id
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            command -v setfacl
+            sudo -n setfacl -m "u:$(id -un):rw" /dev/kvm
+          fi
           if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
             echo '::error::x86_64 runner cannot use /dev/kvm'
             exit 1
