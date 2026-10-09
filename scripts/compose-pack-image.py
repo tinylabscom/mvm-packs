@@ -7,11 +7,12 @@ Run inside the project builder VM. This command does not sign or publish a pack.
 import argparse
 import importlib.util
 import json
+import os
 import shutil
 import stat
 import subprocess
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 OUTPUTS = frozenset(("rootfs.ext4", "rootfs.verity", "rootfs.roothash", "asset-report.json"))
@@ -155,10 +156,30 @@ def snapshot_candidate(source, destination, binder):
         raise CompositionError("candidate cannot be snapshotted safely") from error
 
 
-def merge_additive(application, destination):
+def checked_link_target(source, target, root):
+    """Validate a guest symlink lexically; never resolve it on the host."""
+    link = os.readlink(source)
+    parts = [] if link.startswith("/") else list(target.parent.relative_to(root).parts)
+    for component in PurePosixPath(link).parts:
+        if component in ("", "/", "."):
+            continue
+        if component == "..":
+            if not parts:
+                raise CompositionError(f"application symlink target escapes guest root: {source}")
+            parts.pop()
+        else:
+            parts.append(component)
+    if link.startswith("/") and parts[:2] != ["nix", "store"]:
+        raise CompositionError(f"application symlink target is not in the guest Nix store: {source}")
+    return link
+
+
+def merge_additive(application, destination, root=None):
     """Add application entries without replacing any base entry or following links."""
     directory(application, "application tree")
     directory(destination, "base tree")
+    if root is None:
+        root = destination
     original_mode = stat.S_IMODE(destination.lstat().st_mode)
     destination.chmod(original_mode | stat.S_IWUSR)
     try:
@@ -171,11 +192,15 @@ def merge_additive(application, destination):
                         raise CompositionError(f"application directory collides with base: {source.name}")
                 else:
                     target.mkdir(mode=stat.S_IMODE(mode))
-                merge_additive(source, target)
+                merge_additive(source, target, root)
             elif stat.S_ISREG(mode):
                 if target.exists() or target.is_symlink():
                     raise CompositionError(f"application file collides with base: {source.name}")
                 shutil.copy2(source, target, follow_symlinks=False)
+            elif stat.S_ISLNK(mode):
+                if target.exists() or target.is_symlink():
+                    raise CompositionError(f"application symlink collides with base: {source.name}")
+                os.symlink(checked_link_target(source, target, root), target)
             else:
                 raise CompositionError(f"application entry is not a regular file or directory: {source.name}")
     finally:
