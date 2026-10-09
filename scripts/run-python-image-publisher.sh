@@ -111,3 +111,12 @@ python3 scripts/check-python-composed-runtime.py \
   --rootfs "$evidence/rootfs.ext4" \
   --mvm-meta "$evidence/mvm-meta.json"
 assert_current_lock
+
+release_stage="$RUNNER_TEMP/python-image-release-stage"
+python3 scripts/stage-image-release.py \
+  --evidence "$evidence" \
+  --reference "$reference" \
+  --pack-source pack-sources/runtime/python/pack.toml \
+  --mvm-images-lock "$RUNNER_TEMP/images.lock" \
+  --output "$release_stage"
+assert_current_lock

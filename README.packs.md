@@ -227,8 +227,10 @@ release. The manual `sign_python_image` job in the main `publish.yml` workflow
 verifies a release-tagged Linux x86_64 mvmctl archive and its signed checksum,
 fetches the current mvm base lock and selected signed base assets, reproduces
 the image inside the builder VM, and calls this signer under the main publisher
-OIDC identity. It re-fetches the current base lock before and after signing
-and uploads only a seven-day signed-evidence workflow artifact. After the
+OIDC identity. It re-fetches the current base lock before and after signing,
+then independently stages and verifies the signed release-input asset set
+before uploading only a seven-day signed-evidence workflow artifact. It
+rechecks the current lock after staging. After the
 builder completes, `build-python-sidecar.py` requires the reviewed SHA-256 of
 the image-set/v0.2.4 base metadata asset and its exact known claims, then adds
 only the boot argv and libc measured from the pinned base and final composed
@@ -296,7 +298,8 @@ boot-sidecar prerequisites are met. Release verification, live boot, and
 registry publication remain separate gates. Unit tests mock cosign and do not
 establish an actual signed image.
 
-`scripts/stage-image-release.py` is the next fail-closed release-input gate.
+`scripts/stage-image-release.py` is the fail-closed release-input gate run by
+the manual signing job before it uploads evidence.
 Give it the signed evidence directory, exact versioned reference, matching
 `[image_build]` source, the current `mvm/images.lock` from an independently
 pinned checkout, and a new output directory; run `python3
