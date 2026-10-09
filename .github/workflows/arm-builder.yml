@@ -22,9 +22,16 @@ jobs:
       - name: Require usable KVM for the project builder VM
         run: |
           set -euo pipefail
-          test -c /dev/kvm
-          test -r /dev/kvm
-          test -w /dev/kvm
+          if [ ! -e /dev/kvm ]; then
+            echo '::error::arm64 runner has no /dev/kvm device'
+            exit 1
+          fi
+          ls -l /dev/kvm
+          id
+          if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo '::error::arm64 runner cannot use /dev/kvm'
+            exit 1
+          fi
 
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
       - name: Install verified cosign v3 for arm64
