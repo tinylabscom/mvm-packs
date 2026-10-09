@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -40,12 +41,20 @@ class BuildPythonImageTests(unittest.TestCase):
             "default-microvm-rootfs-x86_64.roothash",
         ):
             (self.artifacts / name).write_bytes(b"base asset")
+        intent = tomllib.loads(builder.PYTHON_SOURCE.read_text())["image_build"]["base_set"]
+        self.lock = self.root / "images.lock"
+        self.lock.write_text(
+            f'schema_version = 2\nrepository = "{intent["repository"]}"\n'
+            f'[image_set]\nrepository = "{intent["repository"]}"\n'
+            f'release_tag = "{intent["release_tag"]}"\n'
+            f'manifest_sha256 = "{intent["manifest_sha256"]}"\n'
+        )
         self.output = self.root / "exported"
 
     def run_builder(self):
         return builder.build(
             builder.PYTHON_SOURCE, self.binary, self.pin, self.manifest,
-            self.bundle, self.artifacts, self.output,
+            self.bundle, self.artifacts, self.lock, self.output,
         )
 
     def fake_stage(self, target):
@@ -106,6 +115,15 @@ class BuildPythonImageTests(unittest.TestCase):
         with mock.patch.object(builder.sys, "platform", "linux"), \
                 mock.patch.object(builder.stage, "build_and_stage") as stage:
             with self.assertRaisesRegex(builder.BuildError, "client digest"):
+                self.run_builder()
+        stage.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_refuses_advanced_mvm_base_lock_before_nix(self):
+        self.lock.write_text(self.lock.read_text().replace("image-set/v0.2.4", "image-set/v0.2.5"))
+        with mock.patch.object(builder.sys, "platform", "linux"), \
+                mock.patch.object(builder.stage, "build_and_stage") as stage:
+            with self.assertRaisesRegex(builder.BuildError, "current images.lock"):
                 self.run_builder()
         stage.assert_not_called()
         self.assertFalse(self.output.exists())
