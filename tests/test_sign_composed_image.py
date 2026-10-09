@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from unittest import mock
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sign-composed-image.py"
+sys.path.insert(0, str(SCRIPT.parent))
 spec = importlib.util.spec_from_file_location("sign_composed_image", SCRIPT)
 signer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(signer)
@@ -39,11 +41,32 @@ class SigningTests(unittest.TestCase):
             "manifest_sha256": "a" * 64,
         }
         self.write_lock()
+        self.source = self.root / "pack-sources" / "runtime" / "python"
+        self.source.mkdir(parents=True)
+        self.pack_source = self.source / "pack.toml"
+        self.pack_source.write_text(
+            'version = "1.1.0"\ndescription = "Python runtime"\n'
+            '[image_build]\nschema_version = 1\nplatform = "linux/aarch64"\n'
+            '[image_build.base_set]\nrepository = "tinylabscom/mvm-images"\n'
+            'release_tag = "image-set/v0.2.4"\n'
+            f'manifest_sha256 = "{self.base["manifest_sha256"]}"\n'
+            '[image_build.release]\nrepository = "tinylabscom/mvm-packs"\n'
+            'tag = "pack-runtime-python-v1.1.0"\n'
+        )
+        self.mvm_meta = self.source / "mvm-meta.json"
+        write_json(self.mvm_meta, {
+            "name": "runtime-python", "accessible": False, "sealed": True,
+            "entrypointKind": "command", "entrypointArgv": ["/app/entrypoint"],
+            "initSystem": "busybox", "expectedBootMs": 300,
+            "agentBinary": "real", "rootlessEntrypoint": True,
+            "hypervisor": "firecracker", "overlayAware": True,
+            "runtimeLean": True, "protocolVersion": 2, "libc": "musl",
+        })
         self.candidate_value = {
             "schema_version": 1,
             "kind": "unsigned-image-candidate",
             "platform": "linux/aarch64",
-            "pack_source": record(b"pack"),
+            "pack_source": record(self.pack_source.read_bytes()),
             "base_set": self.base,
             "signed_root_manifest": record(b"manifest"),
             "signed_root_bundle": record(b"bundle"),
@@ -96,7 +119,8 @@ class SigningTests(unittest.TestCase):
 
     def prepare(self):
         signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
-                       self.output, self.environment, self.images_lock)
+                       self.output, self.environment, self.images_lock,
+                       self.pack_source, self.mvm_meta)
 
     def fake_sign(self, path, bundle):
         bundle.write_bytes(hashlib.sha256(path.read_bytes()).hexdigest().encode())
@@ -120,6 +144,15 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(descriptor["assets"]["provenance.json"],
                          record((self.output / "provenance.json").read_bytes()))
         self.assertTrue((self.output / "image-evidence.sigstore.json").is_file())
+        release = json.loads((self.output / "image-descriptor.json").read_text())
+        self.assertEqual(release["schema_version"], 2)
+        self.assertEqual(release["base_set"], self.base)
+        self.assertEqual(release["release"]["tag"], "pack-runtime-python-v1.1.0")
+        self.assertEqual(release["assets"]["mvm_meta"], {
+            "name": "mvm-meta.json", **record(self.mvm_meta.read_bytes())
+        })
+        self.assertEqual(descriptor["assets"]["image-descriptor.json"],
+                         record((self.output / "image-descriptor.json").read_bytes()))
         self.assertEqual((self.output / "candidate.json").read_bytes(), self.candidate.read_bytes())
 
     def test_tampered_image_or_candidate_refuses_before_signing(self):
@@ -136,6 +169,33 @@ class SigningTests(unittest.TestCase):
                 self.prepare()
         called.assert_not_called()
 
+    def test_changed_pack_source_or_unsealed_sidecar_refuses_before_signing(self):
+        self.pack_source.write_text(self.pack_source.read_text().replace(
+            'description = "Python runtime"', 'description = "Changed runtime"'
+        ))
+        with mock.patch.object(signer, "sign_and_verify") as called:
+            with self.assertRaisesRegex(signer.SigningError, "pack source bytes"):
+                self.prepare()
+        called.assert_not_called()
+        self.assertFalse(self.output.exists())
+        self.pack_source.write_text(self.pack_source.read_text().replace(
+            'description = "Changed runtime"', 'description = "Python runtime"'
+        ))
+        for field, value in (
+            ("sealed", False), ("entrypointArgv", []), ("libc", "unknown"),
+            ("overlayAware", False), ("hypervisor", "qemu"),
+        ):
+            original = json.loads(self.mvm_meta.read_text())
+            changed = dict(original)
+            changed[field] = value
+            write_json(self.mvm_meta, changed)
+            with self.subTest(field=field), mock.patch.object(signer, "sign_and_verify") as called:
+                with self.assertRaisesRegex(signer.SigningError, "boot sidecar"):
+                    self.prepare()
+                called.assert_not_called()
+                self.assertFalse(self.output.exists())
+            write_json(self.mvm_meta, original)
+
     def test_wrong_workflow_or_branch_refuses_before_signing(self):
         for key, value in (("GITHUB_REF", "refs/heads/topic"),
                            ("GITHUB_WORKFLOW_REF", "other/workflow@refs/heads/main"),
@@ -148,7 +208,7 @@ class SigningTests(unittest.TestCase):
                     with self.assertRaisesRegex(signer.SigningError, "publisher workflow"):
                         signer.prepare(self.composed, self.candidate,
                                        "runtime/python@1.1.0", self.output, changed,
-                                       self.images_lock)
+                                       self.images_lock, self.pack_source, self.mvm_meta)
                 called.assert_not_called()
                 self.assertFalse(self.output.exists())
 

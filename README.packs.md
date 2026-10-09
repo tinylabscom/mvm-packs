@@ -161,9 +161,11 @@ force.
 
 `scripts/sign-composed-image.py` prepares signed *evidence* for a later image
 release; it is not wired into the publisher. It accepts the composed directory,
-the exact `candidate.json` that produced it, a versioned pack reference, and a
-new output directory (`--composition`, `--candidate-report`, `--reference`,
-`--output`). It also requires `--mvm-images-lock` naming the `images.lock` file
+the exact `candidate.json` that produced it, a versioned pack reference, its
+`[image_build]` pack source, a `mvm-meta.json` beside that source, and a new
+output directory (`--composition`, `--candidate-report`, `--reference`,
+`--pack-source`, `--mvm-meta`, `--output`). It also requires
+`--mvm-images-lock` naming the `images.lock` file
 from an independently pinned mvm checkout. It snapshots input files without
 following symlinks, refuses a composed base set that differs from that lock's
 current signed-root pin, and records the lock-file SHA-256 in provenance. When
@@ -171,7 +173,13 @@ mvm advances its base lock, an old candidate cannot be signed as a new release:
 rebuild against the new base, or keep the existing release immutable. This
 local comparison does not authenticate the mvm checkout; the future publisher
 must pin its source commit independently. The helper rechecks
-the composition and asset-report digests and their candidate/base bindings,
+the composition and asset-report digests, candidate/base bindings, and exact
+pack source bytes. It rejects a boot sidecar without a sealed, known command
+entrypoint, runtime overlay, supported libc and protocol, and real guest agent,
+then binds that sidecar and the seven measured release assets into an
+`image-descriptor.json` matching the consumer's schema-v2 image contract.
+The sidecar's assertion about the guest still needs a live boot check before
+publication. The helper
 then writes an in-toto/SLSA v1 provenance statement naming the rootfs digest,
 base-set pin, application layer, verifier digest, and publisher run. It signs
 the rootfs, statement, and a separate image-evidence descriptor with cosign,
@@ -179,7 +187,7 @@ then verifies each bundle under the exact `publish.yml@refs/heads/main` OIDC
 identity before atomically exposing the output. A different branch, workflow,
 failed verification, or changed input leaves no output. The output explicitly
 identifies itself as `signed-image-evidence-not-published`; it contains no
-boot sidecar or signed registry manifest. A publisher workflow must perform
+signed registry manifest. A publisher workflow must perform
 the actual keyless signing in that identity, verify the complete image release
 and client contract, and keep the existing image-publication refusal until
 those gates are implemented. Unit tests mock cosign and do not establish an
@@ -192,8 +200,8 @@ followed by `sign-composed-image.py` in the same publisher run. Its external
 parameters are the exact versioned `reference` and the immutable `base_set`
 (`repository`, `release_tag`, signed root-manifest SHA-256). Its internal
 parameter is the SHA-256 of the verifier executable. The resolved dependencies
-are the copied `candidate.json`, application-layer `rootfs.ext4`, and signed
-base root manifest by SHA-256, plus the publisher repository's exact git
+are the copied `candidate.json`, application-layer `rootfs.ext4`, signed
+base root manifest and mvm `images.lock` by SHA-256, plus the publisher repository's exact git
 commit. The publisher must obtain the base files
 from the named release, verify them with the released verifier whose own
 compiled `images.lock` accepts that base, reproduce the application layer,
