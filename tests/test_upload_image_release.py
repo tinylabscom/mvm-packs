@@ -171,6 +171,18 @@ class UploadTests(unittest.TestCase):
         self.assertTrue(self.client.release["draft"])
         self.assertNotIn("publish", self.client.calls)
 
+    def test_published_readback_refuses_changed_asset_metadata(self):
+        original_get_release = self.client.get_release
+        def changed_after_publish(release_id):
+            value = original_get_release(release_id)
+            if value["draft"] is False:
+                value["assets"][0] = dict(value["assets"][0], size=0)
+            return value
+        self.client.get_release = changed_after_publish
+        with self.assertRaisesRegex(uploader.UploadError, "asset metadata"):
+            self.publish()
+        self.assertIn("publish", self.client.calls)
+
     def test_api_distinguishes_absent_tag_from_authorization_failure(self):
         client = uploader.GithubReleaseClient("private-test-token")
         missing = urllib.error.HTTPError("https://api.github.com", 404,
