@@ -126,6 +126,14 @@ def check_evidence(snapshot, reference, source, images_lock):
                 composed, snapshot / "candidate.json", reference, reproducer)
         except signer.SigningError as error:
             raise StageError(str(error)) from error
+        exact = composed / "exact-assets"
+        exact.mkdir(mode=0o700)
+        for name in signer.INPUT_ASSETS:
+            binder.copy_regular(snapshot / name, exact / name)
+        try:
+            reproducer.verify_output(exact)
+        except reproducer.ReproductionError as error:
+            raise StageError("composed asset report is invalid") from error
     if composition["base_set"] != descriptor["base_set"]:
         raise StageError("composition base pin differs from signed descriptor")
     provenance = read_json(snapshot / "provenance.json")
