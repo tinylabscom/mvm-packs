@@ -193,6 +193,21 @@ and client contract, and keep the existing image-publication refusal until
 those gates are implemented. Unit tests mock cosign and do not establish an
 actual signed image.
 
+`scripts/stage-image-release.py` is the next fail-closed release-input gate.
+Give it the signed evidence directory, exact versioned reference, matching
+`[image_build]` source, the current `mvm/images.lock` from an independently
+pinned checkout, and a new output directory; run `python3
+scripts/stage-image-release.py --help` for the flags. It copies inputs without
+following links, rehashes every evidence and descriptor asset, checks the
+source intent, current base pin, sealed boot sidecar and provenance subject,
+and verifies the rootfs, provenance and evidence bundles under the main
+publisher workflow identity. It then stages the seven measured release assets
+and descriptor without overwriting an existing path. Advancing the base lock
+refuses this staging step for the old pin; a new pack version must be rebuilt
+and signed. This command does not authenticate the caller-supplied mvm checkout,
+upload a GitHub release, publish a registry manifest, or prove a live boot.
+The image-publication refusal remains in force.
+
 ### Pack image composition v1
 
 The build type named in that statement is the `compose-pack-image.py` operation
