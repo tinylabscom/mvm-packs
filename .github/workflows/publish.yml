@@ -27,6 +27,15 @@ on:
   schedule:
     - cron: "17 */12 * * *"
   workflow_dispatch:
+    inputs:
+      mvmctl_tag:
+        description: Signed compatible mvmctl release tag; empty publishes the catalogue only
+        required: false
+        type: string
+      mvmctl_archive_sha256:
+        description: SHA-256 of the signed Linux x86_64 release archive
+        required: false
+        type: string
 
 permissions: {}
 concurrency:
@@ -34,8 +43,25 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate_dispatch:
+    runs-on: ubuntu-latest
+    env:
+      MVMCTL_TAG: ${{ inputs.mvmctl_tag }}
+      MVMCTL_ARCHIVE_SHA256: ${{ inputs.mvmctl_archive_sha256 }}
+    steps:
+      - name: Require a complete image signing request
+        run: |
+          set -euo pipefail
+          if [[ -z "$MVMCTL_TAG" && -z "$MVMCTL_ARCHIVE_SHA256" ]]; then
+            exit 0
+          fi
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
+          [[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
+          [[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+
   sign:
-    if: github.ref == 'refs/heads/main'
+    needs: validate_dispatch
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'workflow_dispatch' || inputs.mvmctl_tag == '')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -150,3 +176,55 @@ jobs:
             -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
             commit -m 'chore(packs): publish signed pack registry [skip ci]'
           git push origin HEAD:main
+
+  sign_python_image:
+    needs: validate_dispatch
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mvmctl_tag != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MVMCTL_TAG: ${{ inputs.mvmctl_tag }}
+      MVMCTL_ARCHIVE_SHA256: ${{ inputs.mvmctl_archive_sha256 }}
+      GH_TOKEN: ${{ github.token }}
+      COSIGN_YES: 'true'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Require KVM for the project builder VM
+        run: |
+          set -euo pipefail
+          test -c /dev/kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            sudo -n setfacl -m "u:$(id -un):rw" /dev/kvm
+          fi
+          test -r /dev/kvm
+          test -w /dev/kvm
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install verified cosign v3
+        env:
+          COSIGN_V3_VERSION: v3.1.1
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64 "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64.sigstore.json "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Reproduce and sign Python image evidence
+        run: bash scripts/run-python-image-publisher.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-python-image-${{ github.run_id }}
+          path: ${{ runner.temp }}/signed-python-image/
+          if-no-files-found: error
+          retention-days: 7

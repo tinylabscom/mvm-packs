@@ -210,7 +210,18 @@ recorded digests are still required before any image-reproduction acceptance
 is claimed.
 
 `scripts/sign-composed-image.py` prepares signed *evidence* for a later image
-release; it is not wired into the publisher. It accepts the composed directory,
+release. The manual `sign_python_image` job in the main `publish.yml` workflow
+verifies a release-tagged Linux x86_64 mvmctl archive and its signed checksum,
+fetches the current mvm base lock and selected signed base assets, reproduces
+the image inside the builder VM, and calls this signer under the main publisher
+OIDC identity. It re-fetches the current base lock before and after signing
+and uploads only a seven-day signed-evidence workflow artifact. The job
+requires a source-adjacent sealed `mvm-meta.json`; runtime/python does not yet
+have one, so it refuses before building. It does not upload an image release,
+create a registry pack, or prove a live boot. No successful signed-image run
+has been established.
+
+The signer accepts the composed directory,
 the exact `candidate.json` that produced it, a versioned pack reference, its
 `[image_build]` pack source, a `mvm-meta.json` beside that source, and a new
 output directory (`--composition`, `--candidate-report`, `--reference`,
@@ -221,8 +232,8 @@ following symlinks, refuses a composed base set that differs from that lock's
 current signed-root pin, and records the lock-file SHA-256 in provenance. When
 mvm advances its base lock, an old candidate cannot be signed as a new release:
 rebuild against the new base, or keep the existing release immutable. This
-local comparison does not authenticate the mvm checkout; the future publisher
-must pin its source commit independently. The helper rechecks
+local comparison does not authenticate the mvm checkout; the manual signing
+job resolves a current mvm main commit when fetching the lock. The helper rechecks
 the composition and asset-report digests, candidate/base bindings, and exact
 pack source bytes. It rejects a boot sidecar without a sealed, known command
 entrypoint, runtime overlay, supported libc and protocol, and real guest agent,
@@ -237,11 +248,10 @@ then verifies each bundle under the exact `publish.yml@refs/heads/main` OIDC
 identity before atomically exposing the output. A different branch, workflow,
 failed verification, or changed input leaves no output. The output explicitly
 identifies itself as `signed-image-evidence-not-published`; it contains no
-signed registry manifest. A publisher workflow must perform
-the actual keyless signing in that identity, verify the complete image release
-and client contract, and keep the existing image-publication refusal until
-those gates are implemented. Unit tests mock cosign and do not establish an
-actual signed image.
+signed registry manifest. The manual job can sign only after its release and
+boot-sidecar prerequisites are met. Release verification, live boot, and
+registry publication remain separate gates. Unit tests mock cosign and do not
+establish an actual signed image.
 
 `scripts/stage-image-release.py` is the next fail-closed release-input gate.
 Give it the signed evidence directory, exact versioned reference, matching
@@ -268,11 +278,10 @@ SHA-256 values, downloads every asset and compares its bytes to the staged
 copy, then verifies the tag target before publishing. A failed upload or
 comparison leaves the release as a draft; it never overwrites a published
 version. The command reads the published release back before reporting
-success. It does not run automatically yet, does not publish the signed
-registry manifest, and does not make the image pullable. The publisher must
-still pin and authenticate its mvm checkout and released verifier, run the
-builder-VM composition/signing workflow, wire this command into that workflow,
-and verify the resulting live client path before lifting the registry guard.
+success. It is not wired into the signing job, does not publish the signed
+registry manifest, and does not make the image pullable. A separate publication
+lane still needs a truthful live boot check, release and registry readback,
+and a released-client witness before lifting the registry guard.
 
 Before a signed registry manifest can name an uploaded image, the producer
 must independently recheck the published release. The

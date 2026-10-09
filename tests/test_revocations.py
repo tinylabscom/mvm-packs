@@ -144,7 +144,7 @@ class RevocationTests(unittest.TestCase):
         self.assertIn("python3 scripts/build-revocations.py", workflow)
         self.assertIn("--require-revocations", workflow)
         sign = workflow.split("  sign:\n", 1)[1].split("  publish:\n", 1)[0]
-        publish = workflow.split("  publish:\n", 1)[1]
+        publish = workflow.split("  publish:\n", 1)[1].split("  sign_python_image:\n", 1)[0]
         self.assertIn("id-token: write", sign)
         self.assertNotIn("contents: write", sign)
         self.assertIn("contents: write", publish)

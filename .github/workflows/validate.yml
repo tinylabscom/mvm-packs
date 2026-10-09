@@ -8,6 +8,7 @@ on:
       - "tests/**"
       - "README.packs.md"
       - ".github/workflows/python-candidate.yml"
+      - ".github/workflows/publish.yml"
       - ".github/workflows/validate.yml"
 
 permissions:
