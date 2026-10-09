@@ -89,6 +89,10 @@ candidate="$output_dir/python-image"
 test -s "$candidate/candidate.json"
 test -s "$candidate/composition/rootfs.ext4"
 test -s "$candidate/composition/composition.json"
+python3 scripts/check-python-base-entrypoint.py \
+  --rootfs "$base_dir/default-microvm-rootfs-x86_64.ext4" \
+  --pack-source pack-sources/runtime/python/pack.toml \
+  --mvm-meta pack-sources/runtime/python/mvm-meta.json
 reference=$(python3 -c 'import pathlib,tomllib; p=pathlib.Path("pack-sources/runtime/python/pack.toml"); print("runtime/python@" + tomllib.loads(p.read_text())["version"])')
 [[ "$reference" =~ ^runtime/python@[0-9]+\.[0-9]+\.[0-9]+$ ]]
 assert_current_lock

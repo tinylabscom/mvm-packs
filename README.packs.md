@@ -221,6 +221,16 @@ have one, so it refuses before building. It does not upload an image release,
 create a registry pack, or prove a live boot. No successful signed-image run
 has been established.
 
+Before signing, `scripts/check-python-base-entrypoint.py` snapshots the
+selected rootfs, pack intent, and proposed sidecar without following links.
+It requires the image-set/v0.2.4 rootfs digest and the exact
+`/etc/mvm/entrypoint` bytes observed in that signed base, then requires the
+sidecar to declare the actual `/bin/sleep infinity` boot argv. A different
+base lock or changed marker refuses until a new base-specific rule is
+measured and reviewed. This gate does not prove the composed image boots,
+that Python runs through the declared command path, or that the sidecar's
+libc declaration is correct; those remain live publication checks.
+
 The signer accepts the composed directory,
 the exact `candidate.json` that produced it, a versioned pack reference, its
 `[image_build]` pack source, a `mvm-meta.json` beside that source, and a new
