@@ -59,7 +59,8 @@ def read_pin(path):
     return value.strip()
 
 
-def preflight(pack_source, binary, pin_file, manifest, bundle, artifacts, output):
+def preflight(pack_source, binary, pin_file, manifest, bundle, artifacts,
+              images_lock, output):
     if sys.platform != "linux":
         raise BuildError("Python image builds must run inside the Linux builder VM")
     pack_source, binary, pin_file, manifest, bundle, artifacts, output = map(
@@ -78,6 +79,7 @@ def preflight(pack_source, binary, pin_file, manifest, bundle, artifacts, output
     metadata = catalog.parse_pack_toml(pack_source)
     if metadata["image_build"] is None or image["platform"] != "linux/x86_64":
         raise BuildError("runtime/python image intent must target linux/x86_64")
+    signer.check_images_lock(Path(images_lock), image["base_set"])
     digest = read_pin(pin_file)
     expected, _ = base.expected_artifacts(image["platform"])
     base.check_inputs(binary, digest, manifest, bundle, artifacts, expected)
@@ -86,13 +88,15 @@ def preflight(pack_source, binary, pin_file, manifest, bundle, artifacts, output
     return f"runtime/python@{metadata['version']}", digest, parent / output.name
 
 
-def build(pack_source, binary, pin_file, manifest, bundle, artifacts, output):
+def build(pack_source, binary, pin_file, manifest, bundle, artifacts,
+          images_lock, output):
     pack_source, binary, manifest, bundle, artifacts = map(
         Path, (pack_source, binary, manifest, bundle, artifacts)
     )
     try:
         reference, digest, destination = preflight(
-            pack_source, binary, pin_file, manifest, bundle, artifacts, output
+            pack_source, binary, pin_file, manifest, bundle, artifacts,
+            images_lock, output,
         )
         with tempfile.TemporaryDirectory(prefix="mvm-python-image-", dir="/tmp") as private:
             private = Path(private)
@@ -134,11 +138,13 @@ def main(argv=None):
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--artifacts", required=True, type=Path)
+    parser.add_argument("--mvm-images-lock", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args(argv)
     try:
         build(args.pack_source, args.mvmctl, args.mvmctl_sha256_file,
-              args.manifest, args.bundle, args.artifacts, args.output)
+              args.manifest, args.bundle, args.artifacts,
+              args.mvm_images_lock, args.output)
     except BuildError as error:
         parser.exit(1, f"build-python-image: {error}\n")
 

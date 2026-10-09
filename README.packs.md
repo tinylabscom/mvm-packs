@@ -184,7 +184,9 @@ force.
 unpublished `runtime/python@1.1.0` x86_64 intent. Give it the checked-in
 `pack.toml`, a verified released `mvmctl` binary and a separate file containing
 that binary's lowercase SHA-256, the signed `image-set.json` and bundle, exactly
-the four selected x86_64 base artifacts, and a new output directory. Run
+the four selected x86_64 base artifacts, the current `mvm/images.lock` from an
+independently fetched mvm commit, and a new output directory. It refuses a
+source base pin that differs from that lock before running Nix. Run
 `python3 scripts/build-python-image.py --help` for the flags. It stages the
 locked CPython closure, compares two application-layer builds byte-for-byte,
 binds the selected base files with the released verifier, and compares two
@@ -193,6 +195,19 @@ and composition bindings does it atomically export `candidate.json` and the
 `composition/` directory. It must run inside the project Linux builder VM;
 failures leave no exported directory. The output is unsigned candidate evidence,
 not a pack release, attestation, signed descriptor, or boot witness.
+
+The manual `Build unsigned Python image candidate` GitHub workflow supplies
+that command with a signature-verified released Linux x86_64 client, the
+current mvm `images.lock` fetched at a resolved main commit, and the selected
+base assets from the pack's pinned image-set release. Its dispatch requires
+the exact client release tag and archive SHA-256; the signed release checksum
+and both Sigstore bundles are checked before the client runs. The job uses a
+read-only repository token, has no signing identity, and uploads only a
+short-lived artifact with the `unsigned-python-image-` prefix and numeric
+workflow run ID suffix. The artifact is
+not a GitHub release or a registry pack. A successful manual run and its
+recorded digests are still required before any image-reproduction acceptance
+is claimed.
 
 `scripts/sign-composed-image.py` prepares signed *evidence* for a later image
 release; it is not wired into the publisher. It accepts the composed directory,
