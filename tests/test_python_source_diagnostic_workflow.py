@@ -61,8 +61,10 @@ class PythonSourceDiagnosticWorkflowTests(unittest.TestCase):
         self.assertIn("06094a1108ae9e82aa4c23a775aa92758f53f1175d422270d9d6162cb9ade558", workflow)
         self.assertIn("sha256sum -c -", workflow)
         self.assertLess(workflow.index("sha256sum -c -"), workflow.index("tar -xzf"))
-        self.assertIn('"$RUNNER_TEMP/mvm-host-bin" >> "$GITHUB_PATH"', workflow)
-        self.assertIn("firecracker --version", workflow)
+        self.assertIn("sudo -n install -m 0755", workflow)
+        self.assertIn("/usr/bin/firecracker", workflow)
+        self.assertIn("sudo -n sh -c 'command -v firecracker && firecracker --version'", workflow)
+        self.assertLess(workflow.index("sudo -n sh -c"), build)
 
     def test_unsigned_diagnostic_cannot_sign_or_publish(self):
         workflow = WORKFLOW.read_text()
