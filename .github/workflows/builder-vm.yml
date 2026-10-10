@@ -108,3 +108,25 @@ jobs:
           tar -tf "$output/python-tree.tar" | \
             grep -Eq '^root/nix/store/[a-z0-9]+-python3-3[.]12[.]13/bin/python3$'
           sha256sum "$output/python-tree.tar"
+
+      - name: Collect builder VM diagnostics on failure
+        if: failure()
+        run: |
+          set -euo pipefail
+          diag="$RUNNER_TEMP/builder-vm-diagnostics"
+          mkdir -p "$diag"
+          find "$RUNNER_TEMP/mvm-home/vms" -name console.log -print0 2>/dev/null \
+            | tar --null -cf "$diag/guest-consoles.tar" --files-from=- 2>/dev/null || true
+          for log in /tmp/mvm-network-endpoint-*.log; do
+            [ -f "$log" ] && cp "$log" "$diag/"
+          done
+          ls -la "$diag"
+
+      - name: Upload builder VM diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: builder-vm-diagnostics
+          path: ${{ runner.temp }}/builder-vm-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
