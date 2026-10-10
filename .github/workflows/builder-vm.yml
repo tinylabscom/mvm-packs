@@ -85,6 +85,13 @@ jobs:
           "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" --version | \
             grep -F "mvmctl ${BUILDER_CLIENT_TAG#v}"
 
+      - name: Prepare the builder VM environment
+        run: |
+          set -euo pipefail
+          MVM_HOME="$RUNNER_TEMP/mvm-home" \
+            "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" \
+            --builder firecracker bootstrap --production
+
       - name: Stage pinned Python closure inside the builder VM
         run: |
           set -euo pipefail
