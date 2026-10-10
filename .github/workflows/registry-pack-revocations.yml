@@ -1,0 +1,263 @@
+name: Publish official pack revocations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "revocations.toml"
+      - "scripts/build-dedicated-revocations.py"
+      - ".github/workflows/registry-pack-revocations.yml"
+  schedule:
+    - cron: "17 */12 * * *"
+  workflow_dispatch:
+    inputs:
+      authorize_bootstrap:
+        description: Explicitly authorize creation of the initial sequence-1 release only
+        required: true
+        type: boolean
+        default: false
+
+permissions: {}
+concurrency:
+  group: official-pack-revocations
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    if: github.repository == 'tinylabscom/mvm-packs' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDENTITY: https://github.com/tinylabscom/mvm-packs/.github/workflows/registry-pack-revocations.yml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+      RELEASE_TAG: registry-pack-revocations
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install verified cosign v3
+        env:
+          COSIGN_V3_VERSION: v3.1.1
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64 "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64.sigstore.json "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+          cosign version
+      - name: Build from verified immutable history or explicitly authorized bootstrap
+        env:
+          AUTHORIZE_BOOTSTRAP: ${{ inputs.authorize_bootstrap }}
+        run: |
+          set -euo pipefail
+          history="$RUNNER_TEMP/revocation-history"
+          mkdir -p "$history"
+          set +e
+          response="$(gh api -i "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>&1)"
+          result=$?
+          set -e
+          http_status="$(printf '%s\n' "$response" | awk '/^HTTP\// {status=$2} END {print status}')"
+          if [ "$result" -eq 0 ]; then
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]' > "$RUNNER_TEMP/revocation-assets.json"
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'revocations*' --dir "$history"
+            python3 scripts/build-dedicated-revocations.py \
+              --history "$history" --asset-names "$RUNNER_TEMP/revocation-assets.json" \
+              --source revocations.toml --prepare "$RUNNER_TEMP/revocations.json" \
+              --previous-output "$RUNNER_TEMP/previous.json"
+            previous_sequence="$(jq -er .sequence "$RUNNER_TEMP/previous.json")"
+            previous_document="$RUNNER_TEMP/previous.json"
+          elif [ "$http_status" = 404 ]; then
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$AUTHORIZE_BOOTSTRAP" != true ]; then
+              echo 'Initial official revocation publication requires manual workflow dispatch with authorize_bootstrap=true.' >&2
+              exit 1
+            fi
+            test ! -e "$history/revocations.json"
+            python3 scripts/build-dedicated-revocations.py \
+              --source revocations.toml --build-initial "$RUNNER_TEMP/revocations.json"
+            previous_sequence=bootstrap
+            previous_document=
+            printf '[]\n' > "$RUNNER_TEMP/revocation-assets.json"
+          else
+            printf '%s\n' "$response" >&2
+            echo 'Unable to establish official revocation release state.' >&2
+            exit 1
+          fi
+          cosign sign-blob --yes --new-bundle-format \
+            --bundle "$RUNNER_TEMP/revocations.sigstore.json" "$RUNNER_TEMP/revocations.json"
+          candidate_args=(--check-candidate --source revocations.toml \
+            --history "$history" --asset-names "$RUNNER_TEMP/revocation-assets.json" \
+            --document "$RUNNER_TEMP/revocations.json" --bundle "$RUNNER_TEMP/revocations.sigstore.json")
+          if [ "$previous_sequence" != bootstrap ]; then
+            candidate_args+=(--previous-document "$previous_document")
+          fi
+          sequence="$(python3 scripts/build-dedicated-revocations.py "${candidate_args[@]}")"
+          printf '%s\n' "$sequence" > "$RUNNER_TEMP/sequence"
+          cosign verify-blob --bundle "$RUNNER_TEMP/revocations.sigstore.json" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+            "$RUNNER_TEMP/revocations.json"
+          test "$(wc -c < "$RUNNER_TEMP/revocations.json")" -le 1048576
+          test "$(wc -c < "$RUNNER_TEMP/revocations.sigstore.json")" -le 1048576
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: official-revocation-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/revocations.json
+            ${{ runner.temp }}/revocations.sigstore.json
+            ${{ runner.temp }}/sequence
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: sign
+    if: github.repository == 'tinylabscom/mvm-packs' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDENTITY: https://github.com/tinylabscom/mvm-packs/.github/workflows/registry-pack-revocations.yml@refs/heads/main
+      ISSUER: https://token.actions.githubusercontent.com
+      RELEASE_TAG: registry-pack-revocations
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install verified cosign v3
+        env:
+          COSIGN_V3_VERSION: v3.1.1
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/v3.1.1"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64 "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64.sigstore.json "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: official-revocation-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate
+      - name: Verify prior history, signed candidate and release state
+        env:
+          AUTHORIZE_BOOTSTRAP: ${{ inputs.authorize_bootstrap }}
+        run: |
+          set -euo pipefail
+          candidate="$RUNNER_TEMP/candidate/revocations.json"
+          bundle="$RUNNER_TEMP/candidate/revocations.sigstore.json"
+          sequence="$(cat "$RUNNER_TEMP/candidate/sequence")"
+          cosign verify-blob --bundle "$bundle" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" "$candidate"
+          history="$RUNNER_TEMP/revocation-history"
+          mkdir -p "$history"
+          set +e
+          response="$(gh api -i "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" 2>&1)"
+          result=$?
+          set -e
+          http_status="$(printf '%s\n' "$response" | awk '/^HTTP\// {status=$2} END {print status}')"
+          if [ "$result" -eq 0 ]; then
+            gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]' > "$RUNNER_TEMP/revocation-assets.json"
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'revocations*' --dir "$history"
+            previous_sequence="$(python3 scripts/build-dedicated-revocations.py \
+              --history "$history" --asset-names "$RUNNER_TEMP/revocation-assets.json" \
+              --restore-aliases)"
+            previous_document="$history/revocations-${previous_sequence}.json"
+            python3 scripts/build-dedicated-revocations.py \
+              --history "$history" --asset-names "$RUNNER_TEMP/revocation-assets.json" \
+              --document "$candidate" --bundle "$bundle" --source revocations.toml \
+              --previous-document "$previous_document" --check-candidate >/dev/null
+            python3 - "$history" "$candidate" "$sequence" <<'PY'
+          import pathlib, sys
+          history, candidate, sequence = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
+          numbered = history / f"revocations-{sequence}.json"
+          if numbered.exists() and numbered.read_bytes() != candidate.read_bytes():
+              raise SystemExit("immutable sequence already contains different document bytes")
+          PY
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              "$history/revocations.json#revocations.json" \
+              "$history/revocations.sigstore.json#revocations.sigstore.json" --clobber
+          elif [ "$http_status" = 404 ]; then
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$AUTHORIZE_BOOTSTRAP" != true ] || [ "$sequence" != 1 ]; then
+              echo 'Missing release is not an explicitly authorized sequence-1 bootstrap.' >&2
+              exit 1
+            fi
+            printf '[]\n' > "$RUNNER_TEMP/revocation-assets.json"
+            python3 scripts/build-dedicated-revocations.py \
+              --history "$history" --asset-names "$RUNNER_TEMP/revocation-assets.json" \
+              --document "$candidate" --bundle "$bundle" --source revocations.toml --check-candidate >/dev/null
+          else
+            printf '%s\n' "$response" >&2
+            echo 'Unable to establish official revocation release state.' >&2
+            exit 1
+          fi
+          test "$(jq -er .sequence "$candidate")" = "$sequence"
+      - name: Create release only after authorized bootstrap verification
+        env:
+          AUTHORIZE_BOOTSTRAP: ${{ inputs.authorize_bootstrap }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$AUTHORIZE_BOOTSTRAP" != true ] || [ "$(cat "$RUNNER_TEMP/candidate/sequence")" != 1 ]; then
+              echo 'Refusing to create release without explicit initial-feed authorization.' >&2
+              exit 1
+            fi
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --target main --latest=false --title 'Official pack revocations' \
+              --notes 'Separately signed official MVM registry-pack revocations. Numbered sequence assets are immutable; current aliases are convenience copies.'
+          fi
+      - name: Publish immutable sequence pair then refresh aliases
+        run: |
+          set -euo pipefail
+          sequence="$(cat "$RUNNER_TEMP/candidate/sequence")"
+          document="$RUNNER_TEMP/candidate/revocations.json"
+          bundle="$RUNNER_TEMP/candidate/revocations.sigstore.json"
+          numbered_document="revocations-${sequence}.json"
+          numbered_bundle="revocations-${sequence}.sigstore.json"
+          assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]')"
+          if printf '%s' "$assets" | jq -e --arg name "$numbered_document" 'index($name) != null' >/dev/null; then
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$numbered_document" --dir "$RUNNER_TEMP/existing"
+            cmp "$document" "$RUNNER_TEMP/existing/$numbered_document"
+          else
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$document#$numbered_document"
+          fi
+          assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]')"
+          if printf '%s' "$assets" | jq -e --arg name "$numbered_bundle" 'index($name) != null' >/dev/null; then
+            gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$numbered_bundle" --dir "$RUNNER_TEMP/existing"
+            cmp "$bundle" "$RUNNER_TEMP/existing/$numbered_bundle"
+          else
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$bundle#$numbered_bundle"
+          fi
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            "$document#revocations.json" "$bundle#revocations.sigstore.json" --clobber
+      - name: Read back and verify full published history
+        run: |
+          set -euo pipefail
+          verify="$RUNNER_TEMP/published"
+          mkdir -p "$verify"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]' > "$RUNNER_TEMP/published-assets.json"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'revocations*' --dir "$verify"
+          sequence="$(python3 scripts/build-dedicated-revocations.py \
+            --history "$verify" --asset-names "$RUNNER_TEMP/published-assets.json" --verify-history)"
+          test "$sequence" = "$(cat "$RUNNER_TEMP/candidate/sequence")"
+          cosign verify-blob --bundle "$verify/revocations.sigstore.json" \
+            --certificate-identity "$IDENTITY" --certificate-oidc-issuer "$ISSUER" \
+            "$verify/revocations.json"

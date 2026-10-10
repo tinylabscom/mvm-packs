@@ -10,6 +10,7 @@ on:
       - ".github/workflows/python-candidate.yml"
       - ".github/workflows/python-source-diagnostic.yml"
       - ".github/workflows/publish.yml"
+      - ".github/workflows/registry-pack-revocations.yml"
       - ".github/workflows/validate.yml"
 
 permissions:

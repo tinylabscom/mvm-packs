@@ -389,21 +389,56 @@ and commits `packs/`. Published versions are immutable: change a source and
 the build refuses until the version in `pack.toml` is bumped. This workflow
 currently publishes policy packs only, not prepared images.
 
-The same workflow publishes a separate registry-pack revocation feed. Its
-inspectable source is `revocations.toml`: add an exact signing identity to
-`revoked_identities` or a lowercase manifest SHA-256 to `revoked_manifests`.
-Entries cannot be removed by a later release. A scheduled run refreshes the
-document every 12 hours, advancing its positive sequence and setting a 36-hour
-validity window. The sign job first verifies the previous document under the
-current release identity, then signs the new document. The separate
-contents-write job verifies the downloaded signature and checks exact sequence
-advancement against the checked-out publication before committing. The feed
-uses the existing publish workflow identity; it does not change that identity.
-An invalid, missing, expired, rolled-back, or unverifiable feed must be treated
-as unavailable trust data, not as an empty revocation list. This publisher
-change alone does not make clients enforce revocation; a client must fetch,
-verify, checkpoint, and apply the feed on install and every run before it can
-claim that guarantee.
+The ordinary publisher continues to publish a repository-local revocation
+feed under `packs/revocations.json`, signed by the pack publisher identity.
+That legacy feed is not the official MVM revocation root and must not be used
+to establish `mvm/` pack status.
+
+Official MVM packs use the separate `.github/workflows/registry-pack-revocations.yml`
+producer. Its inspectable source is `revocations.toml`: add an exact signing
+identity to `revoked_identities` or a lowercase manifest SHA-256 to
+`revoked_manifests`. Entries are append-only. The feed is published to the
+`registry-pack-revocations` GitHub release as `revocations.json` and
+`revocations.sigstore.json`; immutable numbered pairs
+`revocations-<sequence>.json` and `revocations-<sequence>.sigstore.json` form
+the verifiable sequence history. The official signer is exactly
+
+```
+https://github.com/tinylabscom/mvm-packs/.github/workflows/registry-pack-revocations.yml@refs/heads/main
+```
+
+under the GitHub Actions OIDC issuer. A separate read-only OIDC signing job
+and contents-write publishing job verify the signed candidate and read back
+the release. The schedule refreshes every 12 hours; each signed document is
+valid for at most 30 days, and clients reject it at `not_after`. Initial
+publication requires an explicit manual dispatch authorization. The producer
+refuses to bootstrap from an existing but invalid or incomplete release.
+
+If the first bootstrap fails after creating the public release but before
+uploading any assets, recovery is deliberately manual. A maintainer must verify
+that the release has zero assets and that no signed feed was published or
+consumed, then remove only that empty release and its tag before retrying the
+authorized bootstrap. Never delete a release containing any revocation assets;
+a partial or nonempty release requires investigation and authenticated history
+recovery rather than another bootstrap.
+
+GitHub release assets are mutable storage, not a cryptographic append-only
+log. The workflow verifies every retained numbered signature, contiguous
+sequence, and append-only revocation set, but cannot detect removal of an
+entire valid suffix if the release is rewritten to an older valid prefix.
+Clients must persist their own authenticated sequence high-water mark and fail
+closed on rollback. The producer's pinned identity is not silently rotatable:
+annual or compromise rotation requires an explicitly reviewed client trust
+update and at least 14 days of dual-signed overlap for identical feed bytes.
+This workflow does not yet publish dual-signed rotation bundles; do not rotate
+or replace its signer until that implementation is reviewed and compatible
+clients are released.
+
+An invalid, missing, expired, rolled-back, or unverifiable feed is unavailable
+trust data, not an empty revocation list. Producer publication alone does not
+make clients enforce revocation; consumers must fetch or receive the feed,
+verify its exact identity, persist a rollback-resistant checkpoint, and apply
+it on installation and every subsequent use.
 
 Clients verify on every use — pull, and every policy load — against the
 publisher trust policy. New packs are signed under this workflow's identity:
