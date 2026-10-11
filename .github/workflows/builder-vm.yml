@@ -17,6 +17,11 @@ jobs:
   stage-python:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # Informational until the released client can run a builder shell job
+    # with guest egress on hosted Linux/Firecracker
+    # (https://github.com/tinylabscom/mvm/issues/4298): the workflow keeps
+    # running and uploading diagnostics on failure, but does not gate.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Require usable KVM for the project builder VM
