@@ -1,0 +1,137 @@
+name: Validate Python pack builder VM
+
+on:
+  pull_request:
+    paths:
+      - "pack-sources/runtime/python/image/**"
+      - "scripts/build-python-layer.sh"
+      - "scripts/stage-python-closure.py"
+      - "tests/test_stage_python_closure.py"
+      - ".github/workflows/builder-vm.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage-python:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Informational until the released client can run a builder shell job
+    # with guest egress on hosted Linux/Firecracker
+    # (https://github.com/tinylabscom/mvm/issues/4298): the workflow keeps
+    # running and uploading diagnostics on failure, but does not gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Require usable KVM for the project builder VM
+        run: |
+          set -euo pipefail
+          if [ ! -e /dev/kvm ]; then
+            echo '::error::runner has no /dev/kvm device'
+            exit 1
+          fi
+          ls -l /dev/kvm
+          id
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            command -v setfacl
+            sudo -n setfacl -m "u:$(id -un):rw" /dev/kvm
+          fi
+          if [ ! -c /dev/kvm ] || [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo '::error::runner cannot use /dev/kvm'
+            exit 1
+          fi
+
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install verified cosign v3
+        env:
+          COSIGN_V3_VERSION: "v3.1.1"
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64 "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64.sigstore.json "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+          cosign version
+
+      - name: Verify the released builder client
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILDER_CLIENT_TAG: "v0.22.0"
+          BUILDER_CLIENT_SHA256: "502e84ea3fa1ff04b0138fb6c3cb47b3a72c730d72c8f468df55e01d99c94d64"
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/mvm-release"
+          mkdir -p "$release_dir"
+          archive=mvmctl-x86_64-unknown-linux-gnu.tar.gz
+          gh release download "$BUILDER_CLIENT_TAG" --repo tinylabscom/mvm --dir "$release_dir" \
+            -p "$archive" -p "${archive}.bundle" \
+            -p checksums-sha256.txt -p checksums-sha256.txt.bundle
+          identity="https://github.com/tinylabscom/mvm/.github/workflows/release.yml@refs/tags/${BUILDER_CLIENT_TAG}"
+          for blob in "$archive" checksums-sha256.txt; do
+            cosign verify-blob "$release_dir/$blob" \
+              --bundle "$release_dir/${blob}.bundle" \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          done
+          expected=$(awk -v name="$archive" '$2 == name || $2 == "*" name {print $1}' \
+            "$release_dir/checksums-sha256.txt")
+          test "${#expected}" -eq 64
+          actual=$(sha256sum "$release_dir/$archive" | cut -d ' ' -f 1)
+          test "$actual" = "$expected"
+          test "$actual" = "$BUILDER_CLIENT_SHA256"
+          tar -C "$RUNNER_TEMP" -xzf "$release_dir/$archive"
+          "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" --version | \
+            grep -F "mvmctl ${BUILDER_CLIENT_TAG#v}"
+
+      - name: Prepare the builder VM environment
+        run: |
+          set -euo pipefail
+          MVM_HOME="$RUNNER_TEMP/mvm-home" \
+            "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" \
+            --builder firecracker bootstrap --production
+
+      - name: Stage pinned Python closure inside the builder VM
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/mvm-python-stage"
+          mkdir -p "$output"
+          MVM_HOME="$RUNNER_TEMP/mvm-home" \
+            "$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl" \
+            --builder firecracker __builder-shell-job \
+            --script "$GITHUB_WORKSPACE/scripts/build-python-layer.sh" \
+            --work-dir "$GITHUB_WORKSPACE" \
+            --artifact-out "$output"
+          test -s "$output/python-tree.tar"
+          tar -tf "$output/python-tree.tar" | grep -Fx 'root/bin/python3'
+          tar -tf "$output/python-tree.tar" | \
+            grep -Eq '^root/nix/store/[a-z0-9]+-python3-3[.]12[.]13/bin/python3$'
+          sha256sum "$output/python-tree.tar"
+
+      - name: Collect builder VM diagnostics on failure
+        if: failure()
+        run: |
+          set -euo pipefail
+          diag="$RUNNER_TEMP/builder-vm-diagnostics"
+          mkdir -p "$diag"
+          find "$RUNNER_TEMP/mvm-home/vms" -name console.log -print0 2>/dev/null \
+            | tar --null -cf "$diag/guest-consoles.tar" --files-from=- 2>/dev/null || true
+          for log in /tmp/mvm-network-endpoint-*.log; do
+            [ -f "$log" ] && cp "$log" "$diag/"
+          done
+          ls -la "$diag"
+
+      - name: Upload builder VM diagnostics
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: builder-vm-diagnostics
+          path: ${{ runner.temp }}/builder-vm-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
