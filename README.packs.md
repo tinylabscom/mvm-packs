@@ -234,7 +234,11 @@ rechecks the current lock after staging. After the
 builder completes, `build-python-sidecar.py` requires the reviewed SHA-256 of
 the image-set/v0.2.4 base metadata asset and its exact known claims, then adds
 only the boot argv and libc measured from the pinned base and final composed
-ext4. The base metadata asset is not a member of the signed image-set root;
+ext4. The runner writes `mvm-meta.json` beside `pack.toml` in its private
+`python-image-work/pack-sources/runtime/python/` copy, and uses that same pack
+source for sidecar generation, signing, and release staging. The signer still
+rejects a sidecar outside that sibling path or a linked or non-regular file.
+The base metadata asset is not a member of the signed image-set root;
 its reviewed digest is a separate producer-code pin, not a claim that the
 image-set signature covers it. A different base release needs a new reviewed
 pin and fresh measurements. The job does not upload an image release, create

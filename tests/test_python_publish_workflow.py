@@ -46,7 +46,7 @@ class PythonPublishWorkflowTests(unittest.TestCase):
         positions = [runner.index(item) for item in ordered]
         self.assertEqual(positions, sorted(positions))
         self.assertIn("default-microvm-meta-x86_64.json", runner)
-        self.assertIn('sidecar="$RUNNER_TEMP/python-mvm-meta.json"', runner)
+        self.assertIn('sidecar="${pack_source%/*}/mvm-meta.json"', runner)
         self.assertIn('--mvm-meta "$sidecar"', runner)
         self.assertIn('"$evidence/rootfs.ext4"', runner)
         self.assertIn('"$evidence/mvm-meta.json"', runner)

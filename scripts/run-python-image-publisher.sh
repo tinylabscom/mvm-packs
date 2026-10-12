@@ -86,12 +86,13 @@ candidate="$output_dir/python-image"
 test -s "$candidate/candidate.json"
 test -s "$candidate/composition/rootfs.ext4"
 test -s "$candidate/composition/composition.json"
-sidecar="$RUNNER_TEMP/python-mvm-meta.json"
+pack_source="$work_dir/pack-sources/runtime/python/pack.toml"
+sidecar="${pack_source%/*}/mvm-meta.json"
 python3 scripts/build-python-sidecar.py \
   --base-meta "$base_dir/default-microvm-meta-x86_64.json" \
   --base-rootfs "$base_dir/default-microvm-rootfs-x86_64.ext4" \
   --composed-rootfs "$candidate/composition/rootfs.ext4" \
-  --pack-source pack-sources/runtime/python/pack.toml \
+  --pack-source "$pack_source" \
   --output "$sidecar"
 reference=$(python3 -c 'import pathlib,tomllib; p=pathlib.Path("pack-sources/runtime/python/pack.toml"); print("runtime/python@" + tomllib.loads(p.read_text())["version"])')
 [[ "$reference" =~ ^runtime/python@[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -103,7 +104,7 @@ python3 scripts/sign-composed-image.py \
   --candidate-report "$candidate/candidate.json" \
   --reference "$reference" \
   --mvm-images-lock "$RUNNER_TEMP/images.lock" \
-  --pack-source pack-sources/runtime/python/pack.toml \
+  --pack-source "$pack_source" \
   --mvm-meta "$sidecar" \
   --output "$evidence"
 test -s "$evidence/image-evidence.sigstore.json"
@@ -116,7 +117,7 @@ release_stage="$RUNNER_TEMP/python-image-release-stage"
 python3 scripts/stage-image-release.py \
   --evidence "$evidence" \
   --reference "$reference" \
-  --pack-source pack-sources/runtime/python/pack.toml \
+  --pack-source "$pack_source" \
   --mvm-images-lock "$RUNNER_TEMP/images.lock" \
   --output "$release_stage"
 assert_current_lock
