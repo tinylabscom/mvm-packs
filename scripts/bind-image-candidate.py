@@ -28,20 +28,31 @@ def directory(path, label):
         raise CandidateError(f"{label} must be a directory, not a link")
 
 
-def copy_regular(source, target):
+def copy_regular(source, target, *, max_bytes=None):
     """Copy an exact leaf through a no-follow descriptor into private storage."""
     nofollow = getattr(os, "O_NOFOLLOW", None)
-    if nofollow is None:
-        raise CandidateError("no-follow file copying is unavailable")
-    descriptor = os.open(source, os.O_RDONLY | nofollow)
+    nonblock = getattr(os, "O_NONBLOCK", None)
+    if not nofollow or not nonblock:
+        raise CandidateError("no-follow nonblocking file copying is unavailable")
+    expected = source.lstat()
+    descriptor = os.open(source, os.O_RDONLY | nofollow | nonblock)
     try:
-        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise CandidateError(f"input is not a regular file: {source}")
+        info = os.fstat(descriptor)
+        if (not stat.S_ISREG(info.st_mode)
+                or (info.st_dev, info.st_ino, info.st_size) != (
+                    expected.st_dev, expected.st_ino, expected.st_size)):
+            raise CandidateError(f"input changed or is not a regular file: {source}")
+        if max_bytes is not None and info.st_size > max_bytes:
+            raise CandidateError(f"input exceeds copy bound: {source}")
         target_descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
         try:
             with os.fdopen(descriptor, "rb", closefd=False) as input_file, \
                     os.fdopen(target_descriptor, "wb", closefd=False) as output_file:
+                copied = 0
                 for chunk in iter(lambda: input_file.read(1024 * 1024), b""):
+                    copied += len(chunk)
+                    if max_bytes is not None and copied > max_bytes:
+                        raise CandidateError(f"input grew beyond copy bound: {source}")
                     output_file.write(chunk)
         finally:
             os.close(target_descriptor)

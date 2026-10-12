@@ -355,6 +355,14 @@ checks release metadata and tag target. The command is not wired into the
 publisher workflow yet, so serialization or a local command run is not
 evidence of a published pack or live client acceptance.
 
+The [publication-only observed witness contract](docs/observed-publication-witness.md)
+is a separate verifier-only review slice. It binds signed candidate evidence,
+protected source/run identity, released-client input hashes, the exact image
+lock, backend-specific trusted policy, both probe modes and retained raw
+results. It does not produce runtime evidence, sign imported reports, authorize
+publication, or change consumer admission. Its documented missing observer APIs
+must be supplied before release-job integration.
+
 ### Pack image composition v1
 
 The build type named in that statement is the `compose-pack-image.py` operation
