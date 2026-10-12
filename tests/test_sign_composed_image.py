@@ -3,6 +3,9 @@
 import hashlib
 import importlib.util
 import json
+import os
+import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -142,6 +145,95 @@ class SigningTests(unittest.TestCase):
     def fake_verify(self, blob, bundle):
         if bundle.read_bytes() != hashlib.sha256(blob.read_bytes()).hexdigest().encode():
             raise stager.StageError("publisher signature verification failed")
+
+    def test_runner_metadata_interface_reaches_real_signer_and_stager(self):
+        runner = SCRIPT.with_name("run-python-image-publisher.sh").read_text()
+        # Execute the real post-builder lane with bounded host-tool stand-ins.
+        # Then feed its captured interfaces to the real signer and stager.
+        self.composed.rename(self.root / "composition")
+        self.composed = self.root / "composition"
+        evidence = self.root / "signed-python-image"
+        log = self.root / "calls"
+        prefix = r'''
+set -euo pipefail
+candidate="$RUNNER_TEMP"
+work_dir="$RUNNER_TEMP"
+base_dir="$RUNNER_TEMP/base"
+assert_current_lock() { :; }
+python3() {
+  printf '%s\n' "$*" >> "$RUNNER_TEMP/calls"
+  case "$1" in
+    -c) printf 'runtime/python@1.1.0\n' ;;
+    scripts/sign-composed-image.py)
+      mkdir "$RUNNER_TEMP/signed-python-image"
+      printf mock > "$RUNNER_TEMP/signed-python-image/image-evidence.sigstore.json"
+      ;;
+  esac
+}
+'''
+        suffix = runner[runner.index('test -s "$candidate/candidate.json"'):]
+        result = subprocess.run(
+            ["bash", "-c", prefix + suffix],
+            env={**os.environ, "RUNNER_TEMP": str(self.root)},
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [shlex.split(line) for line in log.read_text().splitlines()]
+        interfaces = {}
+        for script in ("build-python-sidecar.py", "sign-composed-image.py",
+                       "stage-image-release.py"):
+            args = next(call for call in calls if call[0] == f"scripts/{script}")
+            interfaces[script] = dict(zip(args[1::2], args[2::2]))
+            source = Path(args[args.index("--pack-source") + 1])
+            self.assertEqual(source.resolve(), self.pack_source.resolve())
+            if script != "stage-image-release.py":
+                option = "--output" if script == "build-python-sidecar.py" else "--mvm-meta"
+                metadata = Path(args[args.index(option) + 1])
+                self.assertEqual(metadata, source.with_name("mvm-meta.json"))
+        (evidence / "image-evidence.sigstore.json").unlink()
+        evidence.rmdir()
+        args = interfaces["sign-composed-image.py"]
+        with mock.patch.object(signer, "sign_and_verify", side_effect=self.fake_sign):
+            signer.prepare(
+                args["--composition"], args["--candidate-report"], args["--reference"],
+                args["--output"], self.environment, args["--mvm-images-lock"],
+                args["--pack-source"], args["--mvm-meta"],
+            )
+        args = interfaces["stage-image-release.py"]
+        with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
+            stager.stage(args["--evidence"], args["--reference"], args["--pack-source"],
+                         args["--mvm-images-lock"], args["--output"])
+        self.assertTrue(Path(args["--output"]).is_dir())
+
+    def test_wrong_path_link_or_directory_sidecar_refuses_before_signing(self):
+        original = self.mvm_meta
+        wrong = self.root / "mvm-meta.json"
+        wrong.write_bytes(original.read_bytes())
+        link = self.source / "linked-meta.json"
+        link.symlink_to(original)
+        for path in (wrong, link):
+            with self.subTest(path=path), mock.patch.object(signer, "sign_and_verify") as called:
+                self.mvm_meta = path
+                with self.assertRaisesRegex(signer.SigningError, "beside the pack source"):
+                    self.prepare()
+                called.assert_not_called()
+        self.mvm_meta = original
+        body = original.read_bytes()
+        original.unlink()
+        for kind in ("link", "directory"):
+            if kind == "link":
+                original.symlink_to(wrong)
+            else:
+                original.mkdir()
+            with self.subTest(kind=kind), mock.patch.object(signer, "sign_and_verify") as called:
+                with self.assertRaisesRegex(signer.SigningError, "linked or special"):
+                    self.prepare()
+                called.assert_not_called()
+            if kind == "link":
+                original.unlink()
+            else:
+                original.rmdir()
+        original.write_bytes(body)
 
     def test_signed_image_release_stages_exact_measured_assets(self):
         release = self.signed_stage()
