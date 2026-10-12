@@ -193,8 +193,8 @@ jobs:
               raise SystemExit("immutable sequence already contains different document bytes")
           PY
             gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              "$history/revocations.json#revocations.json" \
-              "$history/revocations.sigstore.json#revocations.sigstore.json" --clobber
+              "$history/revocations.json" \
+              "$history/revocations.sigstore.json" --clobber
           elif [ "$http_status" = 404 ]; then
             if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$AUTHORIZE_BOOTSTRAP" != true ] || [ "$sequence" != 1 ]; then
               echo 'Missing release is not an explicitly authorized sequence-1 bootstrap.' >&2
@@ -232,22 +232,27 @@ jobs:
           bundle="$RUNNER_TEMP/candidate/revocations.sigstore.json"
           numbered_document="revocations-${sequence}.json"
           numbered_bundle="revocations-${sequence}.sigstore.json"
+          # gh's # suffix sets a display label, not the uploaded asset name.
+          # Stage real numbered basenames in a private runner directory.
+          upload="$(mktemp -d "$RUNNER_TEMP/revocation-upload.XXXXXX")"
+          cp "$document" "$upload/$numbered_document"
+          cp "$bundle" "$upload/$numbered_bundle"
           assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]')"
           if printf '%s' "$assets" | jq -e --arg name "$numbered_document" 'index($name) != null' >/dev/null; then
             gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$numbered_document" --dir "$RUNNER_TEMP/existing"
             cmp "$document" "$RUNNER_TEMP/existing/$numbered_document"
           else
-            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$document#$numbered_document"
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$upload/$numbered_document"
           fi
           assets="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]')"
           if printf '%s' "$assets" | jq -e --arg name "$numbered_bundle" 'index($name) != null' >/dev/null; then
             gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern "$numbered_bundle" --dir "$RUNNER_TEMP/existing"
             cmp "$bundle" "$RUNNER_TEMP/existing/$numbered_bundle"
           else
-            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$bundle#$numbered_bundle"
+            gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$upload/$numbered_bundle"
           fi
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            "$document#revocations.json" "$bundle#revocations.sigstore.json" --clobber
+            "$document" "$bundle" --clobber
       - name: Read back and verify full published history
         run: |
           set -euo pipefail
