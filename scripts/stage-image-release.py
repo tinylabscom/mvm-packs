@@ -22,6 +22,8 @@ EVIDENCE_NAMES = RELEASE_NAMES | frozenset((
     "asset-report.json", "composition.json", "candidate.json",
     "image-descriptor.json", "image-evidence.json", "image-evidence.sigstore.json",
 ))
+MAX_METADATA_BYTES = 1024 * 1024
+LARGE_IMAGE_NAMES = frozenset(("rootfs.ext4", "rootfs.verity"))
 
 
 class StageError(Exception):
@@ -191,13 +193,15 @@ def stage(evidence_dir, reference, source, images_lock, output):
             raise StageError("signed evidence has missing or extra files")
         try:
             for name in sorted(EVIDENCE_NAMES):
-                binder.copy_regular(evidence_dir / name, snapshot / name)
+                binder.copy_regular(
+                    evidence_dir / name, snapshot / name,
+                    max_bytes=None if name in LARGE_IMAGE_NAMES else MAX_METADATA_BYTES)
             copied_source = (Path(temporary) / "pack-sources" /
                              source.parent.parent.name / source.parent.name / "pack.toml")
             copied_source.parent.mkdir(parents=True, mode=0o700)
             copied_lock = Path(temporary) / "images.lock"
-            binder.copy_regular(source, copied_source)
-            binder.copy_regular(images_lock, copied_lock)
+            binder.copy_regular(source, copied_source, max_bytes=MAX_METADATA_BYTES)
+            binder.copy_regular(images_lock, copied_lock, max_bytes=MAX_METADATA_BYTES)
         except (OSError, binder.CandidateError) as error:
             raise StageError("input snapshot refused a missing, linked or special file") from error
         check_evidence(snapshot, reference, copied_source, copied_lock)
