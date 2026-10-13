@@ -316,7 +316,8 @@ and descriptor without overwriting an existing path. Advancing the base lock
 refuses this staging step for the old pin; a new pack version must be rebuilt
 and signed. This command does not authenticate the caller-supplied mvm checkout,
 upload a GitHub release, publish a registry manifest, or prove a live boot.
-The image-publication refusal remains in force.
+The later publication lanes rerun this same gate on the downloaded evidence
+rather than accepting the signing job's staged copy.
 
 `scripts/upload-image-release.py` consumes the signed evidence through that
 staging gate under the main `publish.yml` workflow identity. It requires the
@@ -331,10 +332,9 @@ source commit, asset metadata, downloaded bytes and tag target still match the
 signed staging input. An orphan tag/release, partial draft or mismatch refuses
 without modifying remote state; no asset is overwritten. The command reads
 the published release back before reporting
-success. It is not wired into the signing job, does not publish the signed
-registry manifest, and does not make the image pullable. A separate publication
-lane still needs a truthful live boot check, release and registry readback,
-and a released-client witness before lifting the registry guard.
+success. The `release_python_image` lane runs it only after the boot lane
+passes (see [Image publication lanes](#image-publication-lanes)). It does not
+publish the signed registry manifest and does not make the image pullable.
 
 Before a signed registry manifest can name an uploaded image, the producer
 must independently recheck the published release. The
@@ -351,9 +351,81 @@ registry version without replacing an existing one. The validator refuses
 built images unless publisher-signature verification is enabled; with it,
 validation downloads and hashes every public release asset, verifies the
 rootfs and provenance signatures and their image/base/source bindings, and
-checks release metadata and tag target. The command is not wired into the
-publisher workflow yet, so serialization or a local command run is not
-evidence of a published pack or live client acceptance.
+checks release metadata and tag target. The `publish_python_pack` lane runs
+it after the release lane; a local command run is not evidence of a
+published pack or live client acceptance.
+
+### Image publication lanes
+
+A manual `publish.yml` dispatch on `main` with `mvmctl_tag` and
+`mvmctl_archive_sha256` takes the `runtime/python` image through four jobs.
+Each job needs the previous one, so any refusal stops everything after it.
+The catalogue jobs do not run in that dispatch, and the workflow-level
+`signed-pack-publisher` concurrency group keeps image and catalogue runs
+from overlapping.
+
+The signing job's workflow artifact is input, not authority. Every later job
+downloads the released client again with `scripts/fetch-released-mvmctl.sh`
+(both Sigstore bundles under the mvm `release.yml` tag identity, the signed
+checksum, and the dispatched archive digest) when it runs the client. It also
+fetches the current mvm `images.lock` again with
+`scripts/fetch-current-images-lock.sh` and re-stages the downloaded evidence
+through `stage-image-release.py`. That rehashes every asset and verifies the
+rootfs, provenance and evidence bundles under the publisher identity. If mvm
+moves its base lock between jobs, staging refuses, because the signed
+provenance names the old lock.
+
+1. `sign_python_image` (`contents: read`, `id-token: write`, KVM) is the
+   signing job described above. It uploads only the signed evidence.
+2. `boot_python_image` (`contents: read`, KVM) runs
+   `scripts/run-python-image-boot-probe.sh`. It copies the re-staged
+   `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash` and `mvm-meta.json`
+   into a private deployment directory. It writes the `deploy.json` that
+   `mvmctl run --deployment` requires with `scripts/write-deployment-record.py`,
+   using the descriptor's SHA-256 and a BLAKE3 from `b3sum`. The client
+   rehashes the rootfs against both values before boot. The job then runs
+   `mvmctl bootstrap` under a private `MVM_HOME`. That fetches the workload
+   kernel from the client's own pinned image set and the guest runtime its
+   release ships. Finally it runs:
+
+   ```sh
+   timeout --kill-after=30 600 mvmctl run --deployment DIR --timeout 120 -- /bin/python3 --version
+   ```
+
+   `scripts/check-python-boot-probe.py` accepts the run only if the command
+   exited 0, printed exactly one `Python 3.12.N` line, and the booted files
+   still match the signed descriptor. It always writes `boot-probe.json` and
+   keeps the raw streams as a 30-day `python-image-boot-probe-` artifact.
+
+   The client finds the verity tree and root hash beside the rootfs. It boots
+   on its bootstrapped workload kernel, not one this repository supplies.
+
+   This lane proves that the released client admitted these exact signed bytes
+   and that CPython ran in the guest. It does not prove the sealed baked
+   entrypoint, egress policy, persistence or cleanup. It is not the
+   [observed publication witness](docs/observed-publication-witness.md), and
+   its report is unsigned.
+
+   The probe is an ad-hoc guest command. A sealed image whose
+   `/etc/mvm/verb-trust.json` requires a verb grant refuses ad-hoc commands
+   unless the client delivers a grant for them. If the released client
+   refuses, the lane stops there. That refusal is the gate working, not a
+   reason to weaken the probe.
+3. `release_python_image` (`contents: write` only, no signing identity) runs
+   `upload-image-release.py`: draft release at the dispatched commit,
+   byte-for-byte readback, tag check, publication and public readback.
+4. `publish_python_pack` (`contents: write`, `id-token: write`) runs
+   `publish-image-pack.py`, which re-verifies the public release before it
+   signs the registry manifest and creates the immutable version. Next it runs
+   `validate-packs.py --verify-signatures --require-revocations`. Then
+   `scripts/commit-image-pack.sh` commits only that version directory and
+   `packs/index.json`. If `main` moved while the run waited or ran, the
+   commit is replayed onto it, the index is rebuilt and must match, and the
+   registry is validated again before the push. A conflict refuses.
+
+A release published by step 3 is immutable. If step 4 then fails, rerun that
+job. A fresh dispatch from a later commit refuses the existing release,
+because its target commit differs.
 
 The [publication-only observed witness contract](docs/observed-publication-witness.md)
 is a separate verifier-only review slice. It binds signed candidate evidence,
@@ -398,8 +470,9 @@ changes. It builds manifests (SHA-256 and size per file), signs each manifest
 keyless with `cosign sign-blob` while the run's OIDC identity is
 `refs/heads/main`, validates the layout with `scripts/validate-packs.py`,
 and commits `packs/`. Published versions are immutable: change a source and
-the build refuses until the version in `pack.toml` is bumped. This workflow
-currently publishes policy packs only, not prepared images.
+the build refuses until the version in `pack.toml` is bumped. The push and
+scheduled runs publish policy packs only. A manual dispatch with a client
+release runs the image publication lanes below instead.
 
 The ordinary publisher continues to publish a repository-local revocation
 feed under `packs/revocations.json`, signed by the pack publisher identity.
