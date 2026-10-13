@@ -28,7 +28,7 @@ def directory(path, label):
         raise CandidateError(f"{label} must be a directory, not a link")
 
 
-def copy_regular(source, target, *, max_bytes=None):
+def copy_regular(source, target, *, max_bytes=None, target_dir_fd=None):
     """Copy an exact leaf through a no-follow descriptor into private storage."""
     nofollow = getattr(os, "O_NOFOLLOW", None)
     nonblock = getattr(os, "O_NONBLOCK", None)
@@ -44,7 +44,8 @@ def copy_regular(source, target, *, max_bytes=None):
             raise CandidateError(f"input changed or is not a regular file: {source}")
         if max_bytes is not None and info.st_size > max_bytes:
             raise CandidateError(f"input exceeds copy bound: {source}")
-        target_descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
+        target_descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
+                                    0o600, dir_fd=target_dir_fd)
         try:
             with os.fdopen(descriptor, "rb", closefd=False) as input_file, \
                     os.fdopen(target_descriptor, "wb", closefd=False) as output_file:

@@ -134,15 +134,21 @@ def same_bytes(first, second):
                 return True
 
 
-def publish_noclobber(source, destination):
+def publish_noclobber(source, destination, *, source_dir_fd=None, destination_dir_fd=None):
     """Atomically rename a directory without replacing any existing entry."""
     libc = ctypes.CDLL(None, use_errno=True)
     old = os.fsencode(source)
     new = os.fsencode(destination)
     if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
-        result = libc.renameat2(-100, old, -100, new, 1)  # RENAME_NOREPLACE
+        result = libc.renameat2(
+            -100 if source_dir_fd is None else source_dir_fd, old,
+            -100 if destination_dir_fd is None else destination_dir_fd, new,
+            1)  # RENAME_NOREPLACE
     elif sys.platform == "darwin" and hasattr(libc, "renameatx_np"):
-        result = libc.renameatx_np(-2, old, -2, new, 4)  # RENAME_EXCL
+        result = libc.renameatx_np(
+            -2 if source_dir_fd is None else source_dir_fd, old,
+            -2 if destination_dir_fd is None else destination_dir_fd, new,
+            4)  # RENAME_EXCL
     else:
         raise ReproductionError("atomic no-clobber directory publication is unavailable")
     if result != 0:
