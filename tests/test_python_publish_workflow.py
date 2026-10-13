@@ -35,8 +35,8 @@ class PythonPublishWorkflowTests(unittest.TestCase):
     def test_reproduction_precedes_signing_without_release_or_registry_write(self):
         runner = RUNNER.read_text()
         ordered = (
-            "checksums-sha256.txt.bundle",
-            "crates/mvm-core/images.lock",
+            "fetch-released-mvmctl.sh",
+            "fetch-current-images-lock.sh",
             "__builder-shell-job",
             "build-python-sidecar.py",
             "sign-composed-image.py",

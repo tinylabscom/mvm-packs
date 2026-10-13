@@ -8,52 +8,22 @@ set -euo pipefail
 [[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
 [[ -d "$RUNNER_TEMP" ]]
 
-release_dir="$RUNNER_TEMP/mvmctl-release"
 base_dir="$RUNNER_TEMP/image-set-release"
 work_dir="$RUNNER_TEMP/python-image-work"
 output_dir="$RUNNER_TEMP/python-image-output"
-mkdir -p "$release_dir" "$base_dir" "$work_dir/pack-sources/runtime" \
+mkdir -p "$base_dir" "$work_dir/pack-sources/runtime" \
   "$work_dir/base" "$output_dir"
 
-archive=mvmctl-x86_64-unknown-linux-gnu.tar.gz
-gh release download "$MVMCTL_TAG" --repo tinylabscom/mvm --dir "$release_dir" \
-  -p "$archive" -p "${archive}.bundle" \
-  -p checksums-sha256.txt -p checksums-sha256.txt.bundle
-identity="https://github.com/tinylabscom/mvm/.github/workflows/release.yml@refs/tags/${MVMCTL_TAG}"
-for blob in "$archive" checksums-sha256.txt; do
-  cosign verify-blob "$release_dir/$blob" \
-    --bundle "$release_dir/${blob}.bundle" \
-    --certificate-identity "$identity" \
-    --certificate-oidc-issuer https://token.actions.githubusercontent.com
-done
-expected=$(awk -v name="$archive" '$2 == name || $2 == "*" name {print $1}' \
-  "$release_dir/checksums-sha256.txt")
-[[ "$expected" =~ ^[0-9a-f]{64}$ ]]
-actual=$(sha256sum "$release_dir/$archive" | cut -d ' ' -f 1)
-test "$actual" = "$expected"
-test "$actual" = "$MVMCTL_ARCHIVE_SHA256"
-tar -C "$RUNNER_TEMP" -xzf "$release_dir/$archive"
-binary="$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl"
-test -x "$binary"
-"$binary" --version | grep -Fx "mvmctl ${MVMCTL_TAG#v}"
-
-fetch_current_lock() {
-  local sha destination
-  destination=$1
-  sha=$(gh api repos/tinylabscom/mvm/commits/main --jq .sha)
-  [[ "$sha" =~ ^[0-9a-f]{40}$ ]]
-  gh api -H 'Accept: application/vnd.github.raw+json' \
-    "repos/tinylabscom/mvm/contents/crates/mvm-core/images.lock?ref=$sha" \
-    > "$destination"
-  test -s "$destination"
-}
+# Verifies both Sigstore bundles, the signed checksum and the dispatch digest.
+binary=$(bash scripts/fetch-released-mvmctl.sh)
 
 assert_current_lock() {
-  fetch_current_lock "$RUNNER_TEMP/images.lock-current"
+  rm -f "$RUNNER_TEMP/images.lock-current"
+  bash scripts/fetch-current-images-lock.sh "$RUNNER_TEMP/images.lock-current"
   cmp -s "$RUNNER_TEMP/images.lock" "$RUNNER_TEMP/images.lock-current"
 }
 
-fetch_current_lock "$RUNNER_TEMP/images.lock"
+bash scripts/fetch-current-images-lock.sh "$RUNNER_TEMP/images.lock"
 set_tag=$(python3 -c 'import pathlib,tomllib; p=pathlib.Path("pack-sources/runtime/python/pack.toml"); print(tomllib.loads(p.read_text())["image_build"]["base_set"]["release_tag"])')
 [[ "$set_tag" =~ ^image-set/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
 gh release download "$set_tag" --repo tinylabscom/mvm-images --dir "$base_dir" \
