@@ -16,7 +16,8 @@ RUNNER = ROOT / "scripts/run-python-image-publisher.sh"
 class PythonPublishWorkflowTests(unittest.TestCase):
     def test_image_lane_is_manual_main_only_and_uses_the_publisher_identity(self):
         workflow = PUBLISH.read_text()
-        image_job = workflow.split("  sign_python_image:\n", 1)[1]
+        image_job = workflow.split("  sign_python_image:\n", 1)[1].split(
+            "\n  boot_python_image:\n", 1)[0]
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("mvmctl_tag:", workflow)
         self.assertIn("mvmctl_archive_sha256:", workflow)

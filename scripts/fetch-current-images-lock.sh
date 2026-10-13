@@ -11,7 +11,7 @@ if [[ -e "$destination" || -L "$destination" ]]; then
   exit 1
 fi
 sha=$(gh api repos/tinylabscom/mvm/commits/main --jq .sha)
-[[ "$sha" =~ ^[0-9a-f]{40}$ ]]
+[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || exit 1
 gh api -H 'Accept: application/vnd.github.raw+json' \
   "repos/tinylabscom/mvm/contents/crates/mvm-core/images.lock?ref=$sha" \
   > "$destination"

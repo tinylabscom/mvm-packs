@@ -7,9 +7,9 @@
 # cosign v3 on PATH. Prints the verified executable's path on stdout.
 set -euo pipefail
 
-[[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
-[[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-[[ -d "$RUNNER_TEMP" ]]
+[[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+[[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+[[ -d "$RUNNER_TEMP" ]] || exit 1
 
 release_dir="$RUNNER_TEMP/mvmctl-release"
 unpack_dir="$RUNNER_TEMP/mvmctl-unpacked"
@@ -32,7 +32,7 @@ for blob in "$archive" checksums-sha256.txt; do
 done
 expected=$(awk -v name="$archive" '$2 == name || $2 == "*" name {print $1}' \
   "$release_dir/checksums-sha256.txt")
-[[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+[[ "$expected" =~ ^[0-9a-f]{64}$ ]] || exit 1
 actual=$(sha256sum "$release_dir/$archive" | cut -d ' ' -f 1)
 test "$actual" = "$expected"
 test "$actual" = "$MVMCTL_ARCHIVE_SHA256"

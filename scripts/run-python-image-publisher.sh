@@ -2,11 +2,11 @@
 # Run only from publish.yml on main; the signer checks the workflow identity.
 set -euo pipefail
 
-[[ "$GITHUB_REF" == refs/heads/main ]]
-[[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
-[[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
-[[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
-[[ -d "$RUNNER_TEMP" ]]
+[[ "$GITHUB_REF" == refs/heads/main ]] || exit 1
+[[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || exit 1
+[[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+[[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+[[ -d "$RUNNER_TEMP" ]] || exit 1
 
 base_dir="$RUNNER_TEMP/image-set-release"
 work_dir="$RUNNER_TEMP/python-image-work"
@@ -25,7 +25,7 @@ assert_current_lock() {
 
 bash scripts/fetch-current-images-lock.sh "$RUNNER_TEMP/images.lock"
 set_tag=$(python3 -c 'import pathlib,tomllib; p=pathlib.Path("pack-sources/runtime/python/pack.toml"); print(tomllib.loads(p.read_text())["image_build"]["base_set"]["release_tag"])')
-[[ "$set_tag" =~ ^image-set/v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$set_tag" =~ ^image-set/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
 gh release download "$set_tag" --repo tinylabscom/mvm-images --dir "$base_dir" \
   -p image-set.json -p image-set.json.bundle \
   -p default-microvm-vmlinux-x86_64 \
@@ -65,7 +65,7 @@ python3 scripts/build-python-sidecar.py \
   --pack-source "$pack_source" \
   --output "$sidecar"
 reference=$(python3 -c 'import pathlib,tomllib; p=pathlib.Path("pack-sources/runtime/python/pack.toml"); print("runtime/python@" + tomllib.loads(p.read_text())["version"])')
-[[ "$reference" =~ ^runtime/python@[0-9]+\.[0-9]+\.[0-9]+$ ]]
+[[ "$reference" =~ ^runtime/python@[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
 assert_current_lock
 
 evidence="$RUNNER_TEMP/signed-python-image"
