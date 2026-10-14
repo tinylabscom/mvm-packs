@@ -1,0 +1,9 @@
+name = "agent-claude-runtime"
+description = "Python + Node runtime scaffold with signed Claude policy; no agent client installed."
+default_vcpus = 2
+default_memory_mib = 1024
+tags = ["agent", "claude", "runtime-scaffold"]
+files = ["app/check-runtime.sh", "SETUP.md"]
+
+[policy]
+profile = "policy/profile.toml"

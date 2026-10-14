@@ -1,0 +1,2 @@
+description = "Runtime scaffold inheriting the signed Codex agent policy."
+extends = "agent/codex@1.0.0"

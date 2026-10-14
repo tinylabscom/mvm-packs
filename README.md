@@ -137,6 +137,24 @@ repo if you are also changing `mvmctl` code.
 
 ## Local testing
 
+The `agent-{claude,codex,goose,opencode}-runtime` templates are **runtime
+scaffolds**, not installed coding agents. They ship a real version-check
+entrypoint, pinned direct Nix inputs, and a local profile extending an existing
+exact-version signed agent pack, without copying its permissions. Read each
+template's `SETUP.md` for trust/pull prerequisites, required secrets, and the
+remaining client installation/authentication work. Their guest builds and
+agent sessions must be validated before treating them as ready-to-run agents.
+These scaffolds require the policy-aware template contract inspected in `mvm`
+0.24.0; older template consumers are not supported.
+
+Validate template payload completeness and pinned signed-profile references:
+
+```bash
+python3 scripts/validate-templates.py
+python3 -m unittest discover -s tests
+python3 scripts/validate-packs.py
+```
+
 Point `mvmctl` at this directory with a `file://` URL:
 
 ```bash
