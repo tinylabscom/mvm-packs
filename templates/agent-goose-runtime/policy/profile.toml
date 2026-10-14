@@ -1,2 +1,0 @@
-description = "Runtime scaffold inheriting the signed Goose agent policy."
-extends = "agent/goose@1.0.0"

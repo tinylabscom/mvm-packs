@@ -1,5 +1,0 @@
-name = "git"
-description = "MicroVM with git and a small SSH client for CI-style clones"
-default_vcpus = 1
-default_memory_mib = 256
-tags = ["git", "ci", "ssh"]

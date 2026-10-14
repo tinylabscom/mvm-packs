@@ -1,2 +1,0 @@
-description = "Runtime scaffold inheriting the signed OpenCode agent policy."
-extends = "agent/opencode@1.0.0"

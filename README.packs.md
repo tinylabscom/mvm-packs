@@ -1,9 +1,16 @@
 # The pack registry
 
-This repository is also the signed pack registry `mvmctl` talks to. A pack
+This repository is the signed pack registry `mvmctl` talks to. A pack
 ships machine-readable policy — a profile (`pack/profile.toml`), a group
 (`pack/group.toml`), or both — plus any payload files the manifest declares,
 signed keyless by the publish workflow.
+
+The main catalog is [`index.json`](index.json); [`packs/index.json`](packs/index.json)
+is its generated compatibility copy for existing clients. Both list all published
+versions, not unpublished source intents or support guarantees. The initial
+supported policy pack is `agent/claude@1.0.1`; the other published packs remain
+discoverable. Neither index is a signed trust document: clients verify each pack's
+`manifest.json` against its adjacent `manifest.sigstore.json`.
 
 ## Layout
 
@@ -558,7 +565,7 @@ feed as revocation-aware.
 
 ```sh
 mvmctl search                                # what the registry offers
-mvmctl pull agent/claude@1.0.0               # verify, install, pin
+mvmctl pull agent/claude@1.0.1               # verify, install, pin
 mvmctl run --policy agent/claude -- make test
 ```
 

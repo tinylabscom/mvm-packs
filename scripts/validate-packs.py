@@ -245,6 +245,30 @@ def validate_manifest(path, verify_signatures=False):
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")
 
 
+def validate_indexes():
+    """Both discovery catalogs must exactly describe the published registry."""
+    builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
+    try:
+        expected = builder["registry_index"](PACKS)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"cannot derive pack index from manifests: {error}")
+        return
+    for path in (ROOT / "index.json", PACKS / "index.json"):
+        rel = path.relative_to(ROOT).as_posix()
+        try:
+            index = json.loads(path.read_text())
+        except (OSError, ValueError) as error:
+            problems.append(f"{rel}: cannot read pack index: {error}")
+            continue
+        check(
+            isinstance(index, dict)
+            and type(index.get("schema_version")) is int
+            and index == expected,
+            f"{rel}: must exactly match published manifests "
+            "(run python3 scripts/build-packs.py to regenerate both indexes)",
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-signatures", action="store_true", help="verify every bundle against the publisher identity")
@@ -259,16 +283,7 @@ def main(argv=None):
     check(bool(manifests), "no manifests under packs/<ns>/<name>/<version>/")
     for manifest in manifests:
         validate_manifest(manifest, args.verify_signatures)
-    index = json.loads((PACKS / "index.json").read_text())
-    check(set(index) == {"schema_version", "packs"}, "index.json: unexpected fields")
-    check(index.get("schema_version") == 1, "index.json: schema_version must be 1")
-    for entry in index.get("packs", []):
-        check(set(entry) == {"namespace", "name", "description", "versions"}, "index.json: bad entry")
-        for version in entry.get("versions", []):
-            check(
-                (PACKS / entry["namespace"] / entry["name"] / version / "manifest.json").is_file(),
-                f"index.json: {entry['namespace']}/{entry['name']}@{version} not on disk",
-            )
+    validate_indexes()
     if args.require_revocations or REVOCATIONS.exists() or REVOCATION_BUNDLE.exists():
         if (not REVOCATIONS.is_file() or not REVOCATION_BUNDLE.is_file()
                 or REVOCATIONS.is_symlink() or REVOCATION_BUNDLE.is_symlink()):

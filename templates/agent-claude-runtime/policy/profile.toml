@@ -1,2 +1,0 @@
-description = "Runtime scaffold inheriting the signed Claude agent policy."
-extends = "agent/claude@1.0.1"

@@ -13,8 +13,8 @@ For every source pack, emits packs/<namespace>/<name>/<version>/ with:
     manifest.sigstore.json    detached cosign bundle over manifest.json
     files/<path>              the payload, byte-identical to the source
 
-and regenerates packs/index.json (the registry index mvmctl search/pull
-read). Refuses to overwrite an existing version with different bytes: pack
+and regenerates index.json plus packs/index.json (the compatibility index
+mvmctl search/pull read). Refuses to overwrite an existing version with different bytes: pack
 content is immutable once published, so a changed source needs a version
 bump in its pack.toml.
 
@@ -328,10 +328,11 @@ def version_key(value):
     return [int(part) for part in match.groups()] if match else [0, 0, 0]
 
 
-def rebuild_index():
+def registry_index(packs_dir):
+    """Derive discovery metadata only from published manifests, not sources."""
     packs = []
-    if PACKS.is_dir():
-        for namespace in sorted(p for p in PACKS.iterdir() if p.is_dir()):
+    if packs_dir.is_dir():
+        for namespace in sorted(p for p in packs_dir.iterdir() if p.is_dir()):
             for name in sorted(p for p in namespace.iterdir() if p.is_dir()):
                 versions = sorted(
                     (
@@ -354,10 +355,16 @@ def rebuild_index():
                             "versions": versions,
                         }
                     )
-    index = {"schema_version": 1, "packs": packs}
+    return {"schema_version": 1, "packs": packs}
+
+
+def rebuild_index():
+    index = registry_index(PACKS)
+    encoded = json.dumps(index, indent=2) + "\n"
     PACKS.mkdir(exist_ok=True)
-    (PACKS / "index.json").write_text(json.dumps(index, indent=2) + "\n")
-    print(f"index: {len(packs)} pack(s)")
+    (PACKS.parent / "index.json").write_text(encoded)
+    (PACKS / "index.json").write_text(encoded)
+    print(f"index: {len(index['packs'])} pack(s)")
 
 
 def main():
