@@ -2,6 +2,34 @@
   "schema_version": 1,
   "templates": [
     {
+      "name": "agent-claude-runtime",
+      "description": "Python + Node runtime scaffold with signed Claude policy; no agent client installed.",
+      "path": "templates/agent-claude-runtime",
+      "tags": ["agent", "claude", "runtime-scaffold"],
+      "mvm_version": ">=0.24.0"
+    },
+    {
+      "name": "agent-codex-runtime",
+      "description": "Node runtime scaffold with signed Codex policy; no agent client installed.",
+      "path": "templates/agent-codex-runtime",
+      "tags": ["agent", "codex", "runtime-scaffold"],
+      "mvm_version": ">=0.24.0"
+    },
+    {
+      "name": "agent-goose-runtime",
+      "description": "Python + Node runtime scaffold with signed Goose policy; no agent client installed.",
+      "path": "templates/agent-goose-runtime",
+      "tags": ["agent", "goose", "runtime-scaffold"],
+      "mvm_version": ">=0.24.0"
+    },
+    {
+      "name": "agent-opencode-runtime",
+      "description": "Python + Node runtime scaffold with signed OpenCode policy; no agent client installed.",
+      "path": "templates/agent-opencode-runtime",
+      "tags": ["agent", "opencode", "runtime-scaffold"],
+      "mvm_version": ">=0.24.0"
+    },
+    {
       "name": "python-pandas",
       "description": "Python runtime with pandas, numpy, and requests pre-installed",
       "path": "templates/python-pandas",
