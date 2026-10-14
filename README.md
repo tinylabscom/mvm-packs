@@ -1,147 +1,79 @@
 # mvm-packs
 
-Remote template registry for [`mvmctl`](https://github.com/tinylabscom/mvm).
+The signed pack registry for [`mvmctl`](https://github.com/tinylabscom/mvm).
+This repository was formerly named `mvm-templates`; templates are no longer
+its supported interface.
 
-This repository holds richer, community-oriented microVM templates that are
-fetched on demand by `mvmctl`'s template registry. A small core catalog
-(`minimal`, `http`, `postgres`, `worker`, `python`) continues to ship inside
-`mvmctl` itself so basic scaffolding works offline.
+## Pack catalog
+
+[`index.json`](index.json) is the main list of published packs.
+[`packs/index.json`](packs/index.json) is a generated compatibility copy for
+existing pack clients. Both are derived from published manifests, not from
+unpublished source metadata, and validation requires them to match exactly.
+Do not edit either catalog by hand.
+
+### Initial supported pack: Claude
+
+`agent/claude@1.0.1` is the initial supported **Claude Code policy pack**.
+It provides policy for LLM APIs, GitHub, and the Anthropic secret binding.
+It does not install Claude Code or provide a runnable Claude VM image.
+The planned runnable environment is described in
+[`CLAUDE-ENVIRONMENT.md`](CLAUDE-ENVIRONMENT.md).
+
+```sh
+mvmctl search
+mvmctl pull agent/claude@1.0.1
+mvmctl run --policy agent/claude -- make test
+```
+
+Other published packs remain in the catalog; publication alone is not a
+claim that they are in the initial supported scope.
+
+## Signatures and trust
+
+Catalogs are discovery metadata, not proof of authenticity. Each published
+pack has a signed `manifest.json` and an adjacent `manifest.sigstore.json`:
+
+- [Claude manifest](packs/agent/claude/1.0.1/manifest.json)
+- [Claude signature bundle](packs/agent/claude/1.0.1/manifest.sigstore.json)
+
+The manifest binds the pack reference, description, and payload SHA-256
+digests and sizes. Clients must verify its signature against the publisher
+trust policy before trusting those bytes. See
+[`README.packs.md`](README.packs.md#publishing) for publisher identities,
+historical-signature handling, and revocation requirements.
 
 ## Layout
 
-```
-index.json                 # registry manifest
-templates/
-  <name>/
-    template.toml          # metadata: name, description, sizing, tags
-    flake.nix              # guest definition using mvm.lib.<system>.mkGuest
-```
-
-## Adding a template
-
-### 1. Add metadata
-
-Create `templates/<name>/template.toml`:
-
-```toml
-name = "<name>"
-description = "..."
-default_vcpus = 1
-default_memory_mib = 256
-tags = ["..."]
-# Optional: extra files to download and copy into the generated project.
-files = ["app.py", "app/main.py"]
+```text
+index.json                         # main pack catalog (generated)
+pack-sources/<namespace>/<name>/    # editable pack.toml and pack/ payload
+packs/index.json                   # compatibility catalog (generated)
+packs/<namespace>/<name>/<version>/
+  manifest.json                    # signed metadata and payload digests
+  manifest.sigstore.json           # detached Sigstore bundle
+  files/                           # manifest-declared payload
 ```
 
-`files` is required for SDK-style templates that ship source files in
-addition to the generated `flake.nix`.
+## Publishing and validation
 
-### 2. Add a guest flake
+Edit a source under `pack-sources/` and bump its version when content changes.
+The publisher builds and keyless-signs bundles, regenerates both catalogs,
+verifies the registry, and commits the published output. Published versions
+are immutable; never hand-edit their manifests, signatures, or payloads.
 
-Create `templates/<name>/flake.nix`. A template is a normal `mvm` flake that
-uses `mvm.lib.<system>.mkGuest`. The scaffolded project copies this flake into
-the user's directory, so keep paths relative and declare any application source
-under an `./app` directory.
+Run the repository checks:
 
-```nix
-{
-  inputs = {
-    mvm.url     = "github:tinylabscom/mvm?dir=nix";
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-  };
-
-  outputs = { mvm, nixpkgs, ... }:
-    let
-      system = "aarch64-linux"; # or x86_64-linux
-      pkgs   = import nixpkgs { inherit system; };
-
-      appSrc = pkgs.stdenv.mkDerivation {
-        pname = "my-app";
-        version = "0";
-        src = ./app;
-        installPhase = "cp -r . $out";
-      };
-    in {
-      packages.${system}.default = mvm.lib.${system}.mkGuest {
-        inherit pkgs;
-        name = "my-app-vm";
-
-        packages = [ pkgs.curl appSrc ];
-
-        services.app = {
-          command = "${appSrc}/bin/start";
-          env = {
-            PORT = "8080";
-          };
-        };
-
-        healthChecks.app = {
-          healthCmd = "${pkgs.curl}/bin/curl -sf http://localhost:8080/ >/dev/null";
-          healthIntervalSecs = 5;
-          healthTimeoutSecs = 3;
-        };
-      };
-    };
-}
+```sh
+python3 -m unittest discover -s tests
+python3 scripts/validate-packs.py
 ```
 
-See the upstream [mkGuest guide](https://github.com/tinylabscom/mvm/blob/main/public/src/content/docs/guides/nix-flakes.md) for the full API.
+To additionally verify publisher signatures (requires `cosign`):
 
-#### Without writing Nix: use the SDK
-
-If you prefer to write an ordinary Python/TypeScript/Node function instead of a
-flake, use the `mvm` SDK decorator. `mvmctl build compile` reads the file
-statically (it is never executed on the host) and emits the `flake.nix` + launch
-plan:
-
-```python
-# app.py
-import mvm
-
-@mvm.app(
-    image=mvm.python_image(python="3.12"),
-    resources=mvm.resources(cpu=1, memory_mb=256),
-    dependencies=mvm.python_deps(lockfile="uv.lock", tool="uv"),
-    env={"BANNER": mvm.literal("hi")},
-)
-def greet(name: str) -> str:
-    return f"hello {name}"
+```sh
+python3 scripts/validate-packs.py --verify-signatures
 ```
 
-```bash
-mvmctl build compile app.py --out .
-```
-
-The generated `flake.nix` is what the template carries; the user who runs
-`mvmctl generate template <name> ./my-project` receives the SDK file *and* the
-pre-generated flake.
-
-### 3. Register the template
-
-Add an entry to `index.json` with the matching `path` and an `mvm_version`
-constraint such as `">=0.18.0"`:
-
-```json
-{
-  "name": "<name>",
-  "description": "...",
-  "path": "templates/<name>",
-  "mvm_version": ">=0.18.0"
-}
-```
-
-### 4. Open a PR
-
-Make sure `cargo fmt` and `cargo clippy` are clean in the consuming `mvm`
-repo if you are also changing `mvmctl` code.
-
-## Local testing
-
-Point `mvmctl` at this directory with a `file://` URL:
-
-```bash
-export MVM_TEMPLATE_REGISTRY="file:///path/to/mvm-packs"
-mvmctl template list
-mvmctl template info <name>
-mvmctl generate template <name> ./my-project
-```
+Full publishing and revocation validation is documented in
+[`README.packs.md`](README.packs.md).

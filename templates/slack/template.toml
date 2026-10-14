@@ -1,5 +1,0 @@
-name = "slack"
-description = "Slack webhook bot worker with curl-based health checks"
-default_vcpus = 1
-default_memory_mib = 256
-tags = ["slack", "webhook", "bot"]

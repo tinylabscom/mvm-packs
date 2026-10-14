@@ -4,8 +4,11 @@ on:
   pull_request:
     paths:
       - "pack-sources/**"
+      - "index.json"
+      - "packs/**"
       - "scripts/**"
       - "tests/**"
+      - "README.md"
       - "README.packs.md"
       - ".github/workflows/python-candidate.yml"
       - ".github/workflows/python-source-diagnostic.yml"

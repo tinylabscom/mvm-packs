@@ -18,6 +18,8 @@ on:
     branches: [main]
     paths:
       - "pack-sources/**"
+      - "index.json"
+      - "packs/index.json"
       - "scripts/build-packs.py"
       - "scripts/validate-packs.py"
       - "scripts/publisher_identity.py"
@@ -116,7 +118,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: signed-packs
-          path: packs/
+          path: |
+            index.json
+            packs/
           if-no-files-found: error
 
   publish:
@@ -135,7 +139,7 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: signed-packs
-          path: packs/
+          path: .
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
       - name: Install cosign v3
         env:
@@ -168,7 +172,7 @@ jobs:
       - name: Commit published packs
         run: |
           set -euo pipefail
-          git add packs/
+          git add index.json packs/
           if git diff --cached --quiet; then
             exit 0
           fi

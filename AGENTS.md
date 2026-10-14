@@ -1,15 +1,16 @@
-# Agent instructions for mvm-templates
+# Agent instructions for mvm-packs
 
-This repository is the remote template and pack registry for
-[`mvmctl`](https://github.com/tinylabscom/mvm). `mvmctl` fetches templates and
-packs from here on demand; a small core catalog ships inside `mvmctl` itself.
+This repository is the signed pack registry for
+[`mvmctl`](https://github.com/tinylabscom/mvm). Templates are no longer supported
+or stored here. The initial supported policy pack is `agent/claude@1.0.1`;
+it is not a runnable Claude Code image.
 
 ## Layout
 
-- `index.json` — registry manifest.
-- `templates/<name>/` — one `template.toml` (metadata) and one `flake.nix`
-  (guest definition using `mvm.lib.<system>.mkGuest`) per template. Keep
-  flake paths relative; application source lives under `./app`.
+- `index.json` — main pack catalog, generated from published manifests.
+- `packs/index.json` — generated compatibility copy for existing pack clients.
+  Regenerate both catalogs with `python3 scripts/build-packs.py`; never edit
+  them by hand.
 - `pack-sources/<kind>/<name>/` — editable pack sources (`pack.toml` plus the
   files each pack ships).
 - `packs/<kind>/<name>/<version>/` — the published, signed pack bundles
@@ -20,8 +21,7 @@ packs from here on demand; a small core catalog ships inside `mvmctl` itself.
 
 ## Validation
 
-Run both before opening a pull request that touches packs, templates, or
-scripts:
+Run both before opening a pull request that touches packs or scripts:
 
 ```sh
 python3 -m unittest discover -s tests
