@@ -80,8 +80,13 @@ class PackImageTests(unittest.TestCase):
             self.assertEqual((previous / "manifest.json").read_bytes(), manifest)
             self.assertEqual((previous / "manifest.sigstore.json").read_bytes(), b"signed bundle")
             self.assertFalse((packs / "runtime" / "python" / "1.1.0").exists())
-            index = json.loads((packs / "index.json").read_text())
-            self.assertEqual(index["packs"][0]["versions"], ["1.0.0"])
+            index = json.loads((packs.parent / "index.json").read_text())
+            self.assertEqual(
+                index["packs"][0]["versions"],
+                [{"version": "1.0.0", "manifest_sha256": build_packs.sha256_of(
+                    previous / "manifest.json"
+                )[0]}],
+            )
 
     def built_image(self):
         digest = "a" * 64

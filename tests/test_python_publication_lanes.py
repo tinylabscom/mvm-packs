@@ -182,8 +182,7 @@ class CommitImagePackTests(unittest.TestCase):
             "def rebuild_index():\n"
             "    names = sorted(str(p.parent.relative_to('packs'))\n"
             "                   for p in Path('packs').rglob('manifest.json'))\n"
-            "    Path('packs/index.json').write_text('\\n'.join(names) + '\\n')\n"
-            "    Path('index.json').write_bytes(Path('packs/index.json').read_bytes())\n")
+            "    Path('index.json').write_text('\\n'.join(names) + '\\n')\n")
         (self.work / "scripts/validate-packs.py").write_text(
             "import pathlib, sys\n"
             "pathlib.Path('validated').write_text(' '.join(sys.argv[1:]))\n")
@@ -192,7 +191,6 @@ class CommitImagePackTests(unittest.TestCase):
         (source / "pack.toml").write_text('version = "1.1.0"\n')
         (self.work / "packs/runtime/python/1.0.0").mkdir(parents=True)
         (self.work / "packs/runtime/python/1.0.0/manifest.json").write_text("{}")
-        (self.work / "packs/index.json").write_text("runtime/python/1.0.0\n")
         (self.work / "index.json").write_text("runtime/python/1.0.0\n")
         (self.work / ".gitignore").write_text("validated\n")
         self.git("add", ".")
@@ -204,9 +202,8 @@ class CommitImagePackTests(unittest.TestCase):
         target.mkdir()
         (target / "manifest.json").write_text("{}")
         (target / "manifest.sigstore.json").write_text("{}")
-        (self.work / "packs/index.json").write_text(
+        (self.work / "index.json").write_text(
             "runtime/python/1.0.0\nruntime/python/1.1.0\n")
-        (self.work / "index.json").write_bytes((self.work / "packs/index.json").read_bytes())
 
     def run_commit(self):
         return subprocess.run(["bash", str(COMMIT), "pack-sources/runtime/python"],
@@ -224,8 +221,9 @@ class CommitImagePackTests(unittest.TestCase):
                       self.origin_files())
         self.assertEqual(
             self.git("show", "main:index.json", cwd=self.origin),
-            self.git("show", "main:packs/index.json", cwd=self.origin),
+            "runtime/python/1.0.0\nruntime/python/1.1.0\n",
         )
+        self.assertNotIn("packs/index.json", self.origin_files())
         message = self.git("log", "-1", "--format=%s", "main", cwd=self.origin)
         self.assertIn("runtime/python@1.1.0", message)
         self.assertIn("[skip ci]", message)
@@ -272,7 +270,7 @@ class CommitImagePackTests(unittest.TestCase):
         for key, value in (("user.name", "Other"), ("user.email", "o@example.invalid"),
                            ("commit.gpgsign", "false")):
             self.git("config", key, value, cwd=other)
-        (other / "packs/index.json").write_text("runtime/python/1.0.0\nagent/x/1.0.0\n")
+        (other / "index.json").write_text("runtime/python/1.0.0\nagent/x/1.0.0\n")
         self.git("commit", "-am", "other pack", cwd=other)
         self.git("push", "origin", "main", cwd=other)
         before = self.git("rev-parse", "main", cwd=self.origin)

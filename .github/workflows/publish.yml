@@ -19,7 +19,6 @@ on:
     paths:
       - "pack-sources/**"
       - "index.json"
-      - "packs/index.json"
       - "scripts/build-packs.py"
       - "scripts/validate-packs.py"
       - "scripts/publisher_identity.py"

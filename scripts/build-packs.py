@@ -13,8 +13,8 @@ For every source pack, emits packs/<namespace>/<name>/<version>/ with:
     manifest.sigstore.json    detached cosign bundle over manifest.json
     files/<path>              the payload, byte-identical to the source
 
-and regenerates index.json plus packs/index.json (the compatibility index
-mvmctl search/pull read). Refuses to overwrite an existing version with different bytes: pack
+and regenerates the root index.json with exact-byte manifest SHA-256 pins.
+Refuses to overwrite an existing version with different bytes: pack
 content is immutable once published, so a changed source needs a version
 bump in its pack.toml.
 
@@ -352,10 +352,18 @@ def registry_index(packs_dir):
                             "namespace": namespace.name,
                             "name": name.name,
                             "description": manifest["description"],
-                            "versions": versions,
+                            "versions": [
+                                {
+                                    "version": version,
+                                    "manifest_sha256": sha256_of(
+                                        name / version / "manifest.json"
+                                    )[0],
+                                }
+                                for version in versions
+                            ],
                         }
                     )
-    return {"schema_version": 1, "packs": packs}
+    return {"schema_version": 2, "packs": packs}
 
 
 def rebuild_index():
@@ -363,7 +371,6 @@ def rebuild_index():
     encoded = json.dumps(index, indent=2) + "\n"
     PACKS.mkdir(exist_ok=True)
     (PACKS.parent / "index.json").write_text(encoded)
-    (PACKS / "index.json").write_text(encoded)
     print(f"index: {len(index['packs'])} pack(s)")
 
 

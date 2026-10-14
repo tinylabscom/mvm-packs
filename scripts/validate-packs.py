@@ -245,28 +245,30 @@ def validate_manifest(path, verify_signatures=False):
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")
 
 
-def validate_indexes():
-    """Both discovery catalogs must exactly describe the published registry."""
+def validate_index():
+    """The sole root catalog must pin the exact published manifest bytes."""
     builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
     try:
         expected = builder["registry_index"](PACKS)
     except (OSError, ValueError, KeyError, TypeError) as error:
         problems.append(f"cannot derive pack index from manifests: {error}")
         return
-    for path in (ROOT / "index.json", PACKS / "index.json"):
-        rel = path.relative_to(ROOT).as_posix()
-        try:
-            index = json.loads(path.read_text())
-        except (OSError, ValueError) as error:
-            problems.append(f"{rel}: cannot read pack index: {error}")
-            continue
-        check(
-            isinstance(index, dict)
-            and type(index.get("schema_version")) is int
-            and index == expected,
-            f"{rel}: must exactly match published manifests "
-            "(run python3 scripts/build-packs.py to regenerate both indexes)",
-        )
+    check(
+        not (PACKS / "index.json").exists(),
+        "packs/index.json: obsolete duplicate catalog must be removed",
+    )
+    try:
+        index = json.loads((ROOT / "index.json").read_text())
+    except (OSError, ValueError) as error:
+        problems.append(f"index.json: cannot read pack index: {error}")
+        return
+    check(
+        isinstance(index, dict)
+        and type(index.get("schema_version")) is int
+        and index == expected,
+        "index.json: must exactly match published manifests and their SHA-256 pins "
+        "(run python3 scripts/build-packs.py to regenerate)",
+    )
 
 
 def main(argv=None):
@@ -283,7 +285,7 @@ def main(argv=None):
     check(bool(manifests), "no manifests under packs/<ns>/<name>/<version>/")
     for manifest in manifests:
         validate_manifest(manifest, args.verify_signatures)
-    validate_indexes()
+    validate_index()
     if args.require_revocations or REVOCATIONS.exists() or REVOCATION_BUNDLE.exists():
         if (not REVOCATIONS.is_file() or not REVOCATION_BUNDLE.is_file()
                 or REVOCATIONS.is_symlink() or REVOCATION_BUNDLE.is_symlink()):

@@ -2,7 +2,7 @@
 # Commit one newly signed image pack version and push it to main.
 #
 # The registry change must be exactly the new immutable version directory plus
-# index.json and packs/index.json. The checkout is the dispatched commit, which
+# root index.json. The checkout is the dispatched commit, which
 # can be behind main when a long image run finishes, so the commit is replayed
 # onto the current main. A conflict, an index that no longer matches the tree,
 # or a registry that fails signature validation refuses the push. Publication
@@ -21,10 +21,10 @@ target="packs/$namespace/$name/$version"
 test -f "$target/manifest.json"
 test -f "$target/manifest.sigstore.json"
 
-# Refuse anything but the new version and the two generated indexes.
+# Refuse anything but the new version and the generated root index.
 unexpected=$(git status --porcelain --untracked-files=all \
   | awk '{print $NF}' \
-  | grep -v -e "^${target}/" -e '^index.json$' -e '^packs/index.json$' || true)
+  | grep -v -e "^${target}/" -e '^index.json$' || true)
 if [[ -n "$unexpected" ]]; then
   echo "commit-image-pack: unexpected working-tree changes:" >&2
   printf '%s\n' "$unexpected" >&2
@@ -35,7 +35,7 @@ if git ls-tree -d --name-only HEAD "$target" | grep -q .; then
   exit 1
 fi
 
-git add -- "$target" index.json packs/index.json
+git add -- "$target" index.json
 git -c user.name='MVM Pack Publisher' \
   -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
   commit -m "chore(packs): publish signed ${namespace}/${name}@${version} image pack [skip ci]"
@@ -50,8 +50,8 @@ if ! git merge-base --is-ancestor origin/main HEAD; then
     exit 1
   fi
   python3 -c 'import importlib.util,pathlib; p=pathlib.Path("scripts/build-packs.py"); s=importlib.util.spec_from_file_location("build_packs", p); m=importlib.util.module_from_spec(s); s.loader.exec_module(m); m.rebuild_index()'
-  if ! git diff --quiet -- index.json packs/index.json; then
-    echo "commit-image-pack: indexes do not match the rebased registry" >&2
+  if ! git diff --quiet -- index.json; then
+    echo "commit-image-pack: index does not match the rebased registry" >&2
     exit 1
   fi
   python3 scripts/validate-packs.py --verify-signatures --require-revocations

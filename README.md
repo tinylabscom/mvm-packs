@@ -7,10 +7,10 @@ its supported interface.
 ## Pack catalog
 
 [`index.json`](index.json) is the main list of published packs.
-[`packs/index.json`](packs/index.json) is a generated compatibility copy for
-existing pack clients. Both are derived from published manifests, not from
-unpublished source metadata, and validation requires them to match exactly.
-Do not edit either catalog by hand.
+It is the only catalog. Schema v2 lists each version together with the
+`manifest_sha256` of its exact published `manifest.json` bytes. It is generated
+from published manifests, not unpublished source metadata, and validation
+requires every entry and digest to match. Do not edit it by hand.
 
 ### Initial supported pack: Claude
 
@@ -46,9 +46,8 @@ historical-signature handling, and revocation requirements.
 ## Layout
 
 ```text
-index.json                         # main pack catalog (generated)
+index.json                         # sole pack catalog, schema v2 (generated)
 pack-sources/<namespace>/<name>/    # editable pack.toml and pack/ payload
-packs/index.json                   # compatibility catalog (generated)
 packs/<namespace>/<name>/<version>/
   manifest.json                    # signed metadata and payload digests
   manifest.sigstore.json           # detached Sigstore bundle
@@ -58,7 +57,7 @@ packs/<namespace>/<name>/<version>/
 ## Publishing and validation
 
 Edit a source under `pack-sources/` and bump its version when content changes.
-The publisher builds and keyless-signs bundles, regenerates both catalogs,
+The publisher builds and keyless-signs bundles, regenerates the root catalog,
 verifies the registry, and commits the published output. Published versions
 are immutable; never hand-edit their manifests, signatures, or payloads.
 
