@@ -5,11 +5,12 @@ ships machine-readable policy — a profile (`pack/profile.toml`), a group
 (`pack/group.toml`), or both — plus any payload files the manifest declares,
 signed keyless by the publish workflow.
 
-The main catalog is [`index.json`](index.json); [`packs/index.json`](packs/index.json)
-is its generated compatibility copy for existing clients. Both list all published
-versions, not unpublished source intents or support guarantees. The initial
+The sole catalog is [`index.json`](index.json), schema v2. Each `versions` entry
+contains `version` and the lowercase `manifest_sha256` of the exact published
+manifest bytes. It lists all published versions, not unpublished source intents
+or support guarantees. The initial
 supported policy pack is `agent/claude@1.0.1`; the other published packs remain
-discoverable. Neither index is a signed trust document: clients verify each pack's
+discoverable. The index is not a signed trust document: clients verify each pack's
 `manifest.json` against its adjacent `manifest.sigstore.json`.
 
 ## Layout
@@ -426,7 +427,7 @@ provenance names the old lock.
    signs the registry manifest and creates the immutable version. Next it runs
    `validate-packs.py --verify-signatures --require-revocations`. Then
    `scripts/commit-image-pack.sh` commits only that version directory and
-   `packs/index.json`. If `main` moved while the run waited or ran, the
+   root `index.json`. If `main` moved while the run waited or ran, the
    commit is replayed onto it, the index is rebuilt and must match, and the
    registry is validated again before the push. A conflict refuses.
 
@@ -462,7 +463,7 @@ claim a SLSA level while the publisher and consumer gates remain unfinished.
 The workflow builds the published layout under `packs/`:
 
 ```
-packs/index.json                                  # registry index (mvmctl search)
+index.json                                        # schema-v2 catalog with manifest SHA-256 pins
 packs/<ns>/<name>/<version>/manifest.json         # RegistryPackManifest, schema v1
 packs/<ns>/<name>/<version>/manifest.sigstore.json# detached cosign bundle
 packs/<ns>/<name>/<version>/files/...             # payload, digest-pinned by the manifest
@@ -476,7 +477,7 @@ Merging to `main` runs `.github/workflows/publish.yml` when `pack-sources/`
 changes. It builds manifests (SHA-256 and size per file), signs each manifest
 keyless with `cosign sign-blob` while the run's OIDC identity is
 `refs/heads/main`, validates the layout with `scripts/validate-packs.py`,
-and commits `packs/`. Published versions are immutable: change a source and
+and commits `index.json` and `packs/`. Published versions are immutable: change a source and
 the build refuses until the version in `pack.toml` is bumped. The push and
 scheduled runs publish policy packs only. A manual dispatch with a client
 release runs the image publication lanes below instead.

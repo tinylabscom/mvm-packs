@@ -7,10 +7,9 @@ it is not a runnable Claude Code image.
 
 ## Layout
 
-- `index.json` — main pack catalog, generated from published manifests.
-- `packs/index.json` — generated compatibility copy for existing pack clients.
-  Regenerate both catalogs with `python3 scripts/build-packs.py`; never edit
-  them by hand.
+- `index.json` — sole pack catalog (schema v2), generated from published
+  manifests with exact-byte `manifest_sha256` pins for each version.
+  Regenerate it with `python3 scripts/build-packs.py`; never edit it by hand.
 - `pack-sources/<kind>/<name>/` — editable pack sources (`pack.toml` plus the
   files each pack ships).
 - `packs/<kind>/<name>/<version>/` — the published, signed pack bundles

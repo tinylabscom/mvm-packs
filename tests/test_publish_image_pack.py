@@ -103,7 +103,8 @@ class RegistryImageTests(unittest.TestCase):
                           for path in (out / "files").rglob("*") if path.is_file()},
                          {entry["path"] for entry in manifest["files"]})
         self.assertIn("1.1.0", json.dumps(json.loads(
-            (self.packs / "index.json").read_text())))
+            (self.packs.parent / "index.json").read_text())))
+        self.assertFalse((self.packs / "index.json").exists())
 
     def test_failed_release_check_leaves_no_registry_version(self):
         with mock.patch.object(publisher.stager, "stage", side_effect=self.fake_stage), \
