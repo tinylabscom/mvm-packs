@@ -188,6 +188,12 @@ class ApplicationManifestTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         validate_source(case["source"])
 
+    def test_publisher_tracks_shared_application_validation_dependency(self):
+        root = Path(__file__).resolve().parent.parent
+        workflow = (root / ".github" / "workflows" / "publish.yml").read_text()
+        push_paths = workflow.split("  push:\n", 1)[1].split("  schedule:\n", 1)[0]
+        self.assertIn('      - "scripts/application_manifest.py"\n', push_paths)
+
     def test_validator_rejects_shape_drift_and_wrong_directory(self):
         self.build()
         path = self.output / "manifest.json"
