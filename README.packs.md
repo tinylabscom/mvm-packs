@@ -13,6 +13,49 @@ supported policy pack is `agent/claude@1.0.1`; the other published packs remain
 discoverable. The index is not a signed trust document: clients verify each pack's
 `manifest.json` against its adjacent `manifest.sigstore.json`.
 
+## Application descriptors
+
+Publisher tooling also supports a distinct signed application manifest (outer
+schema v2, `kind = "application"`). It points to a prebuilt `.mvmpkg`; it is
+not a policy group or an image-build intent. This source-only support does not
+claim a published application, a released compatible client, or a successful
+pull/install/run witness.
+
+An application source consists only of `pack.toml`, with no `pack/` payload.
+For example, this is a **synthetic, non-publishable test definition**, not a
+real software release:
+
+```toml
+version = "1.0.0"
+description = "Synthetic app descriptor"
+
+[application]
+schema_version = 1
+guest_arch = "aarch64"
+
+[application.bundle]
+source = "https://bundles.example/test/hello/1.0.0/app.mvmpkg"
+archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+archive_size = 123
+key_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+```
+
+Folder coordinates and `version` determine the exact `namespace/name@version`
+reference. The resulting manifest contains exactly `schema_version`, `kind`,
+`reference`, `description`, and `application`. The published version contains
+only `manifest.json` and `manifest.sigstore.json`, never `files/` or `image`.
+The nested application schema is v1; the discovery index remains schema v2.
+Existing policy manifest-v1 bytes are unchanged.
+
+The descriptor binds the archive SHA-256, positive byte size, supported guest
+architecture (`x86_64` or `aarch64`), and expected bundle key ID. Source locators
+must be canonical HTTPS without credentials/query/fragment, or a digest-pinned
+OCI reference. A descriptor does **not** enroll its named key in a trust store.
+Consumers must authenticate the descriptor under namespace publisher policy,
+enforce revocation, and independently verify the bundle through existing trust
+and admission checks. No official vendor namespace or redistribution permission
+is granted by this schema.
+
 ## Layout
 
 Sources live under `pack-sources/<namespace>/<name>/`:

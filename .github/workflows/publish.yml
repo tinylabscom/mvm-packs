@@ -21,6 +21,7 @@ on:
       - "index.json"
       - "scripts/build-packs.py"
       - "scripts/validate-packs.py"
+      - "scripts/application_manifest.py"
       - "scripts/publisher_identity.py"
       - "scripts/build-revocations.py"
       - "revocations.toml"

@@ -34,6 +34,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+from application_manifest import manifest_bytes as application_manifest_bytes
+from application_manifest import validate_application
 from publisher_identity import (
     CURRENT_IDENTITY,
     FORMER_IDENTITY,
@@ -77,8 +79,18 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build"}:
+    if set(data) - {"version", "description", "image", "image_build", "application"}:
         fail(f"{path}: unknown pack metadata fields")
+    application = data.get("application")
+    if "application" in data:
+        try:
+            validate_application(application)
+        except ValueError as error:
+            fail(f"{path}: {error}")
+        if not SEMVER.fullmatch(version) or "+" in version:
+            fail(f"{path}: application version must be canonical semver without build metadata")
+        if "image" in data or "image_build" in data:
+            fail(f"{path}: application cannot declare image or image_build")
     image = data.get("image")
     if image is not None and not isinstance(image, dict):
         fail(f"{path}: [image] must be a table")
@@ -88,7 +100,7 @@ def parse_pack_toml(path):
     if image is not None and image_build is not None:
         fail(f"{path}: [image] and [image_build] cannot both be present")
     return {"version": version, "description": description, "image": image,
-            "image_build": image_build}
+            "image_build": image_build, "application": application}
 
 
 def validate_image_build_intent(intent, reference):
@@ -282,10 +294,17 @@ def build_one(source):
         validate_built_image_descriptor(meta["image"], reference)
         fail(f"{reference}: built image packs are not publishable until consumer verification is available")
     payload = source / "pack"
-    if not payload.is_dir():
+    application = meta["application"]
+    if application is not None:
+        if any(path.name != "pack.toml" or path.is_symlink() for path in source.iterdir()):
+            fail(f"{source}: application source cannot contain payload files or directories")
+    elif not payload.is_dir():
         fail(f"{source}: missing pack/ payload directory")
     out = PACKS / namespace / name / meta["version"]
-    manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
+    if application is not None:
+        manifest = application_manifest_bytes(reference, meta["description"], application)
+    else:
+        manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
@@ -294,7 +313,15 @@ def build_one(source):
                 f"{reference}: version already published with different bytes; "
                 "bump the version in pack.toml"
             )
-        check_existing_payload(out, payload)
+        if application is not None:
+            if any(
+                path.is_symlink() or not path.is_file()
+                or path.name not in {"manifest.json", "manifest.sigstore.json"}
+                for path in out.iterdir()
+            ):
+                fail(f"{out}: application cannot contain payload files or directories")
+        else:
+            check_existing_payload(out, payload)
         bundle = out / "manifest.sigstore.json"
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
@@ -309,13 +336,15 @@ def build_one(source):
 
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
-    (tmp / "files").mkdir(parents=True)
-    files_root = tmp / "files" / "pack"
-    for path in payload.rglob("*"):
-        if path.is_file():
-            target = files_root / path.relative_to(payload)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+    tmp.mkdir(parents=True)
+    if application is None:
+        (tmp / "files").mkdir()
+        files_root = tmp / "files" / "pack"
+        for path in payload.rglob("*"):
+            if path.is_file():
+                target = files_root / path.relative_to(payload)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
     (tmp / "manifest.json").write_bytes(manifest)
     sign(tmp / "manifest.json", tmp / "manifest.sigstore.json")
     shutil.rmtree(out, ignore_errors=True)
