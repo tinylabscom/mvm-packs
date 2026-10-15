@@ -99,7 +99,20 @@ Latest checks:
 - `python3 scripts/validate-packs.py`: 9 manifests validated.
 - Ruff format/lint on the four observer/source Python files, lint on the changed
   canonical stager, and `git diff --check`: clean.
-- Independent follow-up review: pending.
+- Independent follow-up review found no additional concrete security bug in
+  the remaining diagnostic pipeline. Its isolated snapshot passed 10 source
+  tests and 38 observer tests, with mocked source/signature authority. That
+  snapshot predated the immutable Git-ref/fsmonitor/timeout/exact-type fixes;
+  it did not independently verify those final fixes. A separate narrow review
+  of those exact fixes at `8ca217656c0e94c219f4da2c1df46fb7130e76b9`
+  subsequently found no additional concrete bug.
+- The final reviewer passed four focused committed tests and independently
+  instrumented immutable Git SHA arguments, routing sanitization, disabled
+  fsmonitor/replacements, deadlines and timeout refusal. Sixteen supplemental
+  bool/float size mutations across metadata record families refused. These
+  supplemental checks were in-memory review evidence, not new committed tests;
+  committed coverage does not directly assert every Git flag/deadline or every
+  metadata size-family/float combination.
 
 Superseded limitations: protected source loading and existing-image/diagnostic
 signature composition are now implemented. The loader does not authenticate an
