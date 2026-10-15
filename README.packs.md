@@ -408,8 +408,9 @@ provenance names the old lock.
    The client finds the verity tree and root hash beside the rootfs. It boots
    on its bootstrapped workload kernel, not one this repository supplies.
 
-   This lane proves that the released client admitted these exact signed bytes
-   and that CPython ran in the guest. It does not prove the sealed baked
+   This lane is intended to check exact signed bytes and a CPython version
+   command. Its existence is not evidence of successful Built admission or a
+   completed run. Even a successful version probe would not prove the sealed baked
    entrypoint, egress policy, persistence or cleanup. It is not the
    [observed publication witness](docs/observed-publication-witness.md), and
    its report is unsigned.
@@ -436,12 +437,18 @@ job. A fresh dispatch from a later commit refuses the existing release,
 because its target commit differs.
 
 The [publication-only observed witness contract](docs/observed-publication-witness.md)
-is a separate verifier-only review slice. It binds signed candidate evidence,
+is a historical v1 verifier-only review slice. It binds signed candidate evidence,
 protected source/run identity, released-client input hashes, the exact image
 lock, backend-specific trusted policy, both probe modes and retained raw
 results. It does not produce runtime evidence, sign imported reports, authorize
 publication, or change consumer admission. Its documented missing observer APIs
 must be supplied before release-job integration.
+
+Producer acceptance is [strict protected-observer v2](docs/protected-observer-v2.md)
+only, with no v1 fallback. The v2 code-controlled slice does not enable producer
+or publication wiring. Actual immutable-config launch/session receipt APIs,
+authenticated distinct releases A/B, the global producer-executable verifier pin
+and real protected observations remain prerequisites.
 
 ### Pack image composition v1
 
