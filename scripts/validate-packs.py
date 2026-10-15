@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from application_manifest import unique_object, validate_application
 from publisher_identity import (
     CURRENT_IDENTITY,
     FORMER_IDENTITY,
@@ -103,29 +104,44 @@ def verify_published_image(image, reference):
 def validate_manifest(path, verify_signatures=False):
     rel = path.relative_to(ROOT).as_posix()
     try:
-        manifest = json.loads(path.read_text())
-    except json.JSONDecodeError as error:
+        manifest = json.loads(path.read_text(), object_pairs_hook=unique_object)
+    except ValueError as error:
         problems.append(f"{rel}: invalid JSON: {error}")
         return
     check(isinstance(manifest, dict), f"{rel}: manifest must be an object")
+    if not isinstance(manifest, dict):
+        return
+    is_application = manifest.get("schema_version") == 2
     fields = {"schema_version", "reference", "description", "files"}
-    if "image" in manifest:
+    if is_application:
+        fields = {"schema_version", "kind", "reference", "description", "application"}
+    elif "image" in manifest:
         fields.add("image")
     check(
         set(manifest) == fields,
         f"{rel}: unknown or missing fields: {sorted(manifest)}",
     )
-    check(manifest.get("schema_version") == 1, f"{rel}: schema_version must be 1")
+    check(
+        type(manifest.get("schema_version")) is int
+        and manifest["schema_version"] in (1, 2),
+        f"{rel}: schema_version must be integer 1 or 2",
+    )
+    if is_application:
+        check(manifest.get("kind") == "application", f"{rel}: kind must be application")
+        try:
+            validate_application(manifest.get("application"))
+        except ValueError as error:
+            problems.append(f"{rel}: {error}")
 
     reference = manifest.get("reference", "")
-    parts = re.match(r"^([^/@]+)/([^/@]+)@([^/@]+)$", reference or "")
+    parts = re.fullmatch(r"([^/@]+)/([^/@]+)@([^/@]+)", reference) if isinstance(reference, str) else None
     check(parts is not None, f"{rel}: reference {reference!r} must be ns/name@version")
     if parts:
         namespace, name, version = parts.groups()
-        check(COORD.match(namespace), f"{rel}: bad namespace {namespace!r}")
-        check(COORD.match(name), f"{rel}: bad name {name!r}")
+        check(COORD.fullmatch(namespace), f"{rel}: bad namespace {namespace!r}")
+        check(COORD.fullmatch(name), f"{rel}: bad name {name!r}")
         check(
-            SEMVER.match(version) and version == version.split("+")[0],
+            SEMVER.fullmatch(version) and version == version.split("+")[0],
             f"{rel}: version {version!r} must be strict semver",
         )
         check(
@@ -139,8 +155,9 @@ def validate_manifest(path, verify_signatures=False):
         f"{rel}: description must be a non-empty string",
     )
 
-    files = manifest.get("files")
-    check(isinstance(files, list), f"{rel}: files must be a list")
+    files = [] if is_application else manifest.get("files")
+    if not is_application:
+        check(isinstance(files, list), f"{rel}: files must be a list")
     seen = set()
     for entry in files if isinstance(files, list) else []:
         check(
@@ -184,7 +201,7 @@ def validate_manifest(path, verify_signatures=False):
         verify_signature(path, reference)
         signature_trusted = len(problems) == previous_problems
 
-    image = manifest.get("image")
+    image = None if is_application else manifest.get("image")
     if image is not None:
         if isinstance(image, dict) and image.get("schema_version") == 2:
             builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
@@ -241,6 +258,8 @@ def validate_manifest(path, verify_signatures=False):
         relative = included.relative_to(path.parent)
         if included.is_symlink():
             problems.append(f"{rel}: symlink is not allowed: {relative}")
+        elif is_application and relative not in allowed:
+            problems.append(f"{rel}: application payload is not allowed: {relative}")
         elif included.is_file() and relative not in allowed:
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")
 
