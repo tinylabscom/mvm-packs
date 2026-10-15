@@ -12,6 +12,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 
@@ -126,6 +127,16 @@ class ReportAndPolicyTests(unittest.TestCase):
                 mode: record(("UNIT-" + mode).encode())
                 for mode in ("transient", "persistent")
             },
+            "images_lock": record(b"UNIT-LOCK"),
+            "base_set": {
+                "repository": "tinylabscom/mvm-images",
+                "release_tag": "image-set/v0.2.4",
+                "manifest_sha256": "c" * 64,
+            },
+            "signed_image_evidence": {
+                name: record(("UNIT-" + name).encode())
+                for name in observer.v1.stager.EVIDENCE_NAMES
+            },
         }
         self.policies = {
             (
@@ -217,6 +228,9 @@ class ReportAndPolicyTests(unittest.TestCase):
             ("policy", "document"),
             ("policy", "registry"),
             ("candidate", "payload", "pack/group.toml"),
+            ("images_lock",),
+            ("base_set",),
+            ("signed_image_evidence",),
         ]
         for role in ("A", "B"):
             paths += [("clients", role), ("clients", role, "observed_source")]
@@ -545,18 +559,36 @@ class CandidateByteBindingTests(unittest.TestCase):
 
     def setUp(self):
         from tests.test_private_image_candidate import PrivateEvidenceTests
+        from tests import test_sign_composed_image as signing
 
         self.fixture = PrivateEvidenceTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
+        # Re-render via the real canonical producer fixture for this lane.
+        # All payload and signing bytes remain synthetic, never executed.
+        fixture = self.fixture.fixture
+        fixture.pack_source.write_text(
+            fixture.pack_source.read_text().replace("linux/aarch64", "linux/x86_64")
+        )
+        fixture.candidate_value["platform"] = "linux/x86_64"
+        fixture.candidate_value["pack_source"] = record(
+            fixture.pack_source.read_bytes()
+        )
+        pin = getattr(self, "requested_pin", fixture.candidate_value["verifier_sha256"])
+        fixture.candidate_value["verifier_sha256"] = pin
+        signing.write_json(fixture.candidate, fixture.candidate_value)
+        fixture.composition["candidate_sha256"] = record(
+            fixture.candidate.read_bytes()
+        )["sha256"]
+        fixture.composition["verifier_sha256"] = pin
+        signing.write_json(fixture.composed / "composition.json", fixture.composition)
+        fixture.output = fixture.root / "signed-x86"
+        with mock.patch.object(
+            signing.signer, "sign_and_verify", side_effect=fixture.fake_sign
+        ):
+            fixture.prepare()
         private, (_, _), _ = self.fixture.prepare()
         self.directory = (private / "registry").resolve()
-        # This fixture is byte-validation only. Its original aarch64 image is
-        # relabelled for the first proposed diagnostic lane, NOT executed.
-        path = self.directory / "manifest.json"
-        manifest = json.loads(path.read_bytes())
-        manifest["image"]["platform"] = "linux/x86_64"
-        path.write_text(json.dumps(manifest))
         (self.directory / "manifest.sigstore.json").write_bytes(b"UNIT-ONLY-BUNDLE")
         provenance = json.loads(
             (self.directory / "files" / "provenance.json").read_bytes()
@@ -756,6 +788,281 @@ class CandidateByteBindingTests(unittest.TestCase):
         self.rebind()
         with self.assertRaises(observer.WitnessError):
             self.verify()
+
+
+class DiagnosticPipelineTests(unittest.TestCase):
+    """Real byte/stager validation with MOCK source authority and signatures."""
+
+    def setUp(self):
+        self.clients = {}
+        for role in ("A", "B"):
+            fixture = ClientByteBindingTests()
+            fixture.setUp()
+            self.addCleanup(fixture.doCleanups)
+            if role == "B":
+                fixture.executable += b"-DISTINCT-OBSERVER-B"
+                fixture.client["executable"] = record(fixture.executable)
+                fixture.client["tag"] = "v0.24.1"
+                fixture.client["observed_source"]["ref"] = "refs/tags/v0.24.1"
+                fixture.write_archive()
+            self.clients[role] = fixture
+        self.pin = self.clients["A"].client["executable"]["sha256"]
+        self.candidate = CandidateByteBindingTests()
+        self.candidate.requested_pin = self.pin
+        self.candidate.setUp()
+        self.addCleanup(self.candidate.doCleanups)
+        self.image = self.candidate.fixture.fixture
+        self.contract = ReportAndPolicyTests()
+        self.contract.setUp()
+        self.report = self.contract.report
+        self.report.update(
+            {
+                "clients": {
+                    role: fixture.client for role, fixture in self.clients.items()
+                },
+                "candidate": self.candidate.candidate,
+                "producer_sha256": self.pin,
+                "images_lock": record(self.image.images_lock.read_bytes()),
+                "base_set": self.image.base,
+                "signed_image_evidence": {
+                    path.name: record(path.read_bytes())
+                    for path in self.image.output.iterdir()
+                },
+            }
+        )
+        self.directory = (self.image.root / "diagnostic").resolve()
+        self.directory.mkdir()
+        for mode in ("transient", "persistent"):
+            raw = ("UNIT-OPAQUE-NOT-A-RECEIPT:" + mode).encode()
+            (self.directory / (mode + ".json")).write_bytes(raw)
+            self.report["artifacts"][mode] = record(raw)
+        self.write_report()
+        self.trusted = {
+            "source": source(),
+            "checkout_sha": source()["sha"],
+            "workflow_sha": source()["sha"],
+            "trusted_registry": self.contract.registry_raw,
+            "trusted_policies": self.contract.policies,
+        }
+        self.loader = SimpleNamespace(
+            ROOT=self.image.root.resolve(),
+            load_source=mock.Mock(return_value=self.trusted),
+        )
+
+    def write_report(self):
+        (self.directory / "witness.json").write_bytes(encode(self.report))
+        (self.directory / "witness.sigstore.json").write_bytes(
+            b"UNIT-DIAGNOSTIC-BUNDLE"
+        )
+
+    def verify(self, *, signature_failure=None):
+        commands = []
+
+        def cosign(command, **kwargs):
+            self.assertEqual(command[:2], ["cosign", "verify-blob"])
+            commands.append(command)
+            if Path(command[2]).name == signature_failure:
+                raise subprocess.CalledProcessError(1, command)
+            return subprocess.CompletedProcess(command, 0)
+
+        relative = "pack-sources/runtime/python/pack.toml"
+        with (
+            mock.patch.object(observer, "_source_loader", return_value=self.loader),
+            mock.patch.object(
+                observer,
+                "_pack_source",
+                return_value=(relative, self.image.pack_source.read_bytes()),
+            ),
+            mock.patch.object(observer.subprocess, "run", side_effect=cosign),
+        ):
+            result = observer.verify_diagnostic(
+                directory=self.directory,
+                evidence=self.image.output.resolve(),
+                candidate_directory=self.candidate.directory,
+                client_directories={
+                    role: fixture.directory for role, fixture in self.clients.items()
+                },
+                images_lock=self.image.images_lock.resolve(),
+                reference="runtime/python@1.1.0",
+                environment=self.contract.environment,
+                producer_sha256=self.pin,
+            )
+        return result, commands
+
+    def test_all_existing_signed_subjects_are_bound_but_gate_still_refuses(self):
+        result, commands = self.verify()
+        self.assertEqual(result, self.report)
+        self.assertEqual(
+            len(commands), 9
+        )  # A/B * 2 + manifest + image * 3 + diagnostic
+        subjects = [Path(command[2]).name for command in commands]
+        for name in (
+            "manifest.json",
+            "rootfs.ext4",
+            "provenance.json",
+            "image-evidence.json",
+            "witness.json",
+        ):
+            self.assertEqual(subjects.count(name), 1)
+        for command in commands:
+            if Path(command[2]).name in (
+                "manifest.json",
+                "rootfs.ext4",
+                "provenance.json",
+                "image-evidence.json",
+                "witness.json",
+            ):
+                self.assertIn(source()["publisher_identity"], command)
+                option = "--certificate-github-workflow-sha"
+                self.assertEqual(command[command.index(option) + 1], source()["sha"])
+        with self.assertRaises(observer.WitnessError):
+            observer.require_publication_authorization(result)
+
+    def test_image_report_and_candidate_signature_failures_refuse(self):
+        for name in (
+            "manifest.json",
+            "rootfs.ext4",
+            "provenance.json",
+            "image-evidence.json",
+            "witness.json",
+        ):
+            with self.subTest(name=name), self.assertRaises(observer.WitnessError):
+                self.verify(signature_failure=name)
+
+    def test_changed_artifacts_evidence_and_lock_bytes_refuse(self):
+        for path in (
+            self.directory / "transient.json",
+            self.directory / "persistent.json",
+            self.image.output / "composition.json",
+            self.image.images_lock,
+        ):
+            original = path.read_bytes()
+            path.write_bytes(original + b"\n")
+            try:
+                with (
+                    self.subTest(path=path.name),
+                    self.assertRaises(observer.WitnessError),
+                ):
+                    self.verify()
+            finally:
+                path.write_bytes(original)
+
+    def test_equivalent_manifest_rewrite_requires_new_observation(self):
+        path = self.candidate.directory / "manifest.json"
+        path.write_bytes(path.read_bytes() + b"\n")
+        with self.assertRaises(observer.WitnessError):
+            self.verify()
+
+    def test_base_and_rebound_lock_cannot_override_evidence(self):
+        original = copy.deepcopy(self.report)
+        self.report["base_set"]["manifest_sha256"] = "0" * 64
+        self.write_report()
+        with self.assertRaises(observer.WitnessError):
+            self.verify()
+        self.report = original
+        self.image.images_lock.write_bytes(self.image.images_lock.read_bytes() + b"\n")
+        self.report["images_lock"] = record(self.image.images_lock.read_bytes())
+        self.write_report()
+        with self.assertRaises(observer.WitnessError):
+            self.verify()
+
+    def test_extra_files_and_protected_source_failure_refuse(self):
+        (self.directory / "author-policy.json").write_bytes(b"AUTHOR")
+        with self.assertRaises(observer.WitnessError):
+            self.verify()
+        (self.directory / "author-policy.json").unlink()
+        self.loader.load_source.side_effect = observer.WitnessError(
+            "untrusted workflow source"
+        )
+        with self.assertRaisesRegex(observer.WitnessError, "untrusted workflow source"):
+            self.verify()
+
+    def test_current_report_cannot_reuse_previous_run_candidate(self):
+        fresh = source()
+        fresh["run_attempt"] = "3"
+        fresh["invocation"] = fresh["invocation"].removesuffix("/2") + "/3"
+        self.contract.environment["GITHUB_RUN_ATTEMPT"] = "3"
+        self.trusted["source"] = fresh
+        self.report["source"] = fresh
+        self.report["policy"]["source"] = fresh
+        self.write_report()
+        with self.assertRaises(observer.WitnessError):
+            self.verify()
+
+    def test_legacy_metadata_cannot_coerce_boolean_or_float_numbers(self):
+        root = self.image.output.resolve()
+        for name in (
+            "candidate.json",
+            "composition.json",
+            "image-evidence.json",
+            "image-descriptor.json",
+        ):
+            path = root / name
+            raw = path.read_bytes()
+            document = json.loads(raw)
+            for bad in (True, float(document["schema_version"])):
+                changed = {**document, "schema_version": bad}
+                path.write_bytes(encode(changed))
+                try:
+                    with (
+                        self.subTest(name=name, bad=bad),
+                        self.assertRaises(observer.WitnessError),
+                    ):
+                        observer._evidence_record_types(root)
+                finally:
+                    path.write_bytes(raw)
+        path = root / "composition.json"
+        document = json.loads(path.read_bytes())
+        document["assets"]["rootfs.ext4"]["size"] = True
+        path.write_bytes(encode(document))
+        with self.assertRaises(observer.WitnessError):
+            observer._evidence_record_types(root)
+
+    def test_pack_source_uses_exact_git_object_not_working_override(self):
+        root = self.image.root.resolve()
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if not key.startswith("GIT_")
+        }
+        environment["GIT_EDITOR"] = "true"
+        command = [
+            "git",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "user.name=Unit",
+            "-c",
+            "user.email=unit@example.invalid",
+            "-C",
+            str(root),
+        ]
+
+        def git(*args):
+            return subprocess.run(
+                command + list(args),
+                env=environment,
+                check=True,
+                capture_output=True,
+                timeout=30,
+            ).stdout
+
+        git("init", "-q")
+        relative = "pack-sources/runtime/python/pack.toml"
+        git("add", relative)
+        git("commit", "-qm", "unit source boundary")
+        sha = git("rev-parse", "HEAD").decode().strip()
+        context = {**source(), "sha": sha}
+        loader = SimpleNamespace(ROOT=root)
+        self.assertEqual(
+            observer._pack_source(loader, "runtime/python@1.1.0", context),
+            (relative, self.image.pack_source.read_bytes()),
+        )
+        self.image.pack_source.write_bytes(self.image.pack_source.read_bytes() + b"\n")
+        with self.assertRaises(observer.WitnessError):
+            observer._pack_source(loader, "runtime/python@1.1.0", context)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # PS-06 protected observer diagnostic v2 review
 
-## Scope
+## Initial scope at `35faa9a4e10225ab48f84d745117605b11d49029`
 
 Before this review artifact: 5 files, 2 modified, 3 added, 0 deleted;
 1,652 inserted lines and 3 deleted lines.
@@ -31,7 +31,7 @@ No workflow, runtime, release, image recipe or published registry file changed.
    from selected document bytes; both schemas are closed, selector duplicates
    refuse, and source/role/backend/version must agree.
 
-## Explicit remaining integration limitations
+## Initial integration limitations
 
 - No runtime receipts, measurement semantics, production backend acceptance
   policy, or protected source loader is implemented. Caller-owned workflow SHA
@@ -64,3 +64,50 @@ No workflow, runtime, release, image recipe or published registry file changed.
 These tests use synthetic byte fixtures and mocked cryptography. They are not
 real-release signature verification, protected execution, Built admission,
 runtime acceptance, public publication or fresh-recipient evidence.
+
+## Follow-up: protected source and composed diagnostic verification
+
+The integration owner authorized completing the non-runtime source/image
+boundary while explicitly forbidding guessed receipt APIs and producer
+enablement.
+
+Implemented after the initial review:
+
+- Fixed-path policy loading tied to trusted `GITHUB_WORKFLOW_SHA`, actual HEAD,
+  a clean checkout, fixed regular committed workflow/registry/document bytes,
+  and no index flags concealing tracked changes. Git routing variables and
+  replacement objects do not select alternate source; immutable commit IDs,
+  not moving HEAD, select blob content.
+- `verify_diagnostic` composes strict source/report validation, A/B archives,
+  canonical candidate, existing image evidence and exact lock/current-run
+  provenance, plus a signed diagnostic envelope. All nine signed subjects are
+  checked against their fixed role/subject and identity, with publisher source
+  SHA extensions for image/candidate/diagnostic signatures.
+- The canonical stager accepts an optional source-bound signature callback;
+  its default publisher behavior is unchanged. No second publisher exists.
+- Existing metadata versions and file records receive exact v2 numeric rules;
+  no bool/float coercion through legacy JSON equality.
+
+Latest checks:
+
+- `python3 -m unittest tests.test_protected_observer_v2 tests.test_protected_observer_source`:
+  50 passed, including mini-Git source-boundary and mock signature/source
+  pipeline tests.
+- `python3 -m unittest discover -s tests`: 311 tests, 1 skipped, successful.
+  An earlier 200-second invocation timed out without a result; a fresh exact
+  command with a longer execution bound completed successfully in 76.970 s.
+- `python3 scripts/validate-packs.py`: 9 manifests validated.
+- Ruff format/lint on the four observer/source Python files, lint on the changed
+  canonical stager, and `git diff --check`: clean.
+- Independent follow-up review: pending.
+
+Superseded limitations: protected source loading and existing-image/diagnostic
+signature composition are now implemented. The loader does not authenticate an
+arbitrary environment dictionary; its input must be the trusted protected job
+environment. No production policy files, runtime measurement semantics,
+reviewed receipt DTO, producer, publication capability, or live witness exists.
+Transient/persistent files remain opaque bound bytes, not runtime observations.
+No retained candidate transport snapshot is returned for later import or use.
+Current consumer revocation/admission and B's actual compiled-lock acceptance
+remain separate live requirements, not established by matching supplied lock
+bytes.

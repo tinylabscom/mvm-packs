@@ -9,6 +9,7 @@ documents only; it does not define runtime acceptance policy.
 import gzip
 import importlib.util
 import io
+import os
 import re
 import stat
 import subprocess
@@ -40,6 +41,9 @@ SIGNATURE_ROLES = {
     "release-archive": "release",
     "release-checksums": "release",
     "image-evidence": PUBLISHER,
+    "image-rootfs": PUBLISHER,
+    "image-provenance": PUBLISHER,
+    "diagnostic-report": PUBLISHER,
     "candidate": PUBLISHER,
     "report": PUBLISHER,
 }
@@ -53,6 +57,9 @@ REPORT_FIELDS = {
     "candidate",
     "policy",
     "artifacts",
+    "signed_image_evidence",
+    "images_lock",
+    "base_set",
 }
 CLIENT_FIELDS = {
     "repository",
@@ -295,6 +302,19 @@ def validate_report(
     if candidate["verifier_sha256"] != producer_sha256:
         raise WitnessError("candidate verifier is not H")
     _inventory(candidate["payload"])
+    file_record(report["images_lock"], limit=LIMIT)
+    base = report["base_set"]
+    shape(base, {"repository", "release_tag", "manifest_sha256"}, "base set")
+    if (
+        base["repository"] != "tinylabscom/mvm-images"
+        or not isinstance(base["release_tag"], str)
+        or not re.fullmatch(r"image-set/v[0-9]+\.[0-9]+\.[0-9]+", base["release_tag"])
+    ):
+        raise WitnessError("invalid base set")
+    _hex(base["manifest_sha256"])
+    shape(report["signed_image_evidence"], v1.stager.EVIDENCE_NAMES, "image evidence")
+    for name, record in report["signed_image_evidence"].items():
+        file_record(record, limit=LIMIT if name.endswith(".json") else 256 << 20)
     shape(report["artifacts"], {"transient", "persistent"}, "opaque artifacts")
     for record in report["artifacts"].values():
         file_record(record, limit=LIMIT)
@@ -315,6 +335,10 @@ def verify_signature(blob, bundle, *, role, source, tag=None):
         "release-archive": (ARCHIVE, ARCHIVE + ".bundle"),
         "release-checksums": ("checksums-sha256.txt", "checksums-sha256.txt.bundle"),
         "candidate": ("manifest.json", "manifest.sigstore.json"),
+        "image-rootfs": ("rootfs.ext4", "rootfs.signature.json"),
+        "image-provenance": ("provenance.json", "provenance.signature.json"),
+        "image-evidence": ("image-evidence.json", "image-evidence.sigstore.json"),
+        "diagnostic-report": ("witness.json", "witness.sigstore.json"),
     }
     if role not in subjects:
         raise WitnessError(
@@ -334,6 +358,44 @@ def verify_signature(blob, bundle, *, role, source, tag=None):
             or manifest["schema_version"] != 1
         ):
             raise WitnessError("signature role/subject schema differs")
+    elif role == "diagnostic-report":
+        report = parse_json(bounded_bytes(blob))
+        shape(report, REPORT_FIELDS, "diagnostic signature subject")
+        if (
+            type(report["schema_version"]) is not int
+            or report["schema_version"] != 2
+            or report["kind"] != "protected-observer-diagnostic"
+            or not v1.exact(report["source"], source)
+        ):
+            raise WitnessError("diagnostic signature subject/source differs")
+    elif role == "image-evidence":
+        evidence = parse_json(bounded_bytes(blob))
+        shape(
+            evidence,
+            {
+                "schema_version",
+                "kind",
+                "reference",
+                "base_set",
+                "publisher_identity",
+                "assets",
+            },
+            "image evidence subject",
+        )
+        if (
+            type(evidence["schema_version"]) is not int
+            or evidence["schema_version"] != 1
+            or evidence["kind"] != "signed-image-evidence-not-published"
+            or evidence["publisher_identity"] != PUBLISHER
+        ):
+            raise WitnessError("image evidence signature subject differs")
+    elif role == "image-provenance":
+        provenance = parse_json(bounded_bytes(blob))
+        shape(
+            provenance,
+            {"_type", "subject", "predicateType", "predicate"},
+            "provenance signature subject",
+        )
     identity, args = SIGNATURE_ROLES[role], []
     if identity == "release":
         if not isinstance(tag, str) or not re.fullmatch(
@@ -387,7 +449,7 @@ def verify_client(client, directory, *, source):
     with tempfile.TemporaryDirectory() as temporary:
         snapshot, blobs = Path(temporary).resolve(), {}
         for role, name in names.items():
-            raw = bounded_bytes(directory / name, limit=256 << 20)
+            raw = bounded_bytes(directory / name, limit=client[role]["size"])
             if digest(raw) != client[role]:
                 raise WitnessError("client bytes differ")
             blobs[role] = raw
@@ -564,7 +626,9 @@ def verify_candidate(candidate, directory, *, source, reference):
             raise WitnessError("missing candidate bytes")
         provenance = None
         for path, record in expected.items():
-            raw = bounded_bytes(directory / "files" / path, empty=True, limit=256 << 20)
+            raw = bounded_bytes(
+                directory / "files" / path, empty=True, limit=record["size"]
+            )
             if digest(raw) != record:
                 raise WitnessError("candidate payload bytes differ")
             if path == "provenance.json":
@@ -626,6 +690,220 @@ def verify_candidate(candidate, directory, *, source, reference):
             source=source,
         )
         return manifest
+
+
+def _source_loader():
+    return v1.helper("protected-observer-source.py", "protected_observer_source")
+
+
+def _pack_source(loader, reference, source):
+    """Read only the canonical source path derived from an exact pack reference."""
+    namespace_name, _ = reference.split("@", 1)
+    relative = "pack-sources/" + namespace_name + "/pack.toml"
+    raw = bounded_bytes(loader.ROOT / relative)
+    specification = source["sha"] + ":" + relative
+    command = ["git", "--no-replace-objects", "-C", str(loader.ROOT), "cat-file"]
+    git_environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
+    try:
+        size = subprocess.run(
+            command + ["-s", specification],
+            check=True,
+            capture_output=True,
+            timeout=30,
+            env=git_environment,
+        ).stdout
+        if not size.strip().isdigit() or int(size) != len(raw):
+            raise WitnessError("protected pack source tree size differs")
+        committed = subprocess.run(
+            command + ["blob", specification],
+            check=True,
+            capture_output=True,
+            timeout=30,
+            env=git_environment,
+        ).stdout
+    except (OSError, subprocess.SubprocessError) as error:
+        raise WitnessError("protected pack source tree unavailable") from error
+    if raw != committed:
+        raise WitnessError("protected pack source differs from workflow commit")
+    return relative, raw
+
+
+def _snapshot_record(path, destination, expected, *, limit=LIMIT):
+    raw = bounded_bytes(path, limit=min(limit, expected["size"]))
+    if digest(raw) != expected:
+        raise WitnessError("bound input bytes differ")
+    destination.write_bytes(raw)
+    return raw
+
+
+def _evidence_record_types(snapshot):
+    """Apply v2's exact numeric/record rules to existing metadata formats."""
+    documents = {
+        name: parse_json(bounded_bytes(snapshot / name))
+        for name in (
+            "candidate.json",
+            "composition.json",
+            "image-evidence.json",
+            "image-descriptor.json",
+        )
+    }
+    for name, document in documents.items():
+        version = 2 if name == "image-descriptor.json" else 1
+        if (
+            type(document["schema_version"]) is not int
+            or document["schema_version"] != version
+        ):
+            raise WitnessError("image metadata schema version is not an exact integer")
+    candidate = documents["candidate.json"]
+    for key in ("pack_source", "signed_root_manifest", "signed_root_bundle"):
+        file_record(candidate[key], limit=LIMIT)
+    for value in (
+        candidate["base_artifacts"],
+        candidate["application_layer"],
+        documents["composition.json"]["assets"],
+        documents["image-evidence.json"]["assets"],
+    ):
+        _inventory(value)
+    report = parse_json(bounded_bytes(snapshot / "asset-report.json"))
+    shape(report, {"assets"}, "asset report")
+    if not isinstance(report["assets"], list) or not 1 <= len(report["assets"]) <= 256:
+        raise WitnessError("invalid bounded asset report")
+    for entry in report["assets"]:
+        shape(entry, {"path", "sha256", "size"}, "reported asset")
+        _path(entry["path"])
+        file_record({key: entry[key] for key in ("sha256", "size")})
+
+
+def verify_diagnostic(
+    *,
+    directory,
+    evidence,
+    candidate_directory,
+    client_directories,
+    images_lock,
+    reference,
+    environment,
+    producer_sha256=None,
+):
+    """Authenticate existing artifact bytes, NOT measurement or launch authority.
+
+    The source loader supplies policy bytes from fixed protected checkout paths.
+    No report-, dispatch- or candidate-provided trust/policy bytes are accepted.
+    Opaque mode files remain uninterpreted; their hashes do not prove execution.
+    No installed candidate or reusable immutable transport snapshot is returned.
+    """
+    loader = _source_loader()
+    trusted = loader.load_source(environment)
+    directory, evidence = Path(directory), Path(evidence)
+    report_bytes = bounded_bytes(directory / "witness.json")
+    report = parse_json(report_bytes)
+    validate_report(
+        report,
+        trusted["trusted_policies"],
+        environment=environment,
+        checkout_sha=trusted["checkout_sha"],
+        workflow_sha=trusted["workflow_sha"],
+        trusted_registry=trusted["trusted_registry"],
+        producer_sha256=producer_sha256,
+    )
+    if report["reference"] != reference:
+        raise WitnessError("diagnostic reference differs from intended candidate")
+    source = trusted["source"]
+    if not v1.exact(source, report["source"]):
+        raise WitnessError("loaded protected source differs from report")
+    shape(client_directories, {"A", "B"}, "client directories")
+    for role in ("A", "B"):
+        verify_client(report["clients"][role], client_directories[role], source=source)
+    manifest = verify_candidate(
+        report["candidate"], candidate_directory, source=source, reference=reference
+    )
+    retained = {
+        "witness.json",
+        "witness.sigstore.json",
+        "transient.json",
+        "persistent.json",
+    }
+    if {entry.name for entry in directory.iterdir()} != retained:
+        raise WitnessError("diagnostic directory has extra/missing files")
+    if {entry.name for entry in evidence.iterdir()} != v1.stager.EVIDENCE_NAMES:
+        raise WitnessError("image evidence has extra/missing files")
+    with tempfile.TemporaryDirectory(
+        prefix="mvm-diagnostic-", dir=Path(tempfile.gettempdir()).resolve()
+    ) as temporary:
+        private = Path(temporary)
+        raw_directory, snapshot = private / "raw", private / "evidence"
+        raw_directory.mkdir(mode=0o700)
+        snapshot.mkdir(mode=0o700)
+        for name in retained:
+            raw = bounded_bytes(directory / name)
+            if name == "witness.json" and raw != report_bytes:
+                raise WitnessError("diagnostic report changed during verification")
+            if name in ("transient.json", "persistent.json"):
+                if digest(raw) != report["artifacts"][name.removesuffix(".json")]:
+                    raise WitnessError("opaque mode artifact differs")
+            (raw_directory / name).write_bytes(raw)
+        for name, expected in report["signed_image_evidence"].items():
+            _snapshot_record(
+                evidence / name, snapshot / name, expected, limit=256 << 20
+            )
+        lock = private / "images.lock"
+        _snapshot_record(images_lock, lock, report["images_lock"])
+        relative, raw = _pack_source(loader, reference, source)
+        pack_source = private / relative
+        pack_source.parent.mkdir(parents=True)
+        pack_source.write_bytes(raw)
+
+        def verify_image_signature(blob, bundle):
+            roles = {
+                "rootfs.ext4": "image-rootfs",
+                "provenance.json": "image-provenance",
+                "image-evidence.json": "image-evidence",
+            }
+            verify_signature(blob, bundle, role=roles[blob.name], source=source)
+
+        try:
+            v1.stager.check_evidence(
+                snapshot,
+                reference,
+                pack_source,
+                lock,
+                verify_signature=verify_image_signature,
+            )
+        except v1.stager.StageError as error:
+            raise WitnessError(str(error)) from error
+        _evidence_record_types(snapshot)
+        descriptor = parse_json(bounded_bytes(snapshot / "image-descriptor.json"))
+        if not v1.exact(descriptor, manifest["image"]) or not v1.exact(
+            descriptor["base_set"], report["base_set"]
+        ):
+            raise WitnessError("candidate/image evidence/base differs")
+        for asset in descriptor["assets"].values():
+            expected = {key: asset[key] for key in ("sha256", "size")}
+            if not v1.exact(expected, report["signed_image_evidence"][asset["name"]]):
+                raise WitnessError("candidate asset differs from signed evidence")
+        composition = parse_json(bounded_bytes(snapshot / "composition.json"))
+        if composition["verifier_sha256"] != producer_sha256:
+            raise WitnessError("image evidence producer verifier is not H")
+        expected_provenance = v1.signer.provenance(
+            reference,
+            composition,
+            report["signed_image_evidence"]["rootfs.ext4"],
+            source["invocation"],
+            source["sha"],
+            report["images_lock"]["sha256"],
+        )
+        provenance = parse_json(bounded_bytes(snapshot / "provenance.json"))
+        if not v1.exact(provenance, expected_provenance):
+            raise WitnessError("image evidence protected source/run/lock differs")
+        verify_signature(
+            raw_directory / "witness.json",
+            raw_directory / "witness.sigstore.json",
+            role="diagnostic-report",
+            source=source,
+        )
+    return report
 
 
 def require_publication_authorization(*args, **kwargs):

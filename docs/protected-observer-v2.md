@@ -18,8 +18,10 @@ measurement APIs. Passing them cannot establish that a guest ran.
 
 `scripts/protected-observer-v2.py` is an import-only diagnostic module, not a
 producer. Its top-level fields are exactly `schema_version`, `kind`,
-`source`, `reference`, `clients`, `producer_sha256`, `candidate`, `policy`, and
-`artifacts`. The kind is deliberately `protected-observer-diagnostic`, not a
+`source`, `reference`, `clients`, `producer_sha256`, `candidate`, `policy`,
+`artifacts`, `signed_image_evidence`, `images_lock`, and `base_set`.
+All are mandatory; earlier diagnostic envelopes missing them refuse rather
+than downgrade. The kind is deliberately `protected-observer-diagnostic`, not a
 claim of a successful protected observation.
 
 `artifacts` contains exactly `transient` and `persistent` opaque file records.
@@ -56,7 +58,34 @@ is no fallback to the historical v1 parser to fill these gaps.
 - `resolve_policy(binding, trusted_policies, *, source, trusted_registry)`
   checks independent registry and selected-document byte records. Both trusted
   inputs must be obtained by reviewed protected code, never from the report,
-  dispatch, candidate or author. No production source loader is enabled here.
+  dispatch, candidate or author.
+- `verify_diagnostic(directory=..., evidence=..., candidate_directory=...,
+  client_directories=..., images_lock=..., reference=..., environment=...,
+  producer_sha256=None)` composes source loading, strict report validation,
+  both authenticated client archives, canonical candidate verification,
+  existing signed-image semantics/signatures, and the signed diagnostic report.
+  It snapshots evidence and raw artifacts privately. Each image asset must
+  equal the canonical candidate transport asset; descriptor, base, verifier,
+  current source/run/attempt and lock bytes must agree.
+  Opaque mode hashes are checked, but no runtime receipt is parsed.
+
+`scripts/protected-observer-source.py::load_source(environment)` supplies
+policy bytes only from the script's own fixed repository root and fixed paths.
+It requires the trusted GitHub job environment's `GITHUB_WORKFLOW_SHA` to equal
+`GITHUB_SHA` and actual Git HEAD, a clean checkout including untracked files,
+no index flags hiding tracked changes, regular nonlinked input files and exact
+committed blob bytes. Git routing variables and replacement objects cannot
+select alternate content. The fixed workflow file is
+`.github/workflows/publish.yml`; the fixed registry is
+`.github/policies/protected-observer-registry-v2.json`.
+The derived `pack-sources/<namespace>/<name>/pack.toml` is independently checked
+against the same immutable Git commit, not a user-selected source path.
+
+The loader checks consistency with a **trusted job environment**, not the
+authentication of an arbitrary local dictionary. Unit mini-Git environments
+are not authenticated GitHub executions. No production policy files are shipped,
+so an actual loader invocation refuses until reviewed protected source contains
+them; there is no report/dispatch/candidate policy override.
 
 The diagnostic registry is exactly `{schema_version: 2, policies: [...]}`.
 Each entry is exactly `{path, role, backend, version, document}` and selectors
@@ -68,10 +97,9 @@ version, repository, ref, sha, workflow_ref, document_sha256)`.
 The fixed selected-document path is
 `.github/policies/protected-observer-v2.json`. Diagnostic documents contain
 only `{schema_version: 2, role, backend, version}`. These are **not runtime
-checklists or backend applicability policy**. The runtime policy vocabulary,
-actual source loader, and authenticated workflow-source/checkout acquisition
-remain integration work. Caller-supplied `workflow_sha` must eventually come
-from authenticated workflow source metadata, not report JSON.
+checklists or backend applicability policy**. The runtime policy vocabulary and
+reviewed measurement adapter remain integration work. The composed diagnostic
+uses trusted `GITHUB_WORKFLOW_SHA`, not report JSON, for workflow-source binding.
 
 Resource bounds in this diagnostic implementation are 256 payload files,
 256 MiB per payload/client record, 4 MiB per metadata/artifact record, and
@@ -96,11 +124,12 @@ The issuer is `https://token.actions.githubusercontent.com`. Purpose strings and
 role labels select a closed verification rule; they never confer authority.
 Bundles must authenticate the actual subject, not another subject with the same
 role label. The former repository signer is not accepted for new evidence.
-The table describes the required integrated contract. The diagnostic module
-implements release and candidate signature paths only; its generic helper
-refuses image-evidence/report roles until their integrated semantic verifiers
-exist. It does not verify a signed observer report or the full image-evidence
-chain by calling an identity-only helper.
+The diagnostic pipeline implements release, candidate, existing image-evidence,
+and diagnostic-report signature paths with actual fixed subjects and source
+binding. The existing canonical stager accepts an optional source-bound
+signature callback; its publisher default behavior remains unchanged. The
+final runtime observer `report` role still refuses: a signed diagnostic report
+is not an authenticated measurement report and cannot authorize publication.
 
 For each client, retain repository, tag, **observed** source context,
 architecture, archive, checksum text, checksum bundle, archive bundle, executable
