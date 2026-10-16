@@ -240,9 +240,24 @@ headless prompt handling, provider-specific configuration, and declarations of
 policy/secret requirements. None of those declarations is a host grant.
 
 Policy definitions and reusable policy groups may live in both packs and host
-configuration and compose with other policies. `mvm` resolves and enforces the
-effective result; a pack does not override stricter local restrictions or grant
-itself capabilities. An incompatible required capability must refuse clearly.
+configuration and compose with other policies. The user confirmed this
+application-policy precedence, highest first:
+
+1. Organization policy when managed through `mvmd`.
+2. The user's personal policy.
+3. The pack's policy.
+
+Standalone operation uses personal policy above pack policy. `mvm` resolves and
+enforces the composed result; a lower-precedence definition cannot override a
+higher-precedence decision or grant itself capabilities. An incompatible required
+capability must refuse clearly.
+
+Test both pack-versus-personal and, for managed operation, personal/pack-versus-
+organization conflicts. A local configuration file must not be presented as
+proof of actual organization-policy enforcement through `mvmd`.
+
+This workload-policy hierarchy does not permit pack/user verdicts to replace
+the observer's fixed protected-source backend measurement policy.
 
 The platform owns generic authenticated pull/install/admission, verified runtime
 and kernel custody, policy composition/enforcement, authorized host secret
@@ -288,9 +303,20 @@ another builder or a credential bypass.
     or evidence of policy enforcement.
 
 The user has selected a real prompt and the existing host-held secret route,
-but has not yet authorized a model-use budget. Live calls remain blocked until
-the model/request limits and budget are approved and the required secret is
-configured through the supported secure store, never chat or committed files.
+and approved a **maximum of USD 5 total** for model usage across validation,
+rehearsals and the demo combined. This is not a per-run budget and may not be
+raised automatically.
+
+Use supported, verified CLI/provider request and budget controls plus one shared
+redacted spend ledger. Record the exact model, limits and cumulative usage.
+Do not claim an enforced cap until the controls have been tested. If the next
+request cannot be bounded within the remaining balance, stop before issuing it.
+Paid retries count against the same cap; none are automatically authorized.
+
+Live calls still require working Claude/host-broker compatibility, configured
+request limits and the secret supplied through the supported secure store,
+never chat or committed files. The budget does not authorize cloud provisioning,
+new credential stores, public redistribution, signing or publication.
 Subscription/browser login is unproven and must not be assumed available.
 Public Claude redistribution or official endorsement is not authorized by the
 demo name or this plan.
@@ -304,7 +330,7 @@ These are target decision deadlines, not predicted completion dates.
 | Deadline, Pacific | Required checkpoint | If missed |
 | --- | --- | --- |
 | Thu Oct 15 evening | P1 progresses with real hook/PR evidence; remaining API/release tasks have explicit ownership | Report actual failure/unknowns, preserve state and revise the next bounded task |
-| Fri Oct 16, 12:00 | Feasibility decision: reviewed measurement path, bounded remaining work, credible A/H/B route, chosen demo trust/delivery/authentication scope and model budget | Do not promise full public PS-06 for Tuesday; explicitly report which demo claims remain possible |
+| Fri Oct 16, 12:00 | Feasibility decision: reviewed measurement path, bounded remaining work, credible A/H/B route, chosen demo trust/delivery scope, working authentication and controls for the approved USD 5 cap | Do not promise full public PS-06 for Tuesday; explicitly report which demo claims remain possible |
 | Fri Oct 16 evening | API and public-mode coverage frozen/compiled or specific remaining failures exposed; live authorization packet taking shape | Keep workflow disabled; escalate concrete missing evidence, not generic green status |
 | Sat Oct 17 | Target authenticated A/H/B, reproduced candidate, reviewed observer adapter and approved live manifest | Public target becomes no-go unless a revised evidence-backed schedule preserves rehearsal time |
 | Sun Oct 18, 09:00 | Target actual protected/public/fresh-recipient chain and an independently cold-run demo artifact | Do not substitute LOCALDEV/source/one-shot version evidence |
@@ -339,8 +365,8 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
 
 - The user selected Python for public acceptance and `anthropic/claude` as the
   real-prompt policy-interaction demo. The exact Claude pack version, authorized
-  delivery/signing scope, working host-secret binding, model budget and
-  executable commands still require the concrete handoff/approvals above.
+  delivery/signing scope, working host-secret binding, enforced model/request
+  limits and executable commands still require the concrete handoff above.
 - No complete measurement receipt wire is frozen by this document.
 - Full public completion by October 20 remains low-confidence until the Friday
   feasibility gate closes. The plan does not quietly reduce the acceptance bar.
@@ -358,3 +384,8 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
   host, with `mvm` enforcing the effective policy, and selected the existing
   host-held credential-secret mechanism. Raw provider credentials must not enter
   the microVM. Model/request limits and spending authority remain unapproved.
+- 2026-10-15: the user fixed application-policy precedence as organization policy
+  through `mvmd` above personal policy above pack policy, and approved USD 5
+  maximum total model usage for validation, rehearsals and the demo. Execution
+  still requires working secret integration and verified request/budget controls;
+  no other authority is expanded.
