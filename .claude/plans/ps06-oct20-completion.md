@@ -19,6 +19,10 @@ Python acceptance does not prove the Claude demo. A private Claude demonstration
 does not satisfy public Built/image acceptance. A pack name is not publisher
 authority or an assertion of Anthropic endorsement.
 
+The demo is **standalone and transient/headless**, with pack and personal policy.
+`mvmd` and the organization-policy demonstration are explicitly post-demo work.
+Their future precedence contract is retained, not simulated in this demo.
+
 This is a gated delivery plan, not permission to sign, dispatch, upload, publish,
 tag, transfer private artifacts, use credentials or incur cloud/model charges.
 The approved architecture is inherited; no trust bypass or second publisher is
@@ -252,9 +256,9 @@ enforces the composed result; a lower-precedence definition cannot override a
 higher-precedence decision or grant itself capabilities. An incompatible required
 capability must refuse clearly.
 
-Test both pack-versus-personal and, for managed operation, personal/pack-versus-
-organization conflicts. A local configuration file must not be presented as
-proof of actual organization-policy enforcement through `mvmd`.
+For this demo, test pack-versus-personal conflicts. Personal/pack-versus-
+organization validation belongs to the post-demo `mvmd` work. A local
+configuration file must not be presented as organization-policy enforcement.
 
 This workload-policy hierarchy does not permit pack/user verdicts to replace
 the observer's fixed protected-source backend measurement policy.
@@ -294,7 +298,7 @@ another builder or a credential bypass.
 8. Under an allowed policy, submit a non-sensitive prompt and receive an actual
    model response. Record the real input/output/exit and plan/audit association.
    This is required for the requested demo, not an optional enhancement.
-9. Apply a deliberate restrictive local policy and demonstrate the actual
+9. Apply a deliberate restrictive personal policy and demonstrate the actual
    admission/network refusal with its reason. Prefer a required-capability
    admission refusal before a paid request where the implemented contract
    supports it. Requirements are not grants; local restrictions win.
@@ -323,6 +327,39 @@ demo name or this plan.
 If the supported named-pack path is not ready, label any local preview
 accurately; never rename bundle-install success as pack-pull acceptance.
 
+### Friday noon: concrete feasibility evidence
+
+Present two explicit assessments: public PS-06 acceptance and the standalone
+Claude demo. Neither status may borrow the other's evidence.
+
+- Pin the actual implementation, CLI/helper, runtime/kernel proof and candidate
+  identities. Separate source-only, compiled, tested and live results.
+- Show that the replacement exporter includes the verified runtime closure.
+  Repeating the old archive's already-known missing-overlay failure is not
+  validation of a replacement.
+- Report the latest actual cold-consumer attempt and named-pack pull status,
+  with command, numeric exit and retained logs. If a stage is unrun, name the
+  exact missing code/API/artifact/authority rather than reporting green readiness.
+- Record the working host-secret path, provider compatibility and controls for
+  the cumulative USD 5 limit.
+- Supply the exact next bounded native validation manifest for review before
+  execution. Do not invent runtime authority or bypass a check to meet noon.
+
+### Sunday: demo validation must pass all four cases
+
+| Case | Required actual evidence |
+| --- | --- |
+| Pull and cold start | Named pinned pack, descriptor/archive identity and trust verification; clean consumer state; actual application startup without package build, source bootstrap or producer-cache seed |
+| Allowed prompt | Real Claude prompt/model response and exit, tied to the same pack/plan; verified host-only credential path and recorded model usage within the shared budget |
+| Personal-policy refusal | Same pack identity under the restrictive personal policy; actual refusal and reason/audit association, not merely displayed policy configuration |
+| Cleanup and repeatability | Owned runtime resources accounted for after teardown, fixed artifact/commands/policies, and a repeatable rehearsal; backend stop acknowledgement alone is insufficient |
+
+No `mvmd`, organization-policy, interactive terminal, startup SLO or public
+Claude-distribution claim is needed for this standalone demo. Trust, runtime
+custody, policy enforcement and credential isolation are not deferred.
+These four cases validate the demo only; public PS-06 acceptance still requires
+P1–P6 and both public lifecycle modes.
+
 ## Calendar checkpoints
 
 These are target decision deadlines, not predicted completion dates.
@@ -330,10 +367,10 @@ These are target decision deadlines, not predicted completion dates.
 | Deadline, Pacific | Required checkpoint | If missed |
 | --- | --- | --- |
 | Thu Oct 15 evening | P1 progresses with real hook/PR evidence; remaining API/release tasks have explicit ownership | Report actual failure/unknowns, preserve state and revise the next bounded task |
-| Fri Oct 16, 12:00 | Feasibility decision: reviewed measurement path, bounded remaining work, credible A/H/B route, chosen demo trust/delivery scope, working authentication and controls for the approved USD 5 cap | Do not promise full public PS-06 for Tuesday; explicitly report which demo claims remain possible |
+| Fri Oct 16, 12:00 | Separate public/demo feasibility decisions using the concrete evidence checklist above | Do not promise unproven acceptance; report the exact failed or unrun stage and its next bounded action |
 | Fri Oct 16 evening | API and public-mode coverage frozen/compiled or specific remaining failures exposed; live authorization packet taking shape | Keep workflow disabled; escalate concrete missing evidence, not generic green status |
 | Sat Oct 17 | Target authenticated A/H/B, reproduced candidate, reviewed observer adapter and approved live manifest | Public target becomes no-go unless a revised evidence-backed schedule preserves rehearsal time |
-| Sun Oct 18, 09:00 | Target actual protected/public/fresh-recipient chain and an independently cold-run demo artifact | Do not substitute LOCALDEV/source/one-shot version evidence |
+| Sun Oct 18, 09:00 | Target all four actual standalone demo cases above; track public protected/fresh-recipient acceptance separately | Do not substitute compilation, source-only or version output for the real demo |
 | Mon Oct 19 | Full demo rehearsal and artifact/command freeze; verify current revocation/admission | Rebuild/re-sign means re-observe and re-rehearse; no last-minute bypass |
 | Tue Oct 20 before 09:00 | Approved final preflight of exact hashes, trust freshness, state and commands | Refuse expired/revoked/mismatched inputs; present only already-proven claims |
 
@@ -389,3 +426,8 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
   maximum total model usage for validation, rehearsals and the demo. Execution
   still requires working secret integration and verified request/budget controls;
   no other authority is expanded.
+- 2026-10-15: the user excluded `mvmd` from the demo and requested actual Friday
+  feasibility evidence and a real Sunday demo. The standalone policy comparison
+  is pack versus personal; managed organization-policy work is post-demo. Added
+  concrete cold-consumer, prompt, refusal and cleanup validation cases without
+  relaxing the separate public PS-06 acceptance gates.
