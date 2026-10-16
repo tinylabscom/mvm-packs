@@ -57,18 +57,26 @@ explicit before either owner edits the other's integration seam.
   `83f38094b7f4dc6b41c066ba6c0603c3f80be893c0e16a72d4781f52d251085e`,
   tested on `mvm` base `a926126bae1285a1b0e470428bb5a055bdd7b4bb`.
   The exact 12 expected unit tests passed, with zero failures or ignored tests.
-  Source/lock pre/post checks matched. The scoped commit and normal PR were
-  still pending when this plan was written.
+  Source/lock pre/post checks matched. The runtime owner subsequently opened
+  [draft PR #4469](https://github.com/tinylabscom/mvm/pull/4469) at
+  `ed5cdb0d6a2ad18cc548d8a5e39ac05e2f84dc42`, reporting successful normal
+  hooks and both stages of the required pre-push gate. Current-main integration
+  and protected CI remain separate requirements.
 - Those callbacks expose the actual admitted plan and backend stop result.
   They do not prove final-config custody, authenticated peer identity,
   physical cleanup or persistent stop/start.
 - The private Claude archive passed producer health and consumer preboot
   verification/install. Its actual cold launch failed before VM creation
   because the consumer lacked the runtime overlay. It is not a ready fallback.
-- Refreshed release dependencies: #4389 merged; #4409 remains open at
-  `379f0602a39425accca2ce549ecc3a27eca56863`; #4446 remains open at
-  `ec6d7c0aad79024d9829c1904dd29a84e14071ea`. Latest promoted CLI is v0.22.0.
-  No compatible authenticated A/H/B closure has been accepted here.
+- Refreshed release dependencies: #4409 merged into main as
+  `62f65b72318b83a108a56faa0c948e811b7a5eaa`, present in fetched main
+  `911eb7143d89ec2bb2c30666f18c4eade0ac0697`. #4389 merged as
+  `08e50ddebb6455df7e40a984965db82fdd7b3ba8` into
+  `feat/image-boundary-integration`, not main; that commit is not an ancestor
+  of the fetched main. Its portable closure contract still needs scoped
+  integration. #4446 was last checked open at
+  `ec6d7c0aad79024d9829c1904dd29a84e14071ea`. Latest promoted CLI checked here
+  is v0.22.0; no compatible authenticated A/H/B closure has been accepted.
 - [Packs #12](https://github.com/tinylabscom/mvm-packs/issues/12) has six
   unchecked production gates. PS-06/#3716 and the PS-06 box in #3731 stay open.
 
@@ -99,7 +107,7 @@ currently **low**.
   and exact signed root pin; verify immutability and current lock before use.
 - [Observer tests](../../tests/test_protected_observer_v2.py#L1) and
   [source tests](../../tests/test_protected_observer_source.py#L1): source/byte/refusal regression tests.
-- Runtime owner map at public `mvm` source
+- Runtime owner's initial path map at public `mvm` source
   `83485b0d4c3fa291056b7177a0d4b42e28469693`:
   [entrypoint calls](https://github.com/tinylabscom/mvm/blob/83485b0d4c3fa291056b7177a0d4b42e28469693/crates/mvm-client/src/entrypoint/call.rs#L169)
   use the [observer trait](https://github.com/tinylabscom/mvm/blob/83485b0d4c3fa291056b7177a0d4b42e28469693/crates/mvm-client/src/entrypoint/dispatch.rs#L310);
@@ -113,8 +121,10 @@ currently **low**.
   of generic persistent stop/start.
 
 Read the exact current source and owner handoff before implementing. The
-uncommitted callback patch is not current-main integration merely because its
-old-base unit run passed.
+callback patch is not current-main integration merely because its old-base unit
+run passed.
+Portable-runtime integration must now use the fetched `911eb7143d` baseline and
+review the changes from #4409, rather than treating the initial map as current.
 
 ## Dependency and execution plan
 
@@ -136,10 +146,15 @@ does not close the measurement-API gate.
 
 **Owner:** runtime/artifact; observer owner reviews the consumer contract.
 
+- First integrate the specifically reviewed portable release-runtime contract
+  from #4389 against the new main containing #4409. Do not import the whole
+  stale integration branch or assume schema-6 closure already exists on main.
 - Retain the same actual admitted plan and final consumed configuration/runtime
   custody at the last handoff before backend effects.
-- Reuse the reviewed release-runtime verifier/custody implementation, not a
-  new verifier or a rejected source binder.
+- Reuse the merged #4409 release-runtime verifier/custody implementation, not
+  a new verifier, a SourceB substitute or a rejected source binder.
+- Preserve artifact custody without extending a lifecycle lock across a stop
+  path that reacquires it. A new generalized lease design is not this task.
 - Keep signed image-set boot assets separate from CLI-owned runtime custody.
   Refuse an unbound SDK sidecar; LOCALDEV Source proof is never Release proof.
 - Preserve backend-start, readiness, abort/rollback and stop uncertainty.
@@ -436,3 +451,7 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
   bundle → user → optional `mvmd` policy itself. Removed wording that incorrectly
   required a daemon path for policy validation. Standalone composition is the
   real product behavior, not a simulation or deferred implementation.
+- 2026-10-15: independently verified #4409 is merged into current main, while
+  #4389 merged only into the integration branch. Corrected the source dependency:
+  select and integrate its portable closure contract against main with #4409;
+  neither PR state alone nor an old integration branch proves current support.
