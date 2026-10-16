@@ -239,6 +239,11 @@ The pack owns the pinned Claude binary/dependencies, application entrypoint and
 headless prompt handling, provider-specific configuration, and declarations of
 policy/secret requirements. None of those declarations is a host grant.
 
+Policy definitions and reusable policy groups may live in both packs and host
+configuration and compose with other policies. `mvm` resolves and enforces the
+effective result; a pack does not override stricter local restrictions or grant
+itself capabilities. An incompatible required capability must refuse clearly.
+
 The platform owns generic authenticated pull/install/admission, verified runtime
 and kernel custody, policy composition/enforcement, authorized host secret
 brokering and network transport, and session input/output/exit/cleanup. Missing
@@ -264,11 +269,13 @@ another builder or a credential bypass.
 6. Configure the pack's declared unprivileged entrypoint for an actual bounded
    headless prompt. Verify the exact pinned CLI's supported input/model options;
    do not present hypothetical `mvmctl` commands as a released interface.
-7. Verify the chosen authentication path and provider endpoint. The preferred
-   candidate is the existing host-held API-key broker, not a key embedded in the
-   image. Confirm actual Claude proxy/header-substitution behavior; configured
-   environment variables alone are not proof. Never mount host login files or
-   log secret-bearing plans/headers.
+7. Use the existing `mvm` host-held credential-secret mechanism, as confirmed by
+   the user. The pack declares the authorized secret requirement/reference;
+   `mvm` controls its use and provider-side substitution. The microVM must not
+   receive the real provider key in its image, environment, files, arguments or
+   logs. Confirm actual Claude proxy/header-substitution behavior; configured
+   variables alone are not proof. Never mount host login files or log
+   secret-bearing plans/headers. Do not build a new vendor credential store.
 8. Under an allowed policy, submit a non-sensitive prompt and receive an actual
    model response. Record the real input/output/exit and plan/audit association.
    This is required for the requested demo, not an optional enhancement.
@@ -280,10 +287,10 @@ another builder or a credential bypass.
     Version/help output remains diagnostic, not a substitute for the real prompt
     or evidence of policy enforcement.
 
-The user has selected a real prompt as the demo goal, but has not yet selected
-the authentication route or authorized a model-use budget. Live calls remain
-blocked until that concrete execution scope is approved and credentials are
-supplied through the supported secure store, never chat or committed files.
+The user has selected a real prompt and the existing host-held secret route,
+but has not yet authorized a model-use budget. Live calls remain blocked until
+the model/request limits and budget are approved and the required secret is
+configured through the supported secure store, never chat or committed files.
 Subscription/browser login is unproven and must not be assumed available.
 Public Claude redistribution or official endorsement is not authorized by the
 demo name or this plan.
@@ -332,8 +339,8 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
 
 - The user selected Python for public acceptance and `anthropic/claude` as the
   real-prompt policy-interaction demo. The exact Claude pack version, authorized
-  delivery/signing scope, authentication route, model budget and executable
-  commands still require the concrete handoff/approvals described above.
+  delivery/signing scope, working host-secret binding, model budget and
+  executable commands still require the concrete handoff/approvals above.
 - No complete measurement receipt wire is frozen by this document.
 - Full public completion by October 20 remains low-confidence until the Friday
   feasibility gate closes. The plan does not quietly reduce the acceptance bar.
@@ -347,3 +354,7 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
   outcome. Offline/version checks are no longer the demo baseline. Pack-specific
   configuration and generic platform responsibilities are separated above;
   authentication and model-spend authorization remain explicit execution gates.
+- 2026-10-15: the user confirmed composable policy definitions in both pack and
+  host, with `mvm` enforcing the effective policy, and selected the existing
+  host-held credential-secret mechanism. Raw provider credentials must not enter
+  the microVM. Model/request limits and spending authority remain unapproved.
