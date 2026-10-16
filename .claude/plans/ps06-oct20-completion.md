@@ -11,8 +11,9 @@ Deliver two distinct outcomes:
    `runtime/python@1.1.0` Linux x86_64 image-build intent to prove the
    production build, observation, publication and fresh-recipient chain.
 2. **Demo goal:** use a pinned `anthropic/claude` application pack to show
-   prebuilt software delivery, automatic pack-policy loading, permitted work,
-   and refusal when local policy conflicts with required capabilities.
+   prebuilt software delivery, automatic pack-policy loading, a real Claude
+   prompt/model response, and refusal when local policy conflicts with required
+   capabilities.
 
 Python acceptance does not prove the Claude demo. A private Claude demonstration
 does not satisfy public Built/image acceptance. A pack name is not publisher
@@ -232,6 +233,20 @@ Only this complete chain can close the relevant PS-06 acceptance.
 The runtime/artifact owner owns the real runnable delivery path; the observer
 owner checks the policy-interaction claims.
 
+### Pack versus platform
+
+The pack owns the pinned Claude binary/dependencies, application entrypoint and
+headless prompt handling, provider-specific configuration, and declarations of
+policy/secret requirements. None of those declarations is a host grant.
+
+The platform owns generic authenticated pull/install/admission, verified runtime
+and kernel custody, policy composition/enforcement, authorized host secret
+brokering and network transport, and session input/output/exit/cleanup. Missing
+generic support belongs in `mvm`; do not add Claude-specific core branches,
+another builder or a credential bypass.
+
+### Required demonstration
+
 1. Integrate and validate the preserved application resolver against the merged
    application-v2 descriptor contract. Freeze the pack version and actual
    supported command grammar before rehearsal.
@@ -246,15 +261,32 @@ owner checks the policy-interaction claims.
    seed. Local bundle installation alone is not a successful named-pack pull.
 5. Show the loaded pack policy and effective host restrictions using a safe
    redacted projection, not raw secret-bearing plans.
-6. Run a permitted offline operation and a deliberate local-policy conflict.
-   Record actual output/admission refusal and plan/audit association.
-   Requirements are not grants; local restrictions win.
-7. Rehearse actual I/O and confirmed cleanup for every claim made in the demo.
-   Version output alone proves neither policy enforcement nor model usability.
+6. Configure the pack's declared unprivileged entrypoint for an actual bounded
+   headless prompt. Verify the exact pinned CLI's supported input/model options;
+   do not present hypothetical `mvmctl` commands as a released interface.
+7. Verify the chosen authentication path and provider endpoint. The preferred
+   candidate is the existing host-held API-key broker, not a key embedded in the
+   image. Confirm actual Claude proxy/header-substitution behavior; configured
+   environment variables alone are not proof. Never mount host login files or
+   log secret-bearing plans/headers.
+8. Under an allowed policy, submit a non-sensitive prompt and receive an actual
+   model response. Record the real input/output/exit and plan/audit association.
+   This is required for the requested demo, not an optional enhancement.
+9. Apply a deliberate restrictive local policy and demonstrate the actual
+   admission/network refusal with its reason. Prefer a required-capability
+   admission refusal before a paid request where the implemented contract
+   supports it. Requirements are not grants; local restrictions win.
+10. Rehearse actual I/O and confirmed cleanup for every claim made in the demo.
+    Version/help output remains diagnostic, not a substitute for the real prompt
+    or evidence of policy enforcement.
 
-Public Claude redistribution/official endorsement, browser login, credentials
-and paid model calls are not authorized by the demo name or this plan. A real
-model request is an optional separately approved enhancement, not the baseline.
+The user has selected a real prompt as the demo goal, but has not yet selected
+the authentication route or authorized a model-use budget. Live calls remain
+blocked until that concrete execution scope is approved and credentials are
+supplied through the supported secure store, never chat or committed files.
+Subscription/browser login is unproven and must not be assumed available.
+Public Claude redistribution or official endorsement is not authorized by the
+demo name or this plan.
 If the supported named-pack path is not ready, label any local preview
 accurately; never rename bundle-install success as pack-pull acceptance.
 
@@ -265,7 +297,7 @@ These are target decision deadlines, not predicted completion dates.
 | Deadline, Pacific | Required checkpoint | If missed |
 | --- | --- | --- |
 | Thu Oct 15 evening | P1 progresses with real hook/PR evidence; remaining API/release tasks have explicit ownership | Report actual failure/unknowns, preserve state and revise the next bounded task |
-| Fri Oct 16, 12:00 | Feasibility decision: reviewed measurement path, bounded remaining work, credible A/H/B route, chosen demo trust/delivery scope | Do not promise full public PS-06 for Tuesday; explicitly report which demo claims remain possible |
+| Fri Oct 16, 12:00 | Feasibility decision: reviewed measurement path, bounded remaining work, credible A/H/B route, chosen demo trust/delivery/authentication scope and model budget | Do not promise full public PS-06 for Tuesday; explicitly report which demo claims remain possible |
 | Fri Oct 16 evening | API and public-mode coverage frozen/compiled or specific remaining failures exposed; live authorization packet taking shape | Keep workflow disabled; escalate concrete missing evidence, not generic green status |
 | Sat Oct 17 | Target authenticated A/H/B, reproduced candidate, reviewed observer adapter and approved live manifest | Public target becomes no-go unless a revised evidence-backed schedule preserves rehearsal time |
 | Sun Oct 18, 09:00 | Target actual protected/public/fresh-recipient chain and an independently cold-run demo artifact | Do not substitute LOCALDEV/source/one-shot version evidence |
@@ -299,12 +331,19 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
 ## Remaining decisions and restrictions
 
 - The user selected Python for public acceptance and `anthropic/claude` as the
-  ideal policy-interaction demo. The exact Claude pack version, authorized
-  delivery/signing scope and executable demo commands still require an actual
-  implementation/artifact handoff.
+  real-prompt policy-interaction demo. The exact Claude pack version, authorized
+  delivery/signing scope, authentication route, model budget and executable
+  commands still require the concrete handoff/approvals described above.
 - No complete measurement receipt wire is frozen by this document.
 - Full public completion by October 20 remains low-confidence until the Friday
   feasibility gate closes. The plan does not quietly reduce the acceptance bar.
 - No architecture reapproval is requested. Concrete live/signing/publication,
   transfer, credential or billable authority is requested only with its exact
   execution manifest.
+
+## Amendments
+
+- 2026-10-15: the user made a real Claude prompt/response a required demo
+  outcome. Offline/version checks are no longer the demo baseline. Pack-specific
+  configuration and generic platform responsibilities are separated above;
+  authentication and model-spend authorization remain explicit execution gates.
