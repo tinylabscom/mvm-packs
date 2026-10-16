@@ -20,8 +20,9 @@ does not satisfy public Built/image acceptance. A pack name is not publisher
 authority or an assertion of Anthropic endorsement.
 
 The demo is **standalone and transient/headless**, with pack and personal policy.
-`mvmd` and the organization-policy demonstration are explicitly post-demo work.
-Their future precedence contract is retained, not simulated in this demo.
+`mvm` itself owns policy composition and enforcement; it does not require
+`mvmd`. The optional `mvmd` integration is post-demo work, not a prerequisite
+or a deferred standalone policy engine.
 
 This is a gated delivery plan, not permission to sign, dispatch, upload, publish,
 tag, transfer private artifacts, use credentials or incur cloud/model charges.
@@ -244,21 +245,21 @@ headless prompt handling, provider-specific configuration, and declarations of
 policy/secret requirements. None of those declarations is a host grant.
 
 Policy definitions and reusable policy groups may live in both packs and host
-configuration and compose with other policies. The user confirmed this
-application-policy precedence, highest first:
+configuration and compose with other policies. The user confirmed this hierarchy,
+with precedence increasing to the right:
 
-1. Organization policy when managed through `mvmd`.
-2. The user's personal policy.
-3. The pack's policy.
+**bundle → user → optional `mvmd` policy**
 
-Standalone operation uses personal policy above pack policy. `mvm` resolves and
-enforces the composed result; a lower-precedence definition cannot override a
-higher-precedence decision or grant itself capabilities. An incompatible required
-capability must refuse clearly.
+`mvm` resolves and enforces that hierarchy itself. Without the optional
+contribution, user policy takes precedence over bundle policy through the same
+normal engine; no daemon or simulation is required. A lower-precedence layer
+cannot override a higher-precedence decision or grant itself capabilities.
+An incompatible required capability must refuse clearly.
 
-For this demo, test pack-versus-personal conflicts. Personal/pack-versus-
-organization validation belongs to the post-demo `mvmd` work. A local
-configuration file must not be presented as organization-policy enforcement.
+For this demo, validate actual bundle-versus-user composition and refusal.
+Later `mvmd` work supplies the optional higher-precedence input to the existing
+engine; do not invent a separate policy engine or block standalone validation
+on that integration.
 
 This workload-policy hierarchy does not permit pack/user verdicts to replace
 the observer's fixed protected-source backend measurement policy.
@@ -431,3 +432,7 @@ this ledger; the runtime owner supplies actual artifacts and execution evidence.
   is pack versus personal; managed organization-policy work is post-demo. Added
   concrete cold-consumer, prompt, refusal and cleanup validation cases without
   relaxing the separate public PS-06 acceptance gates.
+- 2026-10-15: the user clarified that `mvm` enforces the hierarchy
+  bundle → user → optional `mvmd` policy itself. Removed wording that incorrectly
+  required a daemon path for policy validation. Standalone composition is the
+  real product behavior, not a simulation or deferred implementation.
