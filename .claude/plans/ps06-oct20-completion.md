@@ -107,6 +107,9 @@ currently **low**.
   and exact signed root pin; verify immutability and current lock before use.
 - [Observer tests](../../tests/test_protected_observer_v2.py#L1) and
   [source tests](../../tests/test_protected_observer_source.py#L1): source/byte/refusal regression tests.
+- [Portable-runtime proposal review](../code-reviews/ps06-portable-runtime-proposal.md#L1):
+  exact 14-file current-main packet, kernel-proof acceptance gap and missing
+  genuine positive-runtime input. Source review is not cold-boot validation.
 - Runtime owner's initial path map at public `mvm` source
   `83485b0d4c3fa291056b7177a0d4b42e28469693`:
   [entrypoint calls](https://github.com/tinylabscom/mvm/blob/83485b0d4c3fa291056b7177a0d4b42e28469693/crates/mvm-client/src/entrypoint/call.rs#L169)
@@ -149,6 +152,10 @@ does not close the measurement-API gate.
 - First integrate the specifically reviewed portable release-runtime contract
   from #4389 against the new main containing #4409. Do not import the whole
   stale integration branch or assume schema-6 closure already exists on main.
+- Before treating that integration as a demo unblock, resolve the canonical
+  kernel-proof gap and identify a genuine positive runtime input/authority
+  route recorded in the proposal review. A Release-only serializer cannot
+  authorize the existing private Source bytes.
 - Retain the same actual admitted plan and final consumed configuration/runtime
   custody at the last handoff before backend effects.
 - Reuse the merged #4409 release-runtime verifier/custody implementation, not
