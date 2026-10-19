@@ -80,6 +80,26 @@ explicit before either owner edits the other's integration seam.
 - [Packs #12](https://github.com/tinylabscom/mvm-packs/issues/12) has six
   unchecked production gates. PS-06/#3716 and the PS-06 box in #3731 stay open.
 
+### Review refresh
+
+The October 15 starting point above is historical. At review, public `mvm`
+main is `3cf2f8977e26f6da5b297b1e7cdb2ba5233e6e26`:
+
+- [#4469](https://github.com/tinylabscom/mvm/pull/4469) has merged into main as
+  `5404dec4e669bc6b43be28b600879eca71af64ec`. P1's commit/PR landing work
+  is no longer pending; its bounded callbacks still do not complete P2.
+- [#4446](https://github.com/tinylabscom/mvm/pull/4446) has merged into main as
+  `ac321fc539ae8a5a0faa9cd27ec6b67274fac871`. Its local Built-pack importer
+  and admission integration do not supply a successful SignedBuilt witness,
+  configured H, compatible A/B, or a published image-bearing pack.
+- [#3731](https://github.com/tinylabscom/mvm/issues/3731) is closed, but its
+  PS-06 checkbox remains unchecked; #3716 and packs #12 remain open.
+
+Rebase the next scoped portable-runtime proposal on the then-current main.
+The immutable `911eb7143d` proposal review remains evidence about that packet,
+not proof that its tree is today's integration baseline. None of these merged
+increments changes the live, release, signing or publication authority gates.
+
 ### Estimates, not promises
 
 The runtime owner supplied these active-work planning budgets:
@@ -126,8 +146,9 @@ currently **low**.
 Read the exact current source and owner handoff before implementing. The
 callback patch is not current-main integration merely because its old-base unit
 run passed.
-Portable-runtime integration must now use the fetched `911eb7143d` baseline and
-review the changes from #4409, rather than treating the initial map as current.
+Portable-runtime integration must use current main and review the changes from
+#4409 and #4446, rather than treating the initial map or the historical
+`911eb7143d` proposal baseline as current.
 
 ## Dependency and execution plan
 
