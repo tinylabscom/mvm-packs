@@ -408,8 +408,23 @@ published pack or live client acceptance.
 
 ### Image publication lanes
 
-A manual `publish.yml` dispatch on `main` with `mvmctl_tag` and
-`mvmctl_archive_sha256` takes the `runtime/python` image through four jobs.
+First run the existing unsigned `python-candidate.yml` lane with the exact
+signed released client tag and archive digest. Its artifact includes the
+reproduced `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash`, the original
+deterministically produced `mvm-meta.json`, and `signing-inputs.json`.
+The latter is canonical JSON naming exactly those four files with their
+SHA-256 and size; it is a byte pin, not a signature or authentication token.
+Review the actual artifact/source/base/client tuple and record the SHA-256
+of `signing-inputs.json` before selecting signing. Do not guess future hashes
+or substitute a different candidate merely because its workflow was green.
+
+A manual `publish.yml` dispatch on `main` with `mvmctl_tag`,
+`mvmctl_archive_sha256` and that explicit `image_inputs_sha256` takes the
+`runtime/python` image through four jobs. The existing signer regenerates and
+checks the image, copies its final quartet into private staging, and refuses
+any difference from the reviewed input digest **before its first signature**.
+Missing or malformed image inputs are refused; an empty catalogue-only
+request remains supported. The unsigned manifest mode itself cannot sign.
 Each job needs the previous one, so any refusal stops everything after it.
 The catalogue jobs do not run in that dispatch, and the workflow-level
 `signed-pack-publisher` concurrency group keeps image and catalogue runs

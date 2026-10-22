@@ -6,6 +6,7 @@ contains no registry manifest and must not be served by pull.
 """
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -13,6 +14,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 import tomllib
 from pathlib import Path
@@ -58,6 +60,25 @@ def record(path, reproducer):
     if size <= 0:
         raise SigningError(f"empty input {path.name}")
     return {"sha256": digest, "size": size}
+
+
+def image_inputs(composed, mvm_meta):
+    """Describe original image bytes, not a signature or publication grant."""
+    composed, mvm_meta = Path(composed), Path(mvm_meta)
+    if not stat.S_ISDIR(composed.lstat().st_mode) or mvm_meta.name != "mvm-meta.json":
+        raise SigningError("image inputs require a real composition directory and mvm-meta.json")
+    reproducer = helper("reproduce-app-layer.py", "reproduce_image_input_manifest")
+    try:
+        assets = {
+            name: record(composed / name, reproducer)
+            for name in ("rootfs.ext4", "rootfs.verity", "rootfs.roothash")
+        }
+        assets["mvm-meta.json"] = record(mvm_meta, reproducer)
+    except (OSError, reproducer.ReproductionError) as error:
+        raise SigningError("image inputs must be nonempty ordinary files") from error
+    if assets["mvm-meta.json"]["size"] > 1024 * 1024:
+        raise SigningError("image metadata exceeds its bound")
+    return {"schema_version": 1, "assets": assets}
 
 
 def check_identity(environment):
@@ -262,8 +283,10 @@ def provenance(reference, composition, rootfs_record, invocation, source_sha, lo
 
 
 def prepare(composition_dir, candidate_path, reference, output, environment, images_lock,
-            pack_source, mvm_meta):
+            pack_source, mvm_meta, expected_inputs_sha256):
     invocation = check_identity(environment)
+    if not isinstance(expected_inputs_sha256, str) or not HEX64.fullmatch(expected_inputs_sha256):
+        raise SigningError("image input manifest requires an explicit lowercase SHA-256")
     composition_dir, candidate_path, output, images_lock, pack_source, mvm_meta = map(
         Path, (composition_dir, candidate_path, output, images_lock, pack_source, mvm_meta)
     )
@@ -321,6 +344,11 @@ def prepare(composition_dir, candidate_path, reference, output, environment, ima
                 shutil.copyfile(snapshot / name, staged / name)
             shutil.copyfile(copied_candidate, staged / "candidate.json")
             shutil.copyfile(copied_meta, staged / "mvm-meta.json")
+            # Compare the final private bytes that will actually be signed,
+            # not the caller's mutable paths or an unsigned success marker.
+            actual_inputs = json_bytes(image_inputs(staged, staged / "mvm-meta.json"))
+            if hashlib.sha256(actual_inputs).hexdigest() != expected_inputs_sha256:
+                raise SigningError("image quartet differs from the reviewed input manifest")
             (staged / "provenance.json").write_bytes(json_bytes(provenance(
                 reference, composition, record(staged / "rootfs.ext4", reproducer),
                 invocation, environment["GITHUB_SHA"], lock_sha256,
@@ -376,6 +404,17 @@ def prepare(composition_dir, candidate_path, reference, output, environment, ima
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["image-inputs"]:
+        parser = argparse.ArgumentParser(description="Hash an unsigned original image quartet; never sign")
+        parser.add_argument("--composition", required=True, type=Path)
+        parser.add_argument("--mvm-meta", required=True, type=Path)
+        args = parser.parse_args(argv[1:])
+        try:
+            print(json_bytes(image_inputs(args.composition, args.mvm_meta)).decode(), end="")
+        except (OSError, ValueError, SigningError) as error:
+            parser.exit(1, f"image-inputs: {error}\n")
+        return
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--composition", required=True, type=Path)
     parser.add_argument("--candidate-report", required=True, type=Path)
@@ -384,10 +423,12 @@ def main(argv=None):
     parser.add_argument("--mvm-images-lock", required=True, type=Path)
     parser.add_argument("--pack-source", required=True, type=Path)
     parser.add_argument("--mvm-meta", required=True, type=Path)
+    parser.add_argument("--expected-inputs-sha256", required=True)
     args = parser.parse_args(argv)
     try:
         prepare(args.composition, args.candidate_report, args.reference, args.output,
-                os.environ, args.mvm_images_lock, args.pack_source, args.mvm_meta)
+                os.environ, args.mvm_images_lock, args.pack_source, args.mvm_meta,
+                args.expected_inputs_sha256)
     except (OSError, ValueError, SigningError) as error:
         parser.exit(1, f"sign-composed-image: {error}\n")
 

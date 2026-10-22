@@ -39,6 +39,11 @@ on:
         required: false
         type: string
 
+      image_inputs_sha256:
+        description: Reviewed SHA-256 of the unsigned candidate signing-inputs.json
+        required: false
+        type: string
+
 permissions: {}
 concurrency:
   group: signed-pack-publisher
@@ -50,16 +55,18 @@ jobs:
     env:
       MVMCTL_TAG: ${{ inputs.mvmctl_tag }}
       MVMCTL_ARCHIVE_SHA256: ${{ inputs.mvmctl_archive_sha256 }}
+      MVM_IMAGE_INPUTS_SHA256: ${{ inputs.image_inputs_sha256 }}
     steps:
       - name: Require a complete image signing request
         run: |
           set -euo pipefail
-          if [[ -z "$MVMCTL_TAG" && -z "$MVMCTL_ARCHIVE_SHA256" ]]; then
+          if [[ -z "$MVMCTL_TAG" && -z "$MVMCTL_ARCHIVE_SHA256" && -z "$MVM_IMAGE_INPUTS_SHA256" ]]; then
             exit 0
           fi
-          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]
-          [[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
-          [[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || exit 1
+          [[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
+          [[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          [[ "$MVM_IMAGE_INPUTS_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
 
   sign:
     needs: validate_dispatch
@@ -192,6 +199,7 @@ jobs:
     env:
       MVMCTL_TAG: ${{ inputs.mvmctl_tag }}
       MVMCTL_ARCHIVE_SHA256: ${{ inputs.mvmctl_archive_sha256 }}
+      MVM_IMAGE_INPUTS_SHA256: ${{ inputs.image_inputs_sha256 }}
       GH_TOKEN: ${{ github.token }}
       COSIGN_YES: 'true'
     steps:
