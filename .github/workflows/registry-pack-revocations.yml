@@ -26,6 +26,7 @@ jobs:
   sign:
     if: github.repository == 'tinylabscom/mvm-packs' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
@@ -123,6 +124,7 @@ jobs:
     needs: sign
     if: github.repository == 'tinylabscom/mvm-packs' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       actions: read
       contents: write

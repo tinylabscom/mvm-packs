@@ -552,10 +552,21 @@ https://github.com/tinylabscom/mvm-packs/.github/workflows/registry-pack-revocat
 
 under the GitHub Actions OIDC issuer. A separate read-only OIDC signing job
 and contents-write publishing job verify the signed candidate and read back
-the release. The schedule refreshes every 12 hours; each signed document is
-valid for at most 30 days, and clients reject it at `not_after`. Initial
+the release. The schedule refreshes every 12 hours; new signed documents are
+valid for 36 hours, and clients reject them at `not_after`. Each signing and
+publishing job is bounded to 15 minutes. Previously published, immutable
+30-day documents remain verifiable as history; they are not re-signed as new
+candidates or silently converted to shorter-lived bytes. Initial
 publication requires an explicit manual dispatch authorization. The producer
 refuses to bootstrap from an existing but invalid or incomplete release.
+
+The distinct release identity can also be explicitly configured as an operator
+feed authority for a non-`mvm/` application, provided it differs from that
+application's authenticated publisher. New 36-hour documents fit the client's
+48-hour operator maximum. This does not extend the built-in official namespace
+trust to other namespaces or enroll trust automatically. A new candidate or
+unsigned orphan exceeding the new issuance window is refused, even when it
+would be valid as historical official data.
 
 If the first bootstrap fails after creating the public release but before
 uploading any assets, recovery is deliberately manual. A maintainer must verify
