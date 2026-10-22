@@ -38,17 +38,88 @@ class DedicatedRevocationTests(unittest.TestCase):
         )
         self.assertEqual(feed.ISSUER, "https://token.actions.githubusercontent.com")
 
-    def test_official_feed_has_thirty_day_maximum_and_exact_expiration(self):
+    def test_new_feed_has_thirty_six_hour_window_and_exact_expiration(self):
         raw = self.document()
-        data = feed.parse_document(raw, self.now)
-        self.assertEqual(feed.utc(data["not_after"]) - feed.utc(data["issued_at"]), timedelta(days=30))
-        data["not_after"] = feed.timestamp(feed.utc(data["issued_at"]) + timedelta(days=30, seconds=1))
+        data = feed.parse_document(raw, self.now, maximum_validity=feed.VALIDITY)
+        self.assertEqual(feed.utc(data["not_after"]) - feed.utc(data["issued_at"]), timedelta(hours=36))
+        data["not_after"] = feed.timestamp(feed.utc(data["issued_at"]) + timedelta(hours=36, seconds=1))
         with self.assertRaisesRegex(feed.RevocationError, "too long"):
-            feed.parse_document(feed._canonical_document(data), self.now)
+            feed.parse_document(feed._canonical_document(data), self.now, maximum_validity=feed.VALIDITY)
         data["issued_at"] = feed.timestamp(self.now - timedelta(days=30))
         data["not_after"] = feed.timestamp(self.now)
         with self.assertRaisesRegex(feed.RevocationError, "expired"):
             feed.parse_document(feed._canonical_document(data), self.now)
+
+    def test_old_thirty_day_history_is_preserved_but_not_new_candidate_authority(self):
+        old = json.loads(self.document())
+        old["not_after"] = feed.timestamp(self.now + timedelta(days=30))
+        raw = feed._canonical_document(old)
+        feed.parse_document(raw, self.now, allow_expired=True)
+        old["not_after"] = feed.timestamp(self.now + timedelta(days=30, seconds=1))
+        with self.assertRaisesRegex(feed.RevocationError, "too long"):
+            feed.parse_document(feed._canonical_document(old), self.now, allow_expired=True)
+        with self.assertRaisesRegex(feed.RevocationError, "too long"):
+            feed.parse_document(raw, self.now, maximum_validity=feed.VALIDITY)
+        following = json.loads(feed.build_document(self.source, json.loads(raw), self.now))
+        self.assertEqual(following["sequence"], 2)
+        self.assertEqual(feed.utc(following["not_after"]) - feed.utc(following["issued_at"]), timedelta(hours=36))
+
+    def test_long_window_orphan_cannot_be_resigned_under_new_candidate_contract(self):
+        previous = json.loads(self.document())
+        for window in (timedelta(hours=36, seconds=1), timedelta(hours=48), timedelta(days=30)):
+            orphan = json.loads(self.document(previous))
+            orphan["not_after"] = feed.timestamp(self.now + window)
+            with self.subTest(window=window), self.assertRaisesRegex(feed.RevocationError, "too long"):
+                feed.recover_or_build(
+                    self.source, previous, feed._canonical_document(orphan), 2, self.now
+                )
+
+    def test_history_verification_accepts_expired_thirty_day_prefix_and_new_short_head(self):
+        previous = json.loads(self.document())
+        previous["issued_at"] = feed.timestamp(self.now - timedelta(days=31))
+        previous["not_after"] = feed.timestamp(self.now - timedelta(days=1))
+        old = feed._canonical_document(previous)
+        new = feed.build_document(self.source, previous, self.now)
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            names = []
+            for sequence, document in ((1, old), (2, new)):
+                path = root / f"revocations-{sequence}.json"
+                bundle = root / f"revocations-{sequence}.sigstore.json"
+                path.write_bytes(document)
+                bundle.write_bytes(b"unit signature seam")
+                names.extend((path.name, bundle.name))
+            (root / feed.DOCUMENT_NAME).write_bytes(new)
+            (root / feed.BUNDLE_NAME).write_bytes(b"unit signature seam")
+            with patch.object(feed, "verify_bundle") as verify:
+                head = feed.verify_history(root, names + [feed.DOCUMENT_NAME, feed.BUNDLE_NAME], self.now)
+                self.assertEqual(verify.call_count, 2)
+            self.assertEqual(head["sequence"], 2)
+            self.assertEqual(feed.utc(head["not_after"]) - feed.utc(head["issued_at"]), timedelta(hours=36))
+
+    def test_candidate_cli_rejects_long_window_after_signature_verification(self):
+        previous = self.document()
+        candidate = json.loads(self.document(json.loads(previous)))
+        candidate["not_after"] = feed.timestamp(self.now + timedelta(days=30))
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            document, bundle, source = root / "candidate.json", root / "candidate.bundle", root / "source.toml"
+            document.write_bytes(feed._canonical_document(candidate))
+            bundle.write_bytes(b"unit signature seam")
+            source.write_text(
+                'schema_version = 1\nrevoked_identities = ["workflow@example"]\n'
+                'revoked_manifests = ["' + "a" * 64 + '"]\n'
+            )
+            names = root / "assets.json"
+            names.write_text("[]")
+            with patch.object(feed, "verify_bundle") as verify:
+                with self.assertRaisesRegex(SystemExit, "too long"):
+                    feed.main([
+                        "--check-candidate", "--history", str(root), "--asset-names", str(names),
+                        "--document", str(document), "--bundle", str(bundle),
+                        "--source", str(source), "--now", feed.timestamp(self.now),
+                    ])
+                verify.assert_called_once_with(document, bundle)
 
     def test_history_requires_every_signature_and_exact_sequential_growth(self):
         first = self.document()
@@ -131,6 +202,8 @@ class DedicatedRevocationTests(unittest.TestCase):
         publisher = workflow.split("  publish:\n", 1)[1]
         self.assertNotIn("contents: write", signer)
         self.assertNotIn("id-token: write", publisher)
+        self.assertIn("timeout-minutes: 15", signer)
+        self.assertIn("timeout-minutes: 15", publisher)
         self.assertIn("--certificate-identity", signer)
         self.assertIn("--certificate-identity", publisher)
 
