@@ -102,7 +102,8 @@ jobs:
             -p default-microvm-vmlinux-x86_64 \
             -p default-microvm-rootfs-x86_64.ext4 \
             -p default-microvm-rootfs-x86_64.verity \
-            -p default-microvm-rootfs-x86_64.roothash
+            -p default-microvm-rootfs-x86_64.roothash \
+            -p default-microvm-meta-x86_64.json
       - name: Reproduce the unsigned image inside the builder VM
         run: |
           set -euo pipefail
@@ -131,6 +132,17 @@ jobs:
           test -s "$output/python-image/candidate.json"
           test -s "$output/python-image/composition/rootfs.ext4"
           test -s "$output/python-image/composition/composition.json"
+          python3 scripts/build-python-sidecar.py \
+            --base-meta "$release_dir/default-microvm-meta-x86_64.json" \
+            --base-rootfs "$release_dir/default-microvm-rootfs-x86_64.ext4" \
+            --composed-rootfs "$output/python-image/composition/rootfs.ext4" \
+            --pack-source "$work_dir/pack-sources/runtime/python/pack.toml" \
+            --output "$output/python-image/mvm-meta.json"
+          python3 scripts/sign-composed-image.py image-inputs \
+            --composition "$output/python-image/composition" \
+            --mvm-meta "$output/python-image/mvm-meta.json" \
+            > "$output/python-image/signing-inputs.json"
+          sha256sum "$output/python-image/signing-inputs.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: unsigned-python-image-${{ github.run_id }}

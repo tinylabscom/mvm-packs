@@ -6,6 +6,7 @@ set -euo pipefail
 [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] || exit 1
 [[ "$MVMCTL_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || exit 1
 [[ "$MVMCTL_ARCHIVE_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+[[ "${MVM_IMAGE_INPUTS_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || exit 1
 [[ -d "$RUNNER_TEMP" ]] || exit 1
 
 base_dir="$RUNNER_TEMP/image-set-release"
@@ -76,6 +77,7 @@ python3 scripts/sign-composed-image.py \
   --mvm-images-lock "$RUNNER_TEMP/images.lock" \
   --pack-source "$pack_source" \
   --mvm-meta "$sidecar" \
+  --expected-inputs-sha256 "$MVM_IMAGE_INPUTS_SHA256" \
   --output "$evidence"
 test -s "$evidence/image-evidence.sigstore.json"
 python3 scripts/check-python-composed-runtime.py \

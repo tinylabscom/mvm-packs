@@ -2,6 +2,8 @@
 
 import hashlib
 import importlib.util
+import contextlib
+import io
 import json
 import os
 import shlex
@@ -107,6 +109,18 @@ class SigningTests(unittest.TestCase):
             "assets": {name: record(body) for name, body in self.assets.items()},
         }
         write_json(self.composed / "composition.json", self.composition)
+        self.input_manifest = {
+            "schema_version": 1,
+            "assets": {
+                **{name: record(self.assets[name]) for name in (
+                    "rootfs.ext4", "rootfs.verity", "rootfs.roothash",
+                )},
+                "mvm-meta.json": record(self.mvm_meta.read_bytes()),
+            },
+        }
+        self.expected_inputs_sha256 = hashlib.sha256(
+            (json.dumps(self.input_manifest, sort_keys=True, separators=(",", ":")) + "\n").encode()
+        ).hexdigest()
         self.environment = {
             "GITHUB_REPOSITORY": "tinylabscom/mvm-packs",
             "GITHUB_REF": "refs/heads/main",
@@ -128,7 +142,83 @@ class SigningTests(unittest.TestCase):
     def prepare(self):
         signer.prepare(self.composed, self.candidate, "runtime/python@1.1.0",
                        self.output, self.environment, self.images_lock,
-                       self.pack_source, self.mvm_meta)
+                       self.pack_source, self.mvm_meta, self.expected_inputs_sha256)
+
+    def test_unsigned_manifest_cli_is_exact_and_has_no_signing_effect(self):
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {}, clear=True), \
+             mock.patch.object(signer, "sign_and_verify") as sign, \
+             contextlib.redirect_stdout(output):
+            signer.main(["image-inputs", "--composition", str(self.composed),
+                         "--mvm-meta", str(self.mvm_meta)])
+        self.assertEqual(json.loads(output.getvalue()), self.input_manifest)
+        self.assertEqual(hashlib.sha256(output.getvalue().encode()).hexdigest(),
+                         self.expected_inputs_sha256)
+        sign.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_missing_malformed_or_wrong_input_pin_refuses_before_signing(self):
+        for pin in (None, "", "short", "G" * 64, "A" * 64, "0" * 64):
+            with self.subTest(pin=pin), \
+                 mock.patch.object(signer, "sign_and_verify") as sign, \
+                 self.assertRaises(signer.SigningError):
+                signer.prepare(
+                    self.composed, self.candidate, "runtime/python@1.1.0",
+                    self.output, self.environment, self.images_lock,
+                    self.pack_source, self.mvm_meta, pin,
+                )
+            sign.assert_not_called()
+            self.assertFalse(self.output.exists())
+
+    def test_each_changed_quartet_member_refuses_even_with_matching_unsigned_reports(self):
+        original_report = (self.composed / "asset-report.json").read_bytes()
+        original_composition = (self.composed / "composition.json").read_bytes()
+        for name in ("rootfs.ext4", "rootfs.verity", "rootfs.roothash", "mvm-meta.json"):
+            path = self.mvm_meta if name == "mvm-meta.json" else self.composed / name
+            original = path.read_bytes()
+            try:
+                if name == "mvm-meta.json":
+                    value = json.loads(original)
+                    value["name"] = "different-valid-sidecar-name"
+                    write_json(path, value)
+                else:
+                    path.write_bytes(original + b"changed")
+                    report = json.loads(original_report)
+                    for asset in report["assets"]:
+                        if asset["path"] == name:
+                            asset.update(record(path.read_bytes()))
+                    write_json(self.composed / "asset-report.json", report)
+                    composition = json.loads(original_composition)
+                    composition["assets"][name] = record(path.read_bytes())
+                    composition["assets"]["asset-report.json"] = record(
+                        (self.composed / "asset-report.json").read_bytes()
+                    )
+                    write_json(self.composed / "composition.json", composition)
+                with self.subTest(name=name), \
+                     mock.patch.object(signer, "sign_and_verify") as sign, \
+                     self.assertRaisesRegex(signer.SigningError, "reviewed input manifest"):
+                    self.prepare()
+                sign.assert_not_called()
+                self.assertFalse(self.output.exists())
+            finally:
+                path.write_bytes(original)
+                (self.composed / "asset-report.json").write_bytes(original_report)
+                (self.composed / "composition.json").write_bytes(original_composition)
+
+    def test_unsigned_manifest_refuses_linked_missing_and_oversized_metadata(self):
+        original = self.mvm_meta.read_bytes()
+        for mutation in ("missing", "linked", "oversized"):
+            with self.subTest(mutation=mutation):
+                self.mvm_meta.unlink()
+                if mutation == "linked":
+                    self.mvm_meta.symlink_to(self.composed / "rootfs.ext4")
+                elif mutation == "oversized":
+                    self.mvm_meta.write_bytes(b"x" * (1024 * 1024 + 1))
+                with self.assertRaises((OSError, signer.SigningError)):
+                    signer.image_inputs(self.composed, self.mvm_meta)
+                if self.mvm_meta.exists() or self.mvm_meta.is_symlink():
+                    self.mvm_meta.unlink()
+                self.mvm_meta.write_bytes(original)
 
     def fake_sign(self, path, bundle):
         bundle.write_bytes(hashlib.sha256(path.read_bytes()).hexdigest().encode())
@@ -174,7 +264,8 @@ python3() {
         suffix = runner[runner.index('test -s "$candidate/candidate.json"'):]
         result = subprocess.run(
             ["bash", "-c", prefix + suffix],
-            env={**os.environ, "RUNNER_TEMP": str(self.root)},
+            env={**os.environ, "RUNNER_TEMP": str(self.root),
+                 "MVM_IMAGE_INPUTS_SHA256": self.expected_inputs_sha256},
             capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -198,6 +289,7 @@ python3() {
                 args["--composition"], args["--candidate-report"], args["--reference"],
                 args["--output"], self.environment, args["--mvm-images-lock"],
                 args["--pack-source"], args["--mvm-meta"],
+                args["--expected-inputs-sha256"],
             )
         args = interfaces["stage-image-release.py"]
         with mock.patch.object(stager, "verify_bundle", side_effect=self.fake_verify):
@@ -385,7 +477,8 @@ python3() {
                     with self.assertRaisesRegex(signer.SigningError, "publisher workflow"):
                         signer.prepare(self.composed, self.candidate,
                                        "runtime/python@1.1.0", self.output, changed,
-                                       self.images_lock, self.pack_source, self.mvm_meta)
+                                       self.images_lock, self.pack_source, self.mvm_meta,
+                                       self.expected_inputs_sha256)
                 called.assert_not_called()
                 self.assertFalse(self.output.exists())
 
