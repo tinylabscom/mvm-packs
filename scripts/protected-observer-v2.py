@@ -483,6 +483,11 @@ def _release_executable(raw, expected):
                     tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE,
                 ):
                     raise WitnessError("extended/linked archive member")
+                if member.isdir():
+                    # TarInfo removes every trailing slash. Check the original
+                    # name field too, permitting only one directory terminator.
+                    raw_name = header[:100].split(b"\x00", 1)[0].decode("utf-8", "strict")
+                    _path(raw_name.removesuffix("/"))
                 name = _path(member.name)
                 if name in seen:
                     raise WitnessError("duplicate archive member")

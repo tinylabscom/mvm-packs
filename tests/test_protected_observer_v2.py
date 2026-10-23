@@ -411,6 +411,28 @@ class ClientByteBindingTests(unittest.TestCase):
         self.client["archive"] = record(raw)
         self.write_checksums()
 
+    def write_raw_directory(self, name, prefix="", kind=tarfile.DIRTYPE):
+        root = self.member.rsplit("/", 1)[0]
+        self.write_archive(
+            companions=[self.companion(root + "/assets", kind=tarfile.DIRTYPE)],
+            executable_last=True,
+        )
+        raw = bytearray(gzip.decompress((self.directory / self.archive_name).read_bytes()))
+        directory = tarfile.TarInfo("unit-directory")
+        directory.type, directory.mode = kind, 0o755
+        header = bytearray(directory.tobuf(format=tarfile.USTAR_FORMAT))
+        encoded_name, encoded_prefix = name.encode("utf-8"), prefix.encode("utf-8")
+        self.assertLessEqual(len(encoded_name), 100)
+        self.assertLessEqual(len(encoded_prefix), 155)
+        # Mutate actual header fields: TarInfo's reader normalizes directory
+        # terminators, so a round-trip through it would hide this regression.
+        header[:100] = encoded_name.ljust(100, b"\x00")
+        header[345:500] = encoded_prefix.ljust(155, b"\x00")
+        header[148:156] = b" " * 8
+        header[148:156] = f"{sum(header):06o}\x00 ".encode("ascii")
+        raw[:512] = header
+        self.replace_archive_bytes(gzip.compress(raw))
+
     def write_checksums(self, text=None):
         if text is None:
             text = self.client["archive"]["sha256"] + "  " + self.archive_name + "\n"
@@ -470,6 +492,32 @@ class ClientByteBindingTests(unittest.TestCase):
                     all(call.args[0][0] == "cosign" for call in crypto.call_args_list)
                 )
                 self.assertEqual({p.name for p in self.directory.iterdir()}, before)
+
+    def test_raw_directory_header_aliases_refuse(self):
+        root = self.member.rsplit("/", 1)[0]
+        for name, prefix, kind in (
+            (root + "/assets//", "", tarfile.DIRTYPE),
+            (root + "/assets///", "", tarfile.DIRTYPE),
+            ("assets//", root, tarfile.DIRTYPE),
+            (root + "/assets//", "", tarfile.AREGTYPE),
+        ):
+            with self.subTest(name=name, prefix=prefix, kind=kind):
+                self.write_raw_directory(name, prefix, kind)
+                with self.assertRaisesRegex(observer.WitnessError, "noncanonical"):
+                    self.verify()
+
+    def test_raw_directory_header_accepts_one_terminator_and_ustar_prefix(self):
+        root = self.member.rsplit("/", 1)[0]
+        for name, prefix, kind in (
+            (root + "/assets", "", tarfile.DIRTYPE),
+            (root + "/assets/", "", tarfile.DIRTYPE),
+            ("assets", root, tarfile.DIRTYPE),
+            ("assets/", root, tarfile.DIRTYPE),
+            (root + "/assets/", "", tarfile.AREGTYPE),
+        ):
+            with self.subTest(name=name, prefix=prefix, kind=kind):
+                self.write_raw_directory(name, prefix, kind)
+                self.verify()
 
     def test_companion_aliases_links_specials_and_unknown_files_refuse(self):
         root = self.member.rsplit("/", 1)[0]
