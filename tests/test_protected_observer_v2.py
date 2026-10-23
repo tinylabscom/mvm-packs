@@ -364,20 +364,30 @@ class ClientByteBindingTests(unittest.TestCase):
         }
         self.write_archive()
 
-    def write_archive(self, *, member=None, kind=tarfile.REGTYPE, duplicate=False):
+    def write_archive(
+        self, *, member=None, kind=tarfile.REGTYPE, duplicate=False,
+        companions=(), executable_last=False, mode=0o755,
+    ):
         path = self.directory / self.archive_name
         with tarfile.open(path, "w:gz") as archive:
             entry = tarfile.TarInfo(member or self.member)
-            entry.mode = 0o755
+            entry.mode = mode
             entry.type = kind
             if kind == tarfile.REGTYPE:
                 entry.size = len(self.executable)
-                archive.addfile(entry, io.BytesIO(self.executable))
-                if duplicate:
-                    archive.addfile(entry, io.BytesIO(self.executable))
+                payload = self.executable
             else:
                 entry.linkname = self.member
-                archive.addfile(entry)
+                payload = None
+            selected = [(entry, payload)]
+            if duplicate:
+                selected.append((entry, payload))
+            members = (
+                list(companions) + selected if executable_last
+                else selected + list(companions)
+            )
+            for info, data in members:
+                archive.addfile(info, io.BytesIO(data) if data is not None else None)
         self.client["archive"] = record(path.read_bytes())
         self.write_checksums()
         for role, name in (
@@ -387,6 +397,19 @@ class ClientByteBindingTests(unittest.TestCase):
             raw = ("UNIT-ONLY-SIGNATURE:" + role).encode()
             (self.directory / name).write_bytes(raw)
             self.client[role] = record(raw)
+
+    @staticmethod
+    def companion(name, data=b"UNIT-ONLY-COMPANION", kind=tarfile.REGTYPE):
+        entry = tarfile.TarInfo(name)
+        entry.type = kind
+        entry.mode = 0o755 if kind == tarfile.DIRTYPE else 0o644
+        entry.size = len(data) if kind == tarfile.REGTYPE else 0
+        return entry, data if kind == tarfile.REGTYPE else None
+
+    def replace_archive_bytes(self, raw):
+        (self.directory / self.archive_name).write_bytes(raw)
+        self.client["archive"] = record(raw)
+        self.write_checksums()
 
     def write_checksums(self, text=None):
         if text is None:
@@ -412,6 +435,172 @@ class ClientByteBindingTests(unittest.TestCase):
             self.assertIn("https://token.actions.githubusercontent.com", command)
         subjects = {Path(command[2]).name for command in commands}
         self.assertEqual(subjects, {self.archive_name, "checksums-sha256.txt"})
+
+    def test_release_companions_before_or_after_executable_are_not_executed(self):
+        root = self.member.rsplit("/", 1)[0]
+        companions = [
+            self.companion(root, kind=tarfile.DIRTYPE),
+            *[
+                self.companion(root + "/" + name)
+                for name in (
+                    "mvm-host-agent", "mvm-signer-helper", "mvm-network-endpoint",
+                    "mvm-broker", "mvm-audit-signer", "mvm-gpu-endpoint",
+                    "libmvm_hostlib.so", "README.md", "LICENSE-MPL-2.0.txt",
+                    "THIRD_PARTY_NOTICES.txt",
+                )
+            ],
+            self.companion(root + "/assets", kind=tarfile.DIRTYPE),
+            self.companion(root + "/assets/mvmctl.entitlements"),
+            self.companion(root + "/man", kind=tarfile.DIRTYPE),
+            self.companion(root + "/man/mvmctl.1"),
+        ]
+        for executable_last in (False, True):
+            with self.subTest(executable_last=executable_last):
+                self.write_archive(
+                    companions=companions, executable_last=executable_last,
+                )
+                before = {p.name for p in self.directory.iterdir()}
+                with mock.patch.object(observer.subprocess, "run") as crypto:
+                    result = observer.verify_client(
+                        self.client, self.directory, source=source(),
+                    )
+                self.assertEqual(result, self.executable)
+                self.assertEqual(crypto.call_count, 2)
+                self.assertTrue(
+                    all(call.args[0][0] == "cosign" for call in crypto.call_args_list)
+                )
+                self.assertEqual({p.name for p in self.directory.iterdir()}, before)
+
+    def test_companion_aliases_links_specials_and_unknown_files_refuse(self):
+        root = self.member.rsplit("/", 1)[0]
+        for name, kind in (
+            (root + "/assets/../mvmctl", tarfile.REGTYPE),
+            (root + "/assets//alias", tarfile.REGTYPE),
+            (root + "/assets/./alias", tarfile.REGTYPE),
+            (root + "/assets/back\\slash", tarfile.REGTYPE),
+            (root + "/assets/control\x7f", tarfile.REGTYPE),
+            ("another-release/README.md", tarfile.REGTYPE),
+            (root + "/unexpected-helper", tarfile.REGTYPE),
+            (root + "/mvm-host-agent", tarfile.SYMTYPE),
+            (root + "/mvm-host-agent", tarfile.LNKTYPE),
+            (root + "/mvm-host-agent", tarfile.FIFOTYPE),
+            (root + "/mvm-host-agent", tarfile.CHRTYPE),
+        ):
+            with self.subTest(name=name, kind=kind):
+                self.write_archive(companions=[self.companion(name, kind=kind)])
+                with self.assertRaises(observer.WitnessError):
+                    self.verify()
+
+    def test_duplicate_companion_and_file_parent_collisions_refuse(self):
+        root = self.member.rsplit("/", 1)[0]
+        helper = self.companion(root + "/mvm-host-agent")
+        parent = self.companion(root + "/assets/alias")
+        child = self.companion(root + "/assets/alias/child")
+        for companions, cause in (
+            ([helper, helper], "duplicate"),
+            ([parent, child], "file/directory"),
+            ([child, parent], "file/directory"),
+        ):
+            with self.subTest(cause=cause, companions=companions):
+                self.write_archive(companions=companions)
+                with self.assertRaisesRegex(observer.WitnessError, cause):
+                    self.verify()
+
+    def test_large_companions_are_discarded_in_bounded_chunks(self):
+        root = self.member.rsplit("/", 1)[0]
+        data = b"x" * (3 * (64 << 10) + 7)
+        self.write_archive(companions=[self.companion(root + "/mvm-host-agent", data)])
+        reads, payloads = [], []
+        original_read = gzip.GzipFile.read
+        original_payload = observer._read_client_payload
+
+        def read(stream, size=-1):
+            reads.append(size)
+            return original_read(stream, size)
+
+        def payload(stream, size, *, capture):
+            payloads.append((size, capture))
+            return original_payload(stream, size, capture=capture)
+
+        with (
+            mock.patch.object(observer.gzip.GzipFile, "read", read),
+            mock.patch.object(observer, "_read_client_payload", payload),
+        ):
+            self.verify()
+        self.assertIn((len(data), False), payloads)
+        self.assertEqual([size for size, capture in payloads if capture],
+                         [len(self.executable)])
+        self.assertEqual(max(reads), 64 << 10)
+        self.assertTrue(all(0 <= size <= 64 << 10 for size in reads))
+
+    def test_member_and_aggregate_bounds_refuse_before_payload_read(self):
+        root = self.member.rsplit("/", 1)[0]
+        for declared, bound, cause in (
+            (observer.CLIENT_MAX_MEMBER_BYTES + 1, observer.CLIENT_MAX_UNPACKED_BYTES,
+             "member exceeds byte bound"),
+            (512, 1023, "unpacked byte bound"),
+        ):
+            entry = tarfile.TarInfo(root + "/mvm-host-agent")
+            entry.size = declared
+            self.replace_archive_bytes(gzip.compress(entry.tobuf(format=tarfile.USTAR_FORMAT)))
+            reads = []
+            original = gzip.GzipFile.read
+
+            def read(stream, size=-1):
+                reads.append(size)
+                return original(stream, size)
+
+            with (
+                self.subTest(declared=declared, bound=bound),
+                mock.patch.object(observer, "CLIENT_MAX_UNPACKED_BYTES", bound),
+                mock.patch.object(observer.gzip.GzipFile, "read", read),
+                self.assertRaisesRegex(observer.WitnessError, cause),
+            ):
+                self.verify()
+            self.assertEqual(reads, [512])
+
+    def test_member_count_and_total_archive_boundaries(self):
+        root = self.member.rsplit("/", 1)[0]
+        companions = [
+            self.companion(root + "/man/mvmctl-unit-" + str(i) + ".1")
+            for i in range(3)
+        ]
+        with mock.patch.object(observer, "CLIENT_MAX_MEMBERS", 3):
+            self.write_archive(companions=companions[:2])
+            self.verify()
+            self.write_archive(companions=companions)
+            with self.assertRaisesRegex(observer.WitnessError, "extra archive member"):
+                self.verify()
+        self.write_archive()
+        expanded = len(gzip.decompress((self.directory / self.archive_name).read_bytes()))
+        with mock.patch.object(observer, "CLIENT_MAX_UNPACKED_BYTES", expanded):
+            self.verify()
+        with (
+            mock.patch.object(observer, "CLIENT_MAX_UNPACKED_BYTES", expanded - 1),
+            self.assertRaisesRegex(observer.WitnessError, "bounded archive trailer"),
+        ):
+            self.verify()
+
+    def test_selected_executable_still_requires_execute_mode(self):
+        self.write_archive(mode=0o644)
+        with self.assertRaisesRegex(observer.WitnessError, "executable size or mode"):
+            self.verify()
+
+    def test_truncated_companion_and_nonzero_padding_refuse(self):
+        root = self.member.rsplit("/", 1)[0]
+        entry = tarfile.TarInfo(root + "/mvm-host-agent")
+        entry.size = 1000
+        self.replace_archive_bytes(
+            gzip.compress(entry.tobuf(format=tarfile.USTAR_FORMAT) + b"short")
+        )
+        with self.assertRaisesRegex(observer.WitnessError, "truncated archive member data"):
+            self.verify()
+        self.write_archive(companions=[self.companion(root + "/mvm-host-agent", b"x")])
+        raw = bytearray(gzip.decompress((self.directory / self.archive_name).read_bytes()))
+        raw[3 * 512 + 1] = 1  # Padding after the second member's single data byte.
+        self.replace_archive_bytes(gzip.compress(raw))
+        with self.assertRaisesRegex(observer.WitnessError, "noncanonical member padding"):
+            self.verify()
 
     def test_signature_failure_and_timeout_refuse(self):
         for error in (
