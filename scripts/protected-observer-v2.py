@@ -36,6 +36,14 @@ INTEGRATION_ENABLED = False
 POLICY_PATH = ".github/policies/protected-observer-v2.json"
 ARCHIVE = "mvmctl-x86_64-unknown-linux-gnu.tar.gz"
 MEMBER = "mvmctl-x86_64-unknown-linux-gnu/mvmctl"
+CLIENT_ROOT_FILES = frozenset({
+    "mvm-host-agent", "mvm-signer-helper", "mvm-network-endpoint", "mvm-broker",
+    "mvm-audit-signer", "mvm-gpu-endpoint", "libmvm_hostlib.so", "README.md",
+    "LICENSE-MPL-2.0.txt", "THIRD_PARTY_NOTICES.txt",
+})
+CLIENT_MAX_MEMBERS = 1024
+CLIENT_MAX_MEMBER_BYTES = 256 << 20
+CLIENT_MAX_UNPACKED_BYTES = 1 << 30
 PUBLISHER = "https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main"
 SIGNATURE_ROLES = {
     "release-archive": "release",
@@ -434,6 +442,99 @@ def verify_signature(blob, bundle, *, role, source, tag=None):
         raise WitnessError("signature verification failed") from error
 
 
+def _read_client_payload(stream, size, *, capture):
+    captured = bytearray() if capture else None
+    while size:
+        requested = min(size, 64 << 10)
+        chunk = stream.read(requested)
+        if len(chunk) != requested:
+            raise WitnessError("truncated archive member data")
+        if captured is not None:
+            captured.extend(chunk)
+        size -= len(chunk)
+    return bytes(captured) if captured is not None else None
+
+
+def _release_executable(raw, expected):
+    """Inspect authenticated bytes; never extract or run companion members."""
+    root = MEMBER.rsplit("/", 1)[0]
+    executable, consumed = None, 0
+    seen, required_directories = {}, set()
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(raw)) as archive:
+            while True:
+                # Inspect headers before any PAX/GNU metadata body is consumed.
+                header = archive.read(512)
+                consumed += len(header)
+                if consumed > CLIENT_MAX_UNPACKED_BYTES:
+                    raise WitnessError("archive exceeds unpacked byte bound")
+                if header == bytes(512):
+                    trailer = archive.read(10241)
+                    if (
+                        len(trailer) < 512 or len(trailer) > 10240 or any(trailer)
+                        or consumed + len(trailer) > CLIENT_MAX_UNPACKED_BYTES
+                    ):
+                        raise WitnessError("invalid/bounded archive trailer")
+                    break
+                if len(header) != 512 or len(seen) >= CLIENT_MAX_MEMBERS:
+                    raise WitnessError("truncated/extra archive member")
+                member = tarfile.TarInfo.frombuf(header, "utf-8", "strict")
+                if member.type not in (
+                    tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE,
+                ):
+                    raise WitnessError("extended/linked archive member")
+                if member.isdir():
+                    # TarInfo removes every trailing slash. Check the original
+                    # name field too, permitting only one directory terminator.
+                    raw_name = header[:100].split(b"\x00", 1)[0].decode("utf-8", "strict")
+                    _path(raw_name.removesuffix("/"))
+                name = _path(member.name)
+                if name in seen:
+                    raise WitnessError("duplicate archive member")
+                if "\x7f" in name or (name != root and not name.startswith(root + "/")):
+                    raise WitnessError("archive member leaves the release root")
+                relative = name[len(root) + 1:] if name != root else ""
+                documentation = relative.startswith(("assets/", "man/"))
+                if member.isdir():
+                    allowed = name == root or relative in ("assets", "man") or documentation
+                    if not allowed or member.size != 0:
+                        raise WitnessError("unsafe archive directory")
+                elif not (
+                    name == MEMBER or relative in CLIENT_ROOT_FILES or documentation
+                ):
+                    raise WitnessError("unsafe/extra archive member")
+                parts = name.split("/")
+                parents = ["/".join(parts[:i]) for i in range(1, len(parts))]
+                if (
+                    any(seen.get(parent) == "file" for parent in parents)
+                    or (member.isfile() and name in required_directories)
+                ):
+                    raise WitnessError("archive file/directory collision")
+                required_directories.update(parents)
+                seen[name] = "directory" if member.isdir() else "file"
+                if not 0 <= member.size <= CLIENT_MAX_MEMBER_BYTES:
+                    raise WitnessError("archive member exceeds byte bound")
+                padding_size = (-member.size) % 512
+                consumed += member.size + padding_size
+                if consumed > CLIENT_MAX_UNPACKED_BYTES:
+                    raise WitnessError("archive exceeds unpacked byte bound")
+                selected = name == MEMBER
+                if selected and (
+                    not member.isfile() or not member.mode & 0o111
+                    or member.size != expected["size"]
+                ):
+                    raise WitnessError("archive executable size or mode differs")
+                payload = _read_client_payload(archive, member.size, capture=selected)
+                if selected:
+                    executable = payload
+                padding = archive.read(padding_size)
+                if len(padding) != padding_size or any(padding):
+                    raise WitnessError("truncated/noncanonical member padding")
+    except (tarfile.TarError, OSError, EOFError, UnicodeError) as error:
+        raise WitnessError("invalid executable archive") from error
+    return executable
+
+
 def verify_client(client, directory, *, source):
     """Authenticate snapshots; return exact executable bytes without running."""
     _client(client)
@@ -478,57 +579,7 @@ def verify_client(client, directory, *, source):
                 matches.append(match[1])
         if matches != [client["archive"]["sha256"]]:
             raise WitnessError("archive checksum absent/duplicate/different")
-        executable = None
-        try:
-            with gzip.GzipFile(fileobj=io.BytesIO(blobs["archive"])) as archive:
-                # Parse fixed-size headers BEFORE any extended metadata body.
-                # TarFile iteration would consume PAX/GNU bodies before yielding.
-                seen = set()
-                while True:
-                    header = archive.read(512)
-                    if header == bytes(512):
-                        trailer = archive.read(10241)
-                        if len(trailer) < 512 or len(trailer) > 10240 or any(trailer):
-                            raise WitnessError("invalid/bounded archive trailer")
-                        break
-                    if len(header) != 512 or len(seen) >= 2:
-                        raise WitnessError("truncated/extra archive member")
-                    member = tarfile.TarInfo.frombuf(header, "utf-8", "strict")
-                    if member.name in seen or member.type not in (
-                        tarfile.REGTYPE,
-                        tarfile.AREGTYPE,
-                        tarfile.DIRTYPE,
-                    ):
-                        raise WitnessError("duplicate/extended/linked archive member")
-                    seen.add(member.name)
-                    if (
-                        member.name == MEMBER
-                        and member.isfile()
-                        and member.mode & 0o111
-                    ):
-                        if (
-                            member.size != client["executable"]["size"]
-                            or member.size > 256 << 20
-                        ):
-                            raise WitnessError("archive executable size differs")
-                        executable = archive.read(member.size)
-                        padding = archive.read((-member.size) % 512)
-                        if (
-                            len(executable) != member.size
-                            or len(padding) != (-member.size) % 512
-                            or any(padding)
-                        ):
-                            raise WitnessError("truncated/noncanonical executable data")
-                    elif (
-                        member.name == MEMBER.rsplit("/", 1)[0]
-                        and member.isdir()
-                        and member.size == 0
-                    ):
-                        continue
-                    else:
-                        raise WitnessError("unsafe/extra archive member")
-        except (tarfile.TarError, OSError, EOFError, UnicodeError) as error:
-            raise WitnessError("invalid executable archive") from error
+        executable = _release_executable(blobs["archive"], client["executable"])
         if executable is None or digest(executable) != client["executable"]:
             raise WitnessError("executable bytes differ")
         if (

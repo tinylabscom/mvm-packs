@@ -104,11 +104,22 @@ uses trusted `GITHUB_WORKFLOW_SHA`, not report JSON, for workflow-source binding
 Resource bounds in this diagnostic implementation are 256 payload files,
 256 MiB per payload/client record, 4 MiB per metadata/artifact record, and
 64 policy selectors. Canonical zero-byte payload files are supported. The
-archive permits only its exact binary and optional parent directory. No live
-release-layout/size compatibility is claimed before authentic A/B are tested.
-Fixed-size tar headers are inspected before reading member bodies; PAX/GNU
-extensions are rejected before their declared metadata sizes can trigger an
-unbounded decompression/read.
+Linux client archive may also contain the release's named host helpers,
+`libmvm_hostlib.so`, release notices, and regular files under `assets/` and
+`man/`, all inside its exact release root. Only the exact `mvmctl` member is
+captured and compared with its executable pin. Companions are streamed and
+discarded in at most 64 KiB reads, never extracted, installed or executed.
+Accepting this diagnostic layout does not attest companion usability or a
+working installed client.
+
+Client archives are limited to 1024 members, 256 MiB per member and 1 GiB
+expanded in total, including headers and padding. Directory bodies, duplicate
+or noncanonical names, file/parent collisions, links, special files and unknown
+root-level companions refuse. Fixed-size tar headers and declared sizes are
+checked before payload capture; PAX/GNU extensions are still rejected before
+their metadata bodies can trigger unbounded decompression/read. No genuine
+release-layout/size, signature, native or publication acceptance is claimed
+from the synthetic unit fixtures; authentic A/B still must be tested.
 
 ## Closed authority and subject table
 
