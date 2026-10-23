@@ -508,6 +508,42 @@ or publication wiring. Actual immutable-config launch/session receipt APIs,
 authenticated distinct releases A/B, the global producer-executable verifier pin
 and real protected observations remain prerequisites.
 
+### Post-run consumer session component check
+
+`scripts/check-python-consumer-session.py` checks an already-finished Python
+probe using the exact released client's existing `trust receipt verify` and
+`trust audit verify <plan-id> --tenant local --json` routes. It performs no
+pull, boot, stop, signing, or publication. Run it only inside the enclosing
+consumer runner's exclusively owned private state, with independently captured
+client/key/descriptor/rootfs pins:
+
+```sh
+python3 scripts/check-python-consumer-session.py \
+  --client "$VERIFIED_MVMCTL" --client-sha256 "$CLIENT_SHA256" \
+  --mvm-home "$PRIVATE_MVM_HOME" --audit-key-sha256 "$SETUP_PUBLIC_KEY_SHA256" \
+  --receipt "$RUN_RECEIPT" --plan-id "$EXACT_PLAN_ID" \
+  --reference runtime/python@1.1.0 \
+  --descriptor-sha256 "$PULLED_DESCRIPTOR_SHA256" \
+  --rootfs-sha256 "$ADMITTED_ROOTFS_SHA256" --output "$FRESH_COMPONENT_OUTPUT"
+```
+
+The checker requires the fixed probe argv embedded in the script, exactly
+`PS06-PYTHON-OK\n` on guest stdout, empty guest stderr, successful captured exit,
+unique authenticated pack identity, matching image/backend, and one verified
+`exited` session seal with no uncovered late entries. The probe checks Python
+3.12 and that the guest's network interface inventory contains only `lo`; it
+does not exercise an external service. Duplicate JSON keys, unknown receipt
+fields, wrong signatures/verifier exits, identity conflicts and incomplete
+lifecycle evidence refuse. Existing output is never overwritten.
+
+`components.json` is **unsigned component evidence only**. The surrounding
+runner must still bind the pull, exact run process, receipt, plan session,
+artifact provenance and cleanup observation in a fresh consumer. A receipt
+alone contains neither a pack identity nor cleanup proof. A host session seal
+is not original native `Child` custody, and the verifier's final self-outcome
+is not covered by its own verification. This command does not enable the
+protected-observer v2 publication gate or complete #12/#3716 by itself.
+
 ### Pack image composition v1
 
 The build type named in that statement is the `compose-pack-image.py` operation
