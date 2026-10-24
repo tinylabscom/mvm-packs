@@ -517,6 +517,12 @@ pull, boot, stop, signing, or publication. Run it only inside the enclosing
 consumer runner's exclusively owned private state, with independently captured
 client/key/descriptor/rootfs pins:
 
+The client must emit a schema-2 run receipt containing its recorded plan ID,
+session root, event count, admitted image, backend and exit. The checker matches
+that signed reference against the canonical session verifier's result. Legacy
+schema-1 receipts are not accepted here. A compatible released consumer has not
+yet been demonstrated; source fixtures are not release or runtime evidence.
+
 ```sh
 python3 scripts/check-python-consumer-session.py \
   --client "$VERIFIED_MVMCTL" --client-sha256 "$CLIENT_SHA256" \
@@ -535,6 +541,9 @@ unique authenticated pack identity, matching image/backend, and one verified
 does not exercise an external service. Duplicate JSON keys, unknown receipt
 fields, wrong signatures/verifier exits, identity conflicts and incomplete
 lifecycle evidence refuse. Existing output is never overwritten.
+
+The `receipt_to_audit_session_linkage` result establishes only that signed
+metadata agreement. It does not establish receipt-to-process association.
 
 `components.json` is **unsigned component evidence only**. The surrounding
 runner must still bind the pull, exact run process, receipt, plan session,

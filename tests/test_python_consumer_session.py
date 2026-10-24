@@ -21,6 +21,7 @@ PLAN = "sha256:" + "a" * 64
 ROOTFS = "b" * 64
 DESCRIPTOR = "c" * 64
 KEY = "d" * 64
+SESSION_ROOT = "9" * 64
 REFERENCE = "runtime/python@1.1.0"
 
 
@@ -42,6 +43,7 @@ def fixture():
         "tenant": "local", "plan_id": PLAN, "verdict": "VERIFIED", "late_entries": 0,
         "event_count": 4, "seals": [{"seq": 4, "seal": {
             "reason": "exited", "exit_code": "0", "image_sha256": ROOTFS, "event_count": 4,
+            "session_root": SESSION_ROOT,
         }}],
     }
     return report, entries
@@ -50,7 +52,11 @@ def fixture():
 def receipt_fixture():
     return {
         "payload": {
-            "schema_version": 1, "receipt_id": "unit", "recorded_at": "unit",
+            "schema_version": 2, "receipt_id": "unit", "recorded_at": "unit",
+            "session": {
+                "plan_id": PLAN, "backend": "firecracker", "session_root": SESSION_ROOT,
+                "event_count": 4, "image_sha256": ROOTFS, "exit_code": 0,
+            },
             "invocation": {
                 "manifest": None, "image": None, "cpus": 1, "memory": "256M",
                 "profile": "unit", "network_posture": "deny-all", "egress_enforcement": "unit",
@@ -77,7 +83,8 @@ def receipt_fixture():
 
 class ConsumerSessionTests(unittest.TestCase):
     def judge(self, report, entries):
-        check.session_semantics(report, entries, PLAN, REFERENCE, DESCRIPTOR, ROOTFS)
+        binding = check.receipt_semantics(receipt_fixture(), KEY)
+        check.session_semantics(report, entries, PLAN, REFERENCE, DESCRIPTOR, ROOTFS, binding)
 
     def test_expected_sealed_identity_semantics(self):
         self.judge(*fixture())
@@ -173,6 +180,41 @@ class ConsumerSessionTests(unittest.TestCase):
     def test_receipt_expected_semantics_not_signature_proof(self):
         check.receipt_semantics(receipt_fixture(), KEY)
 
+    def test_legacy_unbound_receipt_is_refused(self):
+        receipt = receipt_fixture()
+        receipt["payload"]["schema_version"] = 1
+        receipt["payload"].pop("session", None)
+        with self.assertRaises(check.EvidenceError):
+            check.receipt_semantics(receipt, KEY)
+
+    def test_receipt_reference_must_match_the_canonical_session(self):
+        for key, wrong in (
+            ("plan_id", "sha256:" + "e" * 64),
+            ("session_root", "e" * 64), ("event_count", 5),
+            ("event_count", 4.0), ("backend", "hvf"),
+            ("image_sha256", "e" * 64), ("exit_code", 1), ("exit_code", False),
+        ):
+            with self.subTest(key=key, wrong=wrong):
+                report, entries = fixture()
+                binding = check.receipt_semantics(receipt_fixture(), KEY)
+                binding[key] = wrong
+                with self.assertRaises(check.EvidenceError):
+                    check.session_semantics(
+                        report, entries, PLAN, REFERENCE, DESCRIPTOR, ROOTFS, binding,
+                    )
+
+    def test_invalid_or_untyped_receipt_reference_refuses(self):
+        for key, wrong in (
+            ("plan_id", PLAN[:16]), ("session_root", "not-a-root"),
+            ("event_count", True), ("exit_code", False),
+            ("image_sha256", None), ("backend", ""),
+        ):
+            with self.subTest(key=key, wrong=wrong):
+                receipt = receipt_fixture()
+                receipt["payload"]["session"][key] = wrong
+                with self.assertRaises(check.EvidenceError):
+                    check.receipt_semantics(receipt, KEY)
+
     def test_receipt_output_status_key_and_command_refusals(self):
         mutations = [
             ("outcome", "exit_code", 1), ("outcome", "success", False),
@@ -193,7 +235,7 @@ class ConsumerSessionTests(unittest.TestCase):
             check.receipt_semantics(receipt_fixture(), "e" * 64)
 
     def test_receipt_unknown_fields_are_not_signed_authority(self):
-        for location in ("payload", "signature", "invocation", "outcome"):
+        for location in ("payload", "signature", "invocation", "outcome", "session"):
             with self.subTest(location=location):
                 receipt = receipt_fixture()
                 target = receipt[location] if location in receipt else receipt["payload"][location]
