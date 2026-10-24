@@ -77,9 +77,9 @@ def receipt_semantics(receipt, public_key_sha256):
     """Check only semantics; callers MUST also run the canonical verifier."""
     fields(receipt, ("payload", "signature"))
     payload, signature = receipt["payload"], receipt["signature"]
-    fields(payload, ("schema_version", "receipt_id", "recorded_at", "invocation", "outcome"))
+    fields(payload, ("schema_version", "receipt_id", "recorded_at", "invocation", "outcome", "session"))
     fields(signature, ("algorithm", "signer_id", "public_key_sha256", "signature_base64"))
-    require(type(payload["schema_version"]) is int and payload["schema_version"] == 1
+    require(type(payload["schema_version"]) is int and payload["schema_version"] == 2
             and signature["algorithm"] == "ed25519",
             "unsupported receipt schema/signature")
     require(signature["public_key_sha256"] == public_key_sha256, "wrong setup audit key")
@@ -88,8 +88,7 @@ def receipt_semantics(receipt, public_key_sha256):
         "manifest", "image", "cpus", "memory", "profile", "network_posture",
         "egress_enforcement", "command", "env_keys", "mounts", "timeout_secs",
     ), ("ai_token_budget",))
-    # Fail on unsigned extensions: the production serde verifier ignores unknown
-    # receipt fields. In particular a supplied "cleanup": true is not evidence.
+    # A field supplied outside the signed receipt schema cannot add assurance.
     expected_command = {
         "kind": "inline", "argv_len": len(COMMAND),
         "argv_sha256": sha(json.dumps(COMMAND, separators=(",", ":")).encode()),
@@ -110,6 +109,24 @@ def receipt_semantics(receipt, public_key_sha256):
             and all(type(outcome.get(key)) is int
                     for key in ("exit_code", "stdout_bytes", "stderr_bytes")),
             "wrong guest output or exit")
+    session = payload["session"]
+    fields(session, ("plan_id", "backend", "session_root", "event_count", "image_sha256", "exit_code"))
+    require(isinstance(session["plan_id"], str)
+            and re.fullmatch(r"sha256:[0-9a-f]{64}", session["plan_id"]) is not None,
+            "receipt needs the exact recorded plan id")
+    require(isinstance(session["session_root"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", session["session_root"]) is not None,
+            "receipt needs the exact recorded session root")
+    require(isinstance(session["image_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", session["image_sha256"]) is not None,
+            "receipt has no admitted pack image")
+    require(isinstance(session["backend"], str)
+            and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session["backend"]) is not None,
+            "receipt has no recorded backend")
+    require(type(session["event_count"]) is int and session["event_count"] > 0
+            and type(session["exit_code"]) is int and session["exit_code"] == 0,
+            "receipt session has no captured successful coverage")
+    return session
 
 
 def session_entries(chain, plan_id):
@@ -132,7 +149,8 @@ def session_entries(chain, plan_id):
     return selected
 
 
-def session_semantics(report, entries, plan_id, reference, descriptor_sha256, rootfs_sha256):
+def session_semantics(report, entries, plan_id, reference, descriptor_sha256, rootfs_sha256,
+                      receipt_session):
     """Add identity/teardown requirements to the canonical session verdict."""
     require(report.get("tenant") == "local" and report.get("plan_id") == plan_id,
             "wrong verified session")
@@ -176,6 +194,15 @@ def session_semantics(report, entries, plan_id, reference, descriptor_sha256, ro
             and seal.get("image_sha256") == rootfs_sha256
             and seal.get("event_count") == len(entries) - 1,
             "session lacks a matching successful exit seal")
+    require(receipt_session["plan_id"] == plan_id
+            and receipt_session["session_root"] == seal.get("session_root")
+            and type(receipt_session["event_count"]) is int
+            and receipt_session["event_count"] == seal["event_count"]
+            and receipt_session["image_sha256"] == rootfs_sha256
+            and receipt_session["backend"] == launched["backend"]
+            and type(receipt_session["exit_code"]) is int
+            and receipt_session["exit_code"] == 0,
+            "signed receipt does not name this canonical audit session")
 
 
 def run_verifier(client, args, environment, output, name):
@@ -210,7 +237,7 @@ def check(args):
     chain, chain_identity = read_regular(audit_path)
     entries = session_entries(chain, args.plan_id)
     receipt, _ = read_regular(args.receipt)
-    receipt_semantics(document(receipt), args.audit_key_sha256)
+    receipt_session = receipt_semantics(document(receipt), args.audit_key_sha256)
     args.output.mkdir(mode=0o700)  # Exclusive output claim; never overwrite/retry.
     (args.output / "receipt.json").write_bytes(receipt)
     (args.output / "audit-before.jsonl").write_bytes(chain)
@@ -235,7 +262,7 @@ def check(args):
     require(read_regular(key_path, 32) == (key, key_identity), "verification changed setup key")
     require(sha(read_regular(client, 1 << 30)[0]) == args.client_sha256, "client changed")
     session_semantics(document(verified), entries, args.plan_id, args.reference,
-                      args.descriptor_sha256, args.rootfs_sha256)
+                      args.descriptor_sha256, args.rootfs_sha256, receipt_session)
     return {
         "schema_version": 1, "kind": "verified-consumer-session-components",
         "plan_id": args.plan_id, "reference": args.reference,
@@ -244,6 +271,7 @@ def check(args):
         "receipt_sha256": sha(receipt), "audit_snapshot_sha256": sha(chain),
         "verifier_final_self_outcome_covered": False,
         "protected_observer_receipt": False,
+        "receipt_to_audit_session_linkage": "signed-reference-matched",
         "receipt_to_plan_process_linkage": "must be established by enclosing isolated runner",
     }
 
