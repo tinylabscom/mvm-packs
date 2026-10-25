@@ -94,6 +94,23 @@ The first planned runnable environment is Claude Code. Its
 publication issues and defines the release evidence. It is not a published image
 or a replacement for the existing policy-only `agent/claude` pack.
 
+The `agent/claude@2.0.0` application source now pins a measured aarch64
+`claude.mvmpkg`, rather than shipping only a policy profile. Its concrete
+Anthropic-only launch policy and logical required secret slot are signed inside
+the archive, not invented as extra registry-manifest fields. The consumer uses
+the same search, pull and run commands shown in the root README; the host
+continues to enforce independent publisher trust and its own ceilings.
+
+The old published `agent/claude@1.0.1` directory must remain byte-identical.
+Only the editable source's former `pack/` payload is removed for the application
+kind. Do not hand-edit `packs/` or `index.json` to simulate publication.
+The normal application-manifest publisher does not upload `.mvmpkg` files:
+the exact archive must first be released at the canonical locator in
+`pack.toml`, read back and checked against its declared SHA-256 and size.
+Archive distribution and genuine keyless descriptor signing remain real release
+operations; source validation alone proves neither availability nor a joke
+response from an installed application.
+
 ### Advancing the base-image lock
 
 A published pack version is immutable, including its base-set tag and signed
