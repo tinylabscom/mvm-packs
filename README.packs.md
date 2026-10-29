@@ -51,6 +51,12 @@ The first planned runnable environment is Claude Code. Its
 publication issues and defines the release evidence. It is not a published image
 or a replacement for the existing policy-only `agent/claude` pack.
 
+The [runnable application declaration contract](docs/application-packages.md)
+binds a separately signed, prebuilt archive to each supported architecture.
+Producer validation and the client consumer path do not authorize publication:
+the generic publisher still refuses these declarations pending protected
+archive signing and release evidence.
+
 ### Advancing the base-image lock
 
 A published pack version is immutable, including its base-set tag and signed

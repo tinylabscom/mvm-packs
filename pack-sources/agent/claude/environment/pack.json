@@ -1,0 +1,22 @@
+{
+  "schema": "mvm.pack-spec/v1",
+  "identity": {"name": "agent/claude", "version": "1.1.0"},
+  "target": "aarch64-linux",
+  "source": {"kind": "local", "path": "source"},
+  "packages": [
+    {"name": "bash", "scope": "runtime"},
+    {"name": "glibc", "scope": "runtime"},
+    {"name": "git", "scope": "runtime"},
+    {"name": "ripgrep", "scope": "runtime"},
+    {"name": "coreutils", "scope": "runtime"},
+    {"name": "cacert", "scope": "runtime"}
+  ],
+  "dependencies": [],
+  "copy": [
+    {"source": "bin/claude", "destination": "/app/bin/claude"},
+    {"source": "start", "destination": "/app/start"},
+    {"source": "inputs.json", "destination": "/app/inputs.json"}
+  ],
+  "entrypoint": ["/app/start"],
+  "resources": {"cpu_cores": 2, "memory_mb": 4096}
+}

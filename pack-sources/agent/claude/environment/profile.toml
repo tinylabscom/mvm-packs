@@ -1,0 +1,4 @@
+description = "Network requirements for the agent environment; local policy grants access."
+
+[overrides.network]
+allow = ["api.anthropic.com:443"]

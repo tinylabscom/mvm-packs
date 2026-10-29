@@ -178,6 +178,12 @@ def validate_manifest(path, verify_signatures=False):
                 f"{rel}: {rel_path!r} digest/size drift from the manifest",
             )
 
+    builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
+    try:
+        builder["validate_application_payload"](path.parent / "files" / "pack", reference, seen)
+    except SystemExit as error:
+        problems.append(f"{rel}: {error}")
+
     signature_trusted = True
     if verify_signatures:
         previous_problems = len(problems)
