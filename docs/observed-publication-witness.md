@@ -1,5 +1,9 @@
 # Publication-only observed witness contract v1
 
+> Historical contract only. Producer acceptance must use strict schema v2;
+> there is no fallback to this schema. See
+> [the protected observer v2 boundary](protected-observer-v2.md).
+
 ## Review boundary
 
 `scripts/observed-publication-witness.py` is a verifier-only, reviewable contract

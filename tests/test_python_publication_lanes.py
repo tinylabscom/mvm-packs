@@ -40,6 +40,14 @@ class PublicationLaneWorkflowTests(unittest.TestCase):
         self.workflow = PUBLISH.read_text()
         self.jobs = jobs(self.workflow)
 
+    def test_validation_pins_the_supported_ubuntu_runner(self):
+        validation = (ROOT / ".github/workflows/validate.yml").read_text()
+        self.assertRegex(
+            jobs(validation)["validate"], r"(?m)^    runs-on: ubuntu-24\.04$"
+        )
+        self.assertIn("\npermissions:\n  contents: read\n", validation)
+        self.assertNotIn("id-token: write", validation)
+
     def test_lanes_run_in_order_only_for_a_main_dispatch(self):
         expected_needs = {
             "boot_python_image": "sign_python_image",

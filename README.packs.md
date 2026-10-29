@@ -13,6 +13,49 @@ supported policy pack is `agent/claude@1.0.1`; the other published packs remain
 discoverable. The index is not a signed trust document: clients verify each pack's
 `manifest.json` against its adjacent `manifest.sigstore.json`.
 
+## Application descriptors
+
+Publisher tooling also supports a distinct signed application manifest (outer
+schema v2, `kind = "application"`). It points to a prebuilt `.mvmpkg`; it is
+not a policy group or an image-build intent. This source-only support does not
+claim a published application, a released compatible client, or a successful
+pull/install/run witness.
+
+An application source consists only of `pack.toml`, with no `pack/` payload.
+For example, this is a **synthetic, non-publishable test definition**, not a
+real software release:
+
+```toml
+version = "1.0.0"
+description = "Synthetic app descriptor"
+
+[application]
+schema_version = 1
+guest_arch = "aarch64"
+
+[application.bundle]
+source = "https://bundles.example/test/hello/1.0.0/app.mvmpkg"
+archive_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+archive_size = 123
+key_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+```
+
+Folder coordinates and `version` determine the exact `namespace/name@version`
+reference. The resulting manifest contains exactly `schema_version`, `kind`,
+`reference`, `description`, and `application`. The published version contains
+only `manifest.json` and `manifest.sigstore.json`, never `files/` or `image`.
+The nested application schema is v1; the discovery index remains schema v2.
+Existing policy manifest-v1 bytes are unchanged.
+
+The descriptor binds the archive SHA-256, positive byte size, supported guest
+architecture (`x86_64` or `aarch64`), and expected bundle key ID. Source locators
+must be canonical HTTPS without credentials/query/fragment, or a digest-pinned
+OCI reference. A descriptor does **not** enroll its named key in a trust store.
+Consumers must authenticate the descriptor under namespace publisher policy,
+enforce revocation, and independently verify the bundle through existing trust
+and admission checks. No official vendor namespace or redistribution permission
+is granted by this schema.
+
 ## Layout
 
 Sources live under `pack-sources/<namespace>/<name>/`:
@@ -51,11 +94,9 @@ The first planned runnable environment is Claude Code. Its
 publication issues and defines the release evidence. It is not a published image
 or a replacement for the existing policy-only `agent/claude` pack.
 
-The [runnable application declaration contract](docs/application-packages.md)
-binds a separately signed, prebuilt archive to each supported architecture.
-Producer validation and the client consumer path do not authorize publication:
-the generic publisher still refuses these declarations pending protected
-archive signing and release evidence.
+The [native input record](docs/application-packages.md) preserves inspected
+archive and executable pins without defining a second application descriptor
+or claiming a published runnable environment.
 
 ### Advancing the base-image lock
 
@@ -371,8 +412,23 @@ published pack or live client acceptance.
 
 ### Image publication lanes
 
-A manual `publish.yml` dispatch on `main` with `mvmctl_tag` and
-`mvmctl_archive_sha256` takes the `runtime/python` image through four jobs.
+First run the existing unsigned `python-candidate.yml` lane with the exact
+signed released client tag and archive digest. Its artifact includes the
+reproduced `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash`, the original
+deterministically produced `mvm-meta.json`, and `signing-inputs.json`.
+The latter is canonical JSON naming exactly those four files with their
+SHA-256 and size; it is a byte pin, not a signature or authentication token.
+Review the actual artifact/source/base/client tuple and record the SHA-256
+of `signing-inputs.json` before selecting signing. Do not guess future hashes
+or substitute a different candidate merely because its workflow was green.
+
+A manual `publish.yml` dispatch on `main` with `mvmctl_tag`,
+`mvmctl_archive_sha256` and that explicit `image_inputs_sha256` takes the
+`runtime/python` image through four jobs. The existing signer regenerates and
+checks the image, copies its final quartet into private staging, and refuses
+any difference from the reviewed input digest **before its first signature**.
+Missing or malformed image inputs are refused; an empty catalogue-only
+request remains supported. The unsigned manifest mode itself cannot sign.
 Each job needs the previous one, so any refusal stops everything after it.
 The catalogue jobs do not run in that dispatch, and the workflow-level
 `signed-pack-publisher` concurrency group keeps image and catalogue runs
@@ -414,8 +470,9 @@ provenance names the old lock.
    The client finds the verity tree and root hash beside the rootfs. It boots
    on its bootstrapped workload kernel, not one this repository supplies.
 
-   This lane proves that the released client admitted these exact signed bytes
-   and that CPython ran in the guest. It does not prove the sealed baked
+   This lane is intended to check exact signed bytes and a CPython version
+   command. Its existence is not evidence of successful Built admission or a
+   completed run. Even a successful version probe would not prove the sealed baked
    entrypoint, egress policy, persistence or cleanup. It is not the
    [observed publication witness](docs/observed-publication-witness.md), and
    its report is unsigned.
@@ -442,12 +499,63 @@ job. A fresh dispatch from a later commit refuses the existing release,
 because its target commit differs.
 
 The [publication-only observed witness contract](docs/observed-publication-witness.md)
-is a separate verifier-only review slice. It binds signed candidate evidence,
+is a historical v1 verifier-only review slice. It binds signed candidate evidence,
 protected source/run identity, released-client input hashes, the exact image
 lock, backend-specific trusted policy, both probe modes and retained raw
 results. It does not produce runtime evidence, sign imported reports, authorize
 publication, or change consumer admission. Its documented missing observer APIs
 must be supplied before release-job integration.
+
+Producer acceptance is [strict protected-observer v2](docs/protected-observer-v2.md)
+only, with no v1 fallback. The v2 code-controlled slice does not enable producer
+or publication wiring. Actual immutable-config launch/session receipt APIs,
+authenticated distinct releases A/B, the global producer-executable verifier pin
+and real protected observations remain prerequisites.
+
+### Post-run consumer session component check
+
+`scripts/check-python-consumer-session.py` checks an already-finished Python
+probe using the exact released client's existing `trust receipt verify` and
+`trust audit verify <plan-id> --tenant local --json` routes. It performs no
+pull, boot, stop, signing, or publication. Run it only inside the enclosing
+consumer runner's exclusively owned private state, with independently captured
+client/key/descriptor/rootfs pins:
+
+The client must emit a schema-2 run receipt containing its recorded plan ID,
+session root, event count, admitted image, backend and exit. The checker matches
+that signed reference against the canonical session verifier's result. Legacy
+schema-1 receipts are not accepted here. A compatible released consumer has not
+yet been demonstrated; source fixtures are not release or runtime evidence.
+
+```sh
+python3 scripts/check-python-consumer-session.py \
+  --client "$VERIFIED_MVMCTL" --client-sha256 "$CLIENT_SHA256" \
+  --mvm-home "$PRIVATE_MVM_HOME" --audit-key-sha256 "$SETUP_PUBLIC_KEY_SHA256" \
+  --receipt "$RUN_RECEIPT" --plan-id "$EXACT_PLAN_ID" \
+  --reference runtime/python@1.1.0 \
+  --descriptor-sha256 "$PULLED_DESCRIPTOR_SHA256" \
+  --rootfs-sha256 "$ADMITTED_ROOTFS_SHA256" --output "$FRESH_COMPONENT_OUTPUT"
+```
+
+The checker requires the fixed probe argv embedded in the script, exactly
+`PS06-PYTHON-OK\n` on guest stdout, empty guest stderr, successful captured exit,
+unique authenticated pack identity, matching image/backend, and one verified
+`exited` session seal with no uncovered late entries. The probe checks Python
+3.12 and that the guest's network interface inventory contains only `lo`; it
+does not exercise an external service. Duplicate JSON keys, unknown receipt
+fields, wrong signatures/verifier exits, identity conflicts and incomplete
+lifecycle evidence refuse. Existing output is never overwritten.
+
+The `receipt_to_audit_session_linkage` result establishes only that signed
+metadata agreement. It does not establish receipt-to-process association.
+
+`components.json` is **unsigned component evidence only**. The surrounding
+runner must still bind the pull, exact run process, receipt, plan session,
+artifact provenance and cleanup observation in a fresh consumer. A receipt
+alone contains neither a pack identity nor cleanup proof. A host session seal
+is not original native `Child` custody, and the verifier's final self-outcome
+is not covered by its own verification. This command does not enable the
+protected-observer v2 publication gate or complete #12/#3716 by itself.
 
 ### Pack image composition v1
 
@@ -508,10 +616,21 @@ https://github.com/tinylabscom/mvm-packs/.github/workflows/registry-pack-revocat
 
 under the GitHub Actions OIDC issuer. A separate read-only OIDC signing job
 and contents-write publishing job verify the signed candidate and read back
-the release. The schedule refreshes every 12 hours; each signed document is
-valid for at most 30 days, and clients reject it at `not_after`. Initial
+the release. The schedule refreshes every 12 hours; new signed documents are
+valid for 36 hours, and clients reject them at `not_after`. Each signing and
+publishing job is bounded to 15 minutes. Previously published, immutable
+30-day documents remain verifiable as history; they are not re-signed as new
+candidates or silently converted to shorter-lived bytes. Initial
 publication requires an explicit manual dispatch authorization. The producer
 refuses to bootstrap from an existing but invalid or incomplete release.
+
+The distinct release identity can also be explicitly configured as an operator
+feed authority for a non-`mvm/` application, provided it differs from that
+application's authenticated publisher. New 36-hour documents fit the client's
+48-hour operator maximum. This does not extend the built-in official namespace
+trust to other namespaces or enroll trust automatically. A new candidate or
+unsigned orphan exceeding the new issuance window is refused, even when it
+would be valid as historical official data.
 
 If the first bootstrap fails after creating the public release but before
 uploading any assets, recovery is deliberately manual. A maintainer must verify

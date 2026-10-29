@@ -33,8 +33,9 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from urllib.parse import urlsplit
 
+from application_manifest import manifest_bytes as application_manifest_bytes
+from application_manifest import validate_application
 from publisher_identity import (
     CURRENT_IDENTITY,
     FORMER_IDENTITY,
@@ -78,8 +79,18 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build"}:
+    if set(data) - {"version", "description", "image", "image_build", "application"}:
         fail(f"{path}: unknown pack metadata fields")
+    application = data.get("application")
+    if "application" in data:
+        try:
+            validate_application(application)
+        except ValueError as error:
+            fail(f"{path}: {error}")
+        if not SEMVER.fullmatch(version) or "+" in version:
+            fail(f"{path}: application version must be canonical semver without build metadata")
+        if "image" in data or "image_build" in data:
+            fail(f"{path}: application cannot declare image or image_build")
     image = data.get("image")
     if image is not None and not isinstance(image, dict):
         fail(f"{path}: [image] must be a table")
@@ -89,7 +100,7 @@ def parse_pack_toml(path):
     if image is not None and image_build is not None:
         fail(f"{path}: [image] and [image_build] cannot both be present")
     return {"version": version, "description": description, "image": image,
-            "image_build": image_build}
+            "image_build": image_build, "application": application}
 
 
 def validate_image_build_intent(intent, reference):
@@ -174,73 +185,6 @@ def sha256_of(path):
     return digest.hexdigest(), size
 
 
-def validate_application_declaration(data, reference):
-    """Validate metadata only, never archive authenticity or publication evidence."""
-    if (not isinstance(data, dict)
-            or set(data) != {"schema_version", "archives"}
-            or type(data["schema_version"]) is not int
-            or data["schema_version"] != 1):
-        fail(f"{reference}: application declaration has missing, extra or unsupported fields")
-    archives = data["archives"]
-    if (not isinstance(archives, dict) or not archives
-            or set(archives) - {"aarch64", "x86_64"}):
-        fail(f"{reference}: application archives require supported architecture keys")
-    for arch, archive in archives.items():
-        if not isinstance(archive, dict) or set(archive) != {
-            "url", "sha256", "size_bytes", "key_id"
-        }:
-            fail(f"{reference}: {arch} archive has missing or extra fields")
-        if not isinstance(archive["sha256"], str) or not HEX64.fullmatch(archive["sha256"]):
-            fail(f"{reference}: {arch} archive sha256 must be lowercase SHA-256")
-        if type(archive["size_bytes"]) is not int or not 0 < archive["size_bytes"] <= 4 * 1024**3:
-            fail(f"{reference}: {arch} archive size_bytes is out of bounds")
-        if not isinstance(archive["key_id"], str) or not re.fullmatch(r"[0-9a-f]{32}", archive["key_id"]):
-            fail(f"{reference}: {arch} archive key_id must be 32 lowercase hex")
-        url = archive["url"]
-        if not isinstance(url, str):
-            fail(f"{reference}: {arch} archive URL must be a string")
-        try:
-            parsed = urlsplit(url)
-        except ValueError:
-            fail(f"{reference}: {arch} archive URL is invalid")
-        parts = parsed.path.lstrip("/").split("/")
-        if (parsed.scheme != "https" or parsed.netloc not in ("github.com", "github.com:443")
-                or parsed.query or parsed.fragment or len(parts) != 6
-                or not all(parts) or parts[2:4] != ["releases", "download"]
-                or parts[4].lower() == "latest"):
-            fail(f"{reference}: {arch} archive URL must name an HTTPS versioned release asset")
-
-
-def validate_application_payload(payload, reference, declared=None):
-    """Share declaration checks between source build and published registry audit."""
-    application = payload / "application.json"
-    if not application.exists():
-        return False
-    if application.stat().st_size > 65536:
-        fail(f"{reference}: application declaration exceeds 64 KiB")
-    if declared is not None and "pack/application.json" not in declared:
-        fail(f"{reference}: application declaration must be signed")
-    if (not (payload / "profile.toml").is_file()
-            or declared is not None and "pack/profile.toml" not in declared):
-        fail(f"{reference}: application requires signed pack/profile.toml")
-    if not 0 < (payload / "profile.toml").stat().st_size <= 1048576:
-        fail(f"{reference}: signed profile size must be 1..1048576 bytes")
-    try:
-        def unique_object(pairs):
-            result = {}
-            for key, value in pairs:
-                if key in result:
-                    raise ValueError(f"duplicate field {key}")
-                result[key] = value
-            return result
-
-        data = json.loads(application.read_text(encoding="utf-8"), object_pairs_hook=unique_object)
-    except (OSError, UnicodeError, ValueError) as error:
-        fail(f"{reference}: invalid application declaration: {error}")
-    validate_application_declaration(data, reference)
-    return True
-
-
 def manifest_bytes(reference, description, payload, image=None):
     # The payload root itself is the `pack/` directory: its contents ship
     # under `pack/` in the manifest, the path mvm reads policy documents
@@ -256,7 +200,6 @@ def manifest_bytes(reference, description, payload, image=None):
             fail(f"unsafe payload path {rel!r}")
         sha256, size = sha256_of(path)
         files.append({"path": rel, "sha256": sha256, "size": size})
-    validate_application_payload(payload, reference, {entry["path"] for entry in files})
     manifest = {
         "schema_version": 1,
         "reference": reference,
@@ -351,15 +294,17 @@ def build_one(source):
         validate_built_image_descriptor(meta["image"], reference)
         fail(f"{reference}: built image packs are not publishable until consumer verification is available")
     payload = source / "pack"
-    if not payload.is_dir():
+    application = meta["application"]
+    if application is not None:
+        if any(path.name != "pack.toml" or path.is_symlink() for path in source.iterdir()):
+            fail(f"{source}: application source cannot contain payload files or directories")
+    elif not payload.is_dir():
         fail(f"{source}: missing pack/ payload directory")
-    if validate_application_payload(payload, reference):
-        fail(
-            f"{reference}: runnable application publication blocked: protected archive "
-            "signing/evidence integration is required; generic file signing is insufficient"
-        )
     out = PACKS / namespace / name / meta["version"]
-    manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
+    if application is not None:
+        manifest = application_manifest_bytes(reference, meta["description"], application)
+    else:
+        manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
@@ -368,7 +313,15 @@ def build_one(source):
                 f"{reference}: version already published with different bytes; "
                 "bump the version in pack.toml"
             )
-        check_existing_payload(out, payload)
+        if application is not None:
+            if any(
+                path.is_symlink() or not path.is_file()
+                or path.name not in {"manifest.json", "manifest.sigstore.json"}
+                for path in out.iterdir()
+            ):
+                fail(f"{out}: application cannot contain payload files or directories")
+        else:
+            check_existing_payload(out, payload)
         bundle = out / "manifest.sigstore.json"
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
@@ -383,13 +336,15 @@ def build_one(source):
 
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
-    (tmp / "files").mkdir(parents=True)
-    files_root = tmp / "files" / "pack"
-    for path in payload.rglob("*"):
-        if path.is_file():
-            target = files_root / path.relative_to(payload)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+    tmp.mkdir(parents=True)
+    if application is None:
+        (tmp / "files").mkdir()
+        files_root = tmp / "files" / "pack"
+        for path in payload.rglob("*"):
+            if path.is_file():
+                target = files_root / path.relative_to(payload)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
     (tmp / "manifest.json").write_bytes(manifest)
     sign(tmp / "manifest.json", tmp / "manifest.sigstore.json")
     shutil.rmtree(out, ignore_errors=True)

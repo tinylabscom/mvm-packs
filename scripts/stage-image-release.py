@@ -68,7 +68,9 @@ def verify_bundle(blob, bundle):
         raise StageError(f"publisher signature verification failed for {blob.name}") from error
 
 
-def check_evidence(snapshot, reference, source, images_lock):
+def check_evidence(snapshot, reference, source, images_lock, *, verify_signature=None):
+    """Check canonical evidence; optionally bind signatures to protected source."""
+    verifier = verify_bundle if verify_signature is None else verify_signature
     if {entry.name for entry in snapshot.iterdir()} != EVIDENCE_NAMES:
         raise StageError("signed evidence has missing or extra files")
     evidence = read_json(snapshot / "image-evidence.json")
@@ -176,7 +178,7 @@ def check_evidence(snapshot, reference, source, images_lock):
     for name, bundle in (("rootfs.ext4", "rootfs.signature.json"),
                          ("provenance.json", "provenance.signature.json"),
                          ("image-evidence.json", "image-evidence.sigstore.json")):
-        verify_bundle(snapshot / name, snapshot / bundle)
+        verifier(snapshot / name, snapshot / bundle)
 
 
 def stage(evidence_dir, reference, source, images_lock, output):

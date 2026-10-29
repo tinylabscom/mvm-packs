@@ -24,12 +24,15 @@ ISSUER = "https://token.actions.githubusercontent.com"
 RELEASE_TAG = "registry-pack-revocations"
 DOCUMENT_NAME = "revocations.json"
 BUNDLE_NAME = "revocations.sigstore.json"
-VALIDITY = timedelta(days=30)
+# Preserve verification of the already published immutable history. New
+# candidates also fit the client's stricter independent operator-feed window.
+HISTORICAL_VALIDITY = timedelta(days=30)
+VALIDITY = timedelta(hours=36)
 MAX_BYTES = 1024 * 1024
 NUMBERED_ASSET = re.compile(r"^revocations-([1-9][0-9]*)\.(json|sigstore\.json)$")
 
 
-def parse_document(raw, now, *, allow_expired=False):
+def parse_document(raw, now, *, allow_expired=False, maximum_validity=HISTORICAL_VALIDITY):
     if len(raw) > MAX_BYTES:
         raise RevocationError("revocation document exceeds 1 MiB")
 
@@ -54,7 +57,7 @@ def parse_document(raw, now, *, allow_expired=False):
         raise RevocationError("revocation sequence must be a positive u64")
     issued = utc(data["issued_at"])
     expires = utc(data["not_after"])
-    if issued >= expires or expires - issued > VALIDITY:
+    if issued >= expires or expires - issued > maximum_validity:
         raise RevocationError("revocation validity window is invalid or too long")
     if issued > now:
         raise RevocationError("revocation document was issued in the future")
@@ -172,7 +175,7 @@ def build_document(source, previous, now):
         "revoked_manifests": manifests,
     }
     encoded = _canonical_document(data)
-    parse_document(encoded, now)
+    parse_document(encoded, now, maximum_validity=VALIDITY)
     return encoded
 
 
@@ -181,7 +184,7 @@ def recover_or_build(source, previous, orphan_bytes, expected_sequence, now):
         return build_document(source, previous, now)
     if previous is None:
         raise RevocationError("an unsigned orphan cannot bootstrap a missing history")
-    orphan = parse_document(orphan_bytes, now)
+    orphan = parse_document(orphan_bytes, now, maximum_validity=VALIDITY)
     if orphan["sequence"] != expected_sequence or expected_sequence != previous["sequence"] + 1:
         raise RevocationError("unsigned orphan sequence is not the next authenticated sequence")
     if (orphan["revoked_identities"], orphan["revoked_manifests"]) != source:
@@ -267,7 +270,7 @@ def main(argv=None):
             return
         if args.check_candidate:
             verify_bundle(args.document, args.bundle)
-            current = parse_document(args.document.read_bytes(), now)
+            current = parse_document(args.document.read_bytes(), now, maximum_validity=VALIDITY)
             source = read_source(args.source)
             if (current["revoked_identities"], current["revoked_manifests"]) != source:
                 raise RevocationError("candidate revocations do not exactly match reviewed source")
