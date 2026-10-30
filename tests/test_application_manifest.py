@@ -242,6 +242,9 @@ class ApplicationManifestTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         for path in (root / "packs").glob("*/*/*/manifest.json"):
             manifest = json.loads(path.read_bytes())
+            if manifest.get("kind") == "application":
+                self.assertEqual(manifest["schema_version"], 2)
+                continue
             namespace, suffix = manifest["reference"].split("/")
             name, _ = suffix.split("@")
             payload = path.parent / "files" / "pack"
@@ -250,3 +253,26 @@ class ApplicationManifestTests(unittest.TestCase):
             )
             with self.subTest(namespace=namespace, name=name):
                 self.assertEqual(raw, path.read_bytes())
+
+    def test_published_claude_policy_version_remains_byte_pinned(self):
+        root = Path(__file__).resolve().parent.parent
+        path = root / "packs" / "agent" / "claude" / "1.0.1" / "manifest.json"
+        self.assertEqual(
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            "c4be773ef57a0f4365730858e522207c5e609f9fda76f1499eab3d6b0c6293f5",
+        )
+
+    def test_claude_application_source_names_a_package_not_a_policy_payload(self):
+        root = Path(__file__).resolve().parent.parent
+        source = root / "pack-sources" / "agent" / "claude"
+        metadata = builder.parse_pack_toml(source / "pack.toml")
+        self.assertEqual(metadata["version"], "2.0.0")
+        self.assertEqual({path.name for path in source.iterdir()}, {"pack.toml"})
+        descriptor = metadata["application"]
+        validate_application(descriptor)
+        self.assertEqual(descriptor["guest_arch"], "aarch64")
+        self.assertEqual(
+            descriptor["bundle"]["source"],
+            "https://github.com/tinylabscom/mvm-packs/releases/download/"
+            "pack-agent-claude-v2.0.0/claude.mvmpkg",
+        )

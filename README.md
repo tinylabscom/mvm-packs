@@ -12,7 +12,33 @@ It is the only catalog. Schema v2 lists each version together with the
 from published manifests, not unpublished source metadata, and validation
 requires every entry and digest to match. Do not edit it by hand.
 
-### Initial supported pack: Claude
+### Runnable Claude application source
+
+`pack-sources/agent/claude` defines `agent/claude@2.0.0` as an application,
+not a policy-only pack. Its descriptor pins the complete `claude.mvmpkg`
+archive, which contains the native Claude binary, baked entrypoint, resources,
+host-held Anthropic secret slot and one embedded allow policy for
+`api.anthropic.com:443`.
+
+The intended consumer demo, after genuine archive and registry publication, is:
+
+```sh
+mvmctl search agent/claude
+mvmctl pull agent/claude
+printf '%s\n' 'tell me a joke' | mvmctl run agent/claude
+```
+
+A compatible CLI, reviewed host runtime/native caller setup, trusted publishers
+and one unambiguous stored Anthropic credential are one-time prerequisites.
+The run must not need an extra allow-host flag, policy file, source checkout,
+flake or workload IR.
+
+This is a release source definition, not a claim that version 2.0.0 has already
+been published. `index.json` remains authoritative for actual availability.
+Publish the exact verified archive at its declared source before allowing the
+normal registry publisher to sign and advertise its descriptor.
+
+### Historical Claude policy pack
 
 `agent/claude@1.0.1` is the initial supported **Claude Code policy pack**.
 It provides policy for LLM APIs, GitHub, and the Anthropic secret binding.
@@ -23,7 +49,7 @@ The planned runnable environment is described in
 ```sh
 mvmctl search
 mvmctl pull agent/claude@1.0.1
-mvmctl run --policy agent/claude -- make test
+mvmctl run --policy agent/claude@1.0.1 -- make test
 ```
 
 Other published packs remain in the catalog; publication alone is not a

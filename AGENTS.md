@@ -2,8 +2,9 @@
 
 This repository is the signed pack registry for
 [`mvmctl`](https://github.com/tinylabscom/mvm). Templates are no longer supported
-or stored here. The initial supported policy pack is `agent/claude@1.0.1`;
-it is not a runnable Claude Code image.
+or stored here. The immutable published `agent/claude@1.0.1` is policy-only.
+The `agent/claude@2.0.0` source is a runnable application descriptor; the signed
+catalog, not source intent, determines whether that version is published.
 
 ## Layout
 

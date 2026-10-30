@@ -1,2 +1,12 @@
-version = "1.0.1"
-description = "Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding."
+version = "2.0.0"
+description = "Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy."
+
+[application]
+schema_version = 1
+guest_arch = "aarch64"
+
+[application.bundle]
+source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.0/claude.mvmpkg"
+archive_sha256 = "cdbd8005dc356add632b3fce4ae19b7912e509df2d359e1d3b8786252de1a2b1"
+archive_size = 456523776
+key_id = "ada32b29ba81aa751cd16a3735be29e9"
