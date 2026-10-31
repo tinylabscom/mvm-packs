@@ -94,6 +94,10 @@ The first planned runnable environment is Claude Code. Its
 publication issues and defines the release evidence. It is not a published image
 or a replacement for the existing policy-only `agent/claude` pack.
 
+The [native input record](docs/application-packages.md) preserves inspected
+archive and executable pins without defining a second application descriptor
+or claiming a published runnable environment.
+
 ### Advancing the base-image lock
 
 A published pack version is immutable, including its base-set tag and signed

@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "upstream_version": "2.1.312",
+  "target": "aarch64-linux",
+  "url": "https://github.com/anthropics/claude-code/releases/download/v2.1.312/claude-linux-arm64.tar.gz",
+  "archive": {
+    "sha256": "0635c6245b11bbb4ca16e4119b0ac3980ee99e2f8cf5ab6e8d6c0e9e0db3ee5b",
+    "size": 130874007
+  },
+  "executable": {
+    "member": "claude",
+    "sha256": "dc4af28917455e009d26704b82a438353a06149e825b6cdf782908b2d28661f5",
+    "size": 293462200,
+    "interpreter": "/lib/ld-linux-aarch64.so.1"
+  }
+}
