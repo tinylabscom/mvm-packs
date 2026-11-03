@@ -1,0 +1,5 @@
+description = "Test fixture policy for cowsay: no network egress."
+required = false
+
+[network]
+allow = []

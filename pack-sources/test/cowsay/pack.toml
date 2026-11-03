@@ -1,0 +1,15 @@
+version = "0.1.0"
+description = "Throwaway test fixture: cowsay as an installed application. Not a real software release."
+
+[image_build]
+schema_version = 1
+platform = "linux/x86_64"
+
+[image_build.base_set]
+repository = "tinylabscom/mvm-images"
+release_tag = "image-set/v0.2.4"
+manifest_sha256 = "5033520a59514f5d206d76d13db8c9b7e5841f068c83dd8585ef141879a1bb24"
+
+[image_build.release]
+repository = "tinylabscom/mvm-packs"
+tag = "pack-test-cowsay-v0.1.0"
