@@ -5,6 +5,8 @@ on:
     paths:
       - "pack-sources/**"
       - "index.json"
+      - "revocations.toml"
+      - "docs/registry/**"
       - "packs/**"
       - "scripts/**"
       - "tests/**"
@@ -45,6 +47,8 @@ jobs:
           install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
           hash -r
       - run: python3 -m unittest discover -s tests
+      - name: Check generated pack pages are current
+        run: python3 scripts/build-pack-pages.py --check
       - name: Verify signed registry and public image releases
         env:
           GITHUB_TOKEN: ${{ github.token }}
