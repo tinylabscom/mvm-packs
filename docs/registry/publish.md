@@ -8,6 +8,8 @@ not install software or supply a runnable image.
 
 1. Fork this repository and create a branch.
 2. Run `just new-pack` to create a draft under `pack-sources/<namespace>/<name>/`.
+   `mvm`, `agent` and `runtime` are reserved for first-party packs, because
+   clients trust this registry's signing identity by default in those namespaces.
    It starts with no network access and no secret bindings. Edit `pack.toml`,
    `pack/group.toml` (or replace it with a `pack/profile.toml`), and
    `pack/README.md` to describe the purpose, setup, and use. Never commit secret
