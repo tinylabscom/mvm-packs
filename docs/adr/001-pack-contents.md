@@ -8,6 +8,14 @@ Related: [#31](https://github.com/tinylabscom/mvm-packs/issues/31),
 This repository had no ADR directory; `docs/adr/` starts here. Nothing in
 `tests/` or `scripts/` validates files under `docs/`.
 
+## Purpose
+
+Packs exist to provide official, signed software, the expected bits, that
+runs with its own policy. That policy composes with the user's policy and with
+other policies in a defined precedence (see Policy composition). A pack is
+therefore two things bound together: the software (application packs only)
+and the policy it ships with (every pack, including policy-only ones).
+
 ## Context
 
 The word "pack" names two different things in this registry. The published
@@ -95,6 +103,8 @@ Neither step is launch authorization; bundle admission still decides.
   repository-local `packs/revocations.json` feed is not the official root.
   The client reads the feed in `crates/mvm-core/src/registry_pack_revocation.rs`.
   Current `revocations.toml` lists no revoked identities or manifests.
+- Older versions stay runnable by pin; each carries the policy it was signed
+  with, and a new version never rewrites that policy.
 
 ### 4. What a pack never contains
 
@@ -133,6 +143,70 @@ Neither step is launch authorization; bundle admission still decides.
   the Claude binary. Redistribution permission is an operator assumption, not
   something this repository or its checks establish
   (`docs/application-packages.md`, `CLAUDE-ENVIRONMENT.md`).
+
+## Policy composition
+
+Sources, all in the `mvm` repository: `specs/prd.md` ("Composable"),
+`public/src/content/docs/guides/policy-and-profiles.md` (merge rules),
+`public/src/content/docs/guides/pack-authoring.md` ("What a pack cannot do"),
+`specs/adrs/055-mvm-pack-naming-and-trust.md`, and the merge code and tests in
+`crates/mvm-client/src/policy_profiles/` (`merge.rs`, `merge_tests.rs`,
+`resolve_tests.rs`).
+
+**Layers.** `specs/prd.md` lists: host constraints, organization policy, user
+policy (groups and profiles), the signed pack and application, and the
+invocation's flags. Referenced packs and groups are included by a pack's
+profile `groups.include` (`pack-sources/agent/claude/pack/profile.toml` names
+`llm-apis`, `github`, `runtime/python`). The admission ceiling is the host
+budget and per-workload limits applied at admission (`specs/prd.md`, ADR-001
+claim 18).
+
+**Order.** Groups apply first; then each profile's `[[when]]` blocks and
+`[overrides]`, parents before children; with repeated `--policy`, the last
+entry takes precedence; flags are the last, most specific layer
+(`policy-and-profiles.md`).
+
+**Merge by field** (`policy-and-profiles.md`, "Merge rules"; the cited tests
+are in `crates/mvm-client/src/policy_profiles/merge_tests.rs`):
+
+| Field | Rule | Test |
+| --- | --- | --- |
+| Allow lists (hosts, env names, tools) | union | `allows_are_unioned_and_canonicalized` |
+| Denies | union; a deny beats an allow from any layer | `a_deny_beats_an_allow_from_any_layer_in_either_order` |
+| `network.block = true` | stays blocked; a later `false` is an error | `a_child_cannot_turn_the_network_back_on` |
+| Secret bindings | a later layer may only narrow destination hosts | `a_later_layer_cannot_widen_a_secrets_destinations` |
+| Resources | every bound is a ceiling; the smallest wins | `every_resource_bound_takes_the_smallest` |
+| Shares | a pack cannot add a host share; writable only if every layer says so | `a_pack_cannot_add_or_modify_a_host_share` |
+| `env.readmit` | honoured only in user-authored layers | `an_escape_hatch_outside_user_authored_layers_is_stripped_with_a_note` |
+
+**Pack limits.** A pack cannot import local policy, use an escape hatch, mount
+a host directory, undo a deny, or widen a stored secret's destinations
+(`pack-authoring.md`). Its signed application ceiling binds the user and
+cannot be widened locally (`policy-and-profiles.md`; `specs/prd.md` rule 4).
+The user can narrow: flags such as `--secret NAME:HOSTS`, `--cpu-limit` and
+`--timeout` apply only when tighter, and `--cpus`/`--memory` must fit the
+ceilings. The user cannot widen a signed ceiling, and a flag cannot exceed a
+resource ceiling. For applications, `specs/prd.md` states the effective
+permission is the grant intersected with every layer's ceiling (rule 4); I
+found no test cited for that exact sentence.
+
+**Unresolved disagreements, reported not resolved.**
+
+- `specs/prd.md` rule 3 says grants come only from host-owner layers and a
+  pack's request grants nothing until a user layer grants it, and the PRD
+  itself says it must still be verified that a pack's allowed network hosts
+  are requests. The merge guide instead says allows are unioned and lists
+  hosts, so a pack's hosts (for example `api.anthropic.com` through the
+  `anthropic` binding) appear to add directly. ADR 055 says only secret
+  bindings are requests. Which of these governs pack-authored egress hosts is
+  not settled by the sources, and this ADR does not choose.
+- The PRD lists the signed pack after user policy; the guide states only that
+  later `--policy` entries win. Where the pack layer sits relative to user
+  `--policy` entries for non-security choices is not stated in one place.
+- Organization policy appears in the PRD layer list; I found no merge code or
+  test for it, so it is intended, not shown as enforced.
+- `specs/prd.md` says every rule has a test and `mvmctl policy show` names
+  the deciding layer; I verified tests for the rows above only.
 
 ## Consumer workflow
 
