@@ -179,7 +179,9 @@ jobs:
       - name: Commit published packs
         run: |
           set -euo pipefail
+          python3 scripts/build-pack-pages.py
           git add index.json packs/
+          git add -A docs/registry/
           if git diff --cached --quiet; then
             exit 0
           fi
