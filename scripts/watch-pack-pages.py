@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild registry pages when their inputs change; stop with Ctrl+C."""
+"""Rebuild registry content as the local site server serves it."""
 
 import subprocess
 import sys
@@ -19,18 +19,29 @@ def snapshot(root):
 
 def main():
     command = [sys.executable, str(ROOT / "scripts/build-pack-pages.py")]
-    subprocess.run(command, cwd=ROOT, check=False)
+    subprocess.run(command, cwd=ROOT, check=True)
+    subprocess.run(["node", "scripts/stage-starlight-pages.mjs"], cwd=ROOT, check=True)
     previous = snapshot(ROOT)
-    print("Watching index.json, revocations.toml and packs/ (Ctrl+C to stop)", flush=True)
+    server = subprocess.Popen(
+        ["node", "node_modules/astro/bin/astro.mjs", "dev",
+         "--host", "127.0.0.1", "--port", "8000"], cwd=ROOT
+    )
+    print("Preview: http://127.0.0.1:8000/mvm-packs/ — watching registry inputs (Ctrl+C to stop)", flush=True)
     try:
         while True:
+            if server.poll() is not None:
+                raise SystemExit(server.returncode)
             time.sleep(1)
             current = snapshot(ROOT)
             if current != previous:
                 previous = current
-                subprocess.run(command, cwd=ROOT, check=False)
+                if subprocess.run(command, cwd=ROOT, check=False).returncode == 0:
+                    subprocess.run(["node", "scripts/stage-starlight-pages.mjs"], cwd=ROOT, check=False)
     except KeyboardInterrupt:
         pass
+    finally:
+        server.terminate()
+        server.wait()
 
 
 if __name__ == "__main__":
