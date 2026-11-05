@@ -43,7 +43,7 @@ jobs:
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
         run: |
           gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[].filename' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION"
+            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
