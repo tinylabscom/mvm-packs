@@ -145,6 +145,30 @@ Neither step is launch authorization; bundle admission still decides.
   something this repository or its checks establish
   (`docs/application-packages.md`, `CLAUDE-ENVIRONMENT.md`).
 
+### 6. Addendum: image-bearing packs and naming
+
+- **A third shape exists in source.** `pack-sources/runtime/python` (1.1.0)
+  carries `[image_build]` intent, and `README.packs.md` describes a generated
+  `[image]` descriptor with a base-set pin and seven release assets. That is a
+  built-image path, tracked in
+  [#12](https://github.com/tinylabscom/mvm-packs/issues/12) and PS-06. The
+  publisher defers it and `build-packs.py` refuses to publish an `[image]`, so
+  nothing image-bearing is published and this ADR's two kinds still describe
+  everything in the registry. If that path ships, it must either resolve to an
+  application pack (a `.mvmpkg` pinned by a descriptor) or get its own ADR; it
+  must not become a third way to embed software without one.
+- **Name.** The PS-06 plan (`.claude/plans/ps06-oct20-completion.md`) calls the
+  Claude pack `anthropic/claude`. This ADR, the draft release and the
+  descriptor use `agent/claude@2.0.0`. No decision is recorded for the
+  `anthropic/` namespace; ADR 002 proposes owner-based namespaces, under which
+  the vendor name would belong to the vendor's own publisher entry. Until that
+  is decided, `agent/claude` is the only name used here.
+- **Applications are embedded in the `.mvmpkg`.** Every pack that is meant to
+  run software (the other `agent/*` packs and the `runtime/*` packs are
+  policy-only today) needs its own application version pinning such an
+  archive. [#67](https://github.com/tinylabscom/mvm-packs/issues/67) tracks
+  Codex, Goose and OpenCode.
+
 ## Policy composition
 
 Sources, all in the `mvm` repository: `specs/prd.md` ("Composable"),
