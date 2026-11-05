@@ -4,9 +4,9 @@
 
 Python runtime policy: package registries and common API hosts a Python workload needs.
 
-- Reference: `runtime/python`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `runtime/python` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

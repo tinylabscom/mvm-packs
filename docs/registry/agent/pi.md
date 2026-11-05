@@ -4,9 +4,9 @@
 
 pi agent policy: LLM APIs and GitHub, with the Anthropic secret binding.
 
-- Reference: `agent/pi`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `agent/pi` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

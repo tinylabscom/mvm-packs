@@ -4,9 +4,9 @@
 
 OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack.
 
-- Reference: `agent/codex`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `agent/codex` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

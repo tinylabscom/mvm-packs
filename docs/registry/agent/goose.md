@@ -4,9 +4,9 @@
 
 Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.
 
-- Reference: `agent/goose`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `agent/goose` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

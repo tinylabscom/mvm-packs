@@ -113,6 +113,15 @@ def signer_identities(reference, raw):
     return ids
 
 
+def human_size(count):
+    value = float(count)
+    for unit in ("B", "KB", "MB"):
+        if value < 1000:
+            return f"{value:.0f} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1000
+    return f"{value:.1f} GB"
+
+
 def version_row(version, sha, manifest, revoked, has_app):
     cells = [f"`{version}`", f"`{sha}`", "yes" if revoked else "no"]
     if has_app:
@@ -140,10 +149,16 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
     latest_version, _, latest, latest_dir, _, _ = loaded[0]
     is_app = latest.get("kind") == "application"
     has_app = any(m.get("kind") == "application" for _, _, m, _, _, _ in loaded)
+    kind = "application" if is_app else "policy"
+    arch, size = "—", "—"
+    if is_app:
+        arch = latest["application"]["guest_arch"]
+        size = human_size(latest["application"]["bundle"]["archive_size"])
+    summary = {"kind": kind, "arch": arch, "size": size}
     out = [HEADER, f"# `{ref}`\n\n", f"{html.escape(entry['description'])}\n\n",
-           f"- Reference: `{ref}`\n",
-           f"- Kind: {'application' if is_app else 'policy'}\n",
-           f"- Latest version: `{latest_version}`\n\n"]
+           "| Reference | Kind | Latest | Architecture | Size | Publisher |\n|---|---|---|---|---|---|\n"
+           f"| `{ref}` | {kind} | `{latest_version}` | {arch} | {size} | "
+           "tinylabscom/mvm-packs (official) |\n\n"]
     out.append("## Use\n\n```sh\n"
                f"mvmctl pull {ref}\n"
                f"mvmctl pull {ref}@{latest_version}\n")
@@ -194,10 +209,16 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
     if is_app:
         out.append("\nThe descriptor names a bundle key ID but does not enroll it; the consumer must "
                    "already trust that key.\n")
-    return f"{ns}/{name}.md", "".join(out)
+    return f"{ns}/{name}.md", "".join(out), summary
 
 
-def render_index(packs):
+def card_meta(pack, summaries):
+    info = summaries[pack["namespace"], pack["name"]]
+    parts = [info["kind"]] + ([info["arch"], info["size"]] if info["kind"] == "application" else [])
+    return " · ".join(parts + [f"latest {pack['versions'][0]['version']}"])
+
+
+def render_index(packs, summaries):
     rows = []
     for pack in packs:
         ref = f"{pack['namespace']}/{pack['name']}"
@@ -205,7 +226,7 @@ def render_index(packs):
             f'<li><a href="{html.escape(ref, quote=True)}.md">'
             f'<strong>{html.escape(ref)}</strong>'
             f'<span>{html.escape(pack["description"])}</span>'
-            f'<small>Latest: {html.escape(pack["versions"][0]["version"])}</small>'
+            f'<small>{html.escape(card_meta(pack, summaries))}</small>'
             '</a></li>\n'
         )
     return ("README.md", HEADER + "# Pack registry\n\n"
@@ -232,8 +253,10 @@ def generate(root):
         raise PageError(f"index.json: {error}") from error
     ids, shas = load_revocations(root)
     ids, shas = set(ids), set(shas)
-    pages = [render_pack(p, root, ids, shas) for p in packs] + [
-        render_index(packs), render_publish(root)]
+    rendered = [render_pack(p, root, ids, shas) for p in packs]
+    summaries = {(p["namespace"], p["name"]): r[2] for p, r in zip(packs, rendered)}
+    pages = [(path, text) for path, text, _ in rendered] + [
+        render_index(packs, summaries), render_publish(root)]
     return dict(pages)
 
 
