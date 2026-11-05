@@ -12,6 +12,12 @@ on:
       - "tests/**"
       - "README.md"
       - "README.packs.md"
+      - "astro.config.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "src/content.config.ts"
+      - "justfile"
+      - ".github/workflows/pages.yml"
       - ".github/workflows/python-candidate.yml"
       - ".github/workflows/python-source-diagnostic.yml"
       - ".github/workflows/publish.yml"
@@ -29,6 +35,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.4"
+          cache: npm
+      - run: npm ci
       - name: Install ext4 inspection tools
         run: sudo apt-get update && sudo apt-get install --yes e2fsprogs
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
@@ -49,6 +60,10 @@ jobs:
       - run: python3 -m unittest discover -s tests
       - name: Check generated pack pages are current
         run: python3 scripts/build-pack-pages.py --check
+      - name: Build registry site
+        run: |
+          node scripts/stage-starlight-pages.mjs
+          npm run build
       - name: Verify signed registry and public image releases
         env:
           GITHUB_TOKEN: ${{ github.token }}

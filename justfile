@@ -1,5 +1,9 @@
 # Local shortcuts; CI runs the underlying Python commands directly.
 
+# List available recipes
+default:
+    @just --list
+
 # Run the repository checks
 check: test pages-check validate
 
@@ -15,7 +19,7 @@ validate:
 pages:
     python3 scripts/build-pack-pages.py
 
-# Regenerate pages whenever registry inputs change (Ctrl+C to stop)
+# Preview pages at http://127.0.0.1:8000/mvm-packs/ and rebuild on input changes
 pages-dev:
     python3 scripts/watch-pack-pages.py
 
