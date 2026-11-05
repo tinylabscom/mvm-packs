@@ -61,10 +61,11 @@ registry descriptor that pins it.
   no `files/`.
 
 A policy pack alone is not runnable: it has no kernel, rootfs, binary or
-entrypoint. An application pack cannot be signed or published unless the
-application and every related file it needs (binary, rootfs, boot closure,
-sidecar) are present in a completed archive; the descriptor pins that archive's
-digest and size, so there is nothing to sign without it.
+entrypoint. A safe application release requires the completed archive and all
+its boot assets, read back and verified against the descriptor's digest and
+size. The current registry publisher validates descriptor fields but does not
+fetch or verify that archive before signing the descriptor; publication must
+remain gated on the separate artifact verification.
 
 ### 2. How index, manifest, descriptor and archive relate
 
@@ -211,8 +212,9 @@ found no test cited for that exact sentence.
 ## Consumer workflow
 
 The target experience is one page per pack, as a container registry lists an
-image. Only the client commands below exist today; no per-pack page exists
-anywhere in this repository or in the client.
+image. Generated pages in `docs/registry/` list the published metadata and
+policy content already in this repository; archive-only fields require a
+verified pull. The client commands below remain the consumer workflow.
 
 **Reference.** `namespace/name[@version]`. In the client, an unpinned
 reference resolves to the highest published version in `index.json`
