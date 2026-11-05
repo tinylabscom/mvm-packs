@@ -54,6 +54,7 @@ class ApplicationManifestTests(unittest.TestCase):
             bundle.write_text("synthetic test signature, not valid")
 
         with patch.object(builder, "PACKS", self.packs), \
+                patch.object(builder, "verify_archive"), \
                 patch.object(builder, "sign", side_effect=fake_sign) as sign:
             builder.build_one(self.source)
             return sign.call_count
@@ -250,3 +251,47 @@ class ApplicationManifestTests(unittest.TestCase):
             )
             with self.subTest(namespace=namespace, name=name):
                 self.assertEqual(raw, path.read_bytes())
+
+
+class ArchiveReadBackTests(unittest.TestCase):
+    DATA = b"x" * 100
+
+    def bundle(self, **changes):
+        bundle = dict(application()["bundle"], archive_size=len(self.DATA),
+                      archive_sha256=hashlib.sha256(self.DATA).hexdigest())
+        return bundle | changes
+
+    def check(self, bundle, data=None):
+        import io
+        response = io.BytesIO(self.DATA if data is None else data)
+        with patch.object(builder.urllib.request, "urlopen", return_value=response):
+            builder.verify_archive(bundle)
+
+    def test_matching_archive_passes(self):
+        self.check(self.bundle())
+
+    def test_wrong_digest_size_or_scheme_is_refused(self):
+        for bundle, data in (
+            (self.bundle(archive_sha256="0" * 64), None),
+            (self.bundle(archive_size=len(self.DATA) - 1), None),
+            (self.bundle(archive_size=len(self.DATA) + 1), None),
+            (self.bundle(source="oci://registry.example/x@sha256:" + "a" * 64), None),
+        ):
+            with self.subTest(bundle=bundle), self.assertRaises(SystemExit):
+                self.check(bundle, data)
+
+    def test_unreadable_archive_is_refused_before_signing(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(builder.urllib.request, "urlopen", side_effect=OSError("404")), \
+                patch.object(builder, "PACKS", Path(tmp) / "packs"), \
+                patch.object(builder, "sign") as sign:
+            source = Path(tmp) / "pack-sources" / "test" / "hello"
+            source.mkdir(parents=True)
+            source.joinpath("pack.toml").write_text(
+                'version = "1.0.0"\ndescription = "d"\n[application]\nschema_version = 1\n'
+                'guest_arch = "aarch64"\n[application.bundle]\n'
+                'source = "https://bundles.example/a.mvmpkg"\n'
+                f'archive_sha256 = "{"a" * 64}"\narchive_size = 123\nkey_id = "{"b" * 32}"\n')
+            with self.assertRaises(SystemExit):
+                builder.build_one(source)
+            sign.assert_not_called()

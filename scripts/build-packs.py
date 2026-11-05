@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
+import urllib.request
 from pathlib import Path
 
 from application_manifest import manifest_bytes as application_manifest_bytes
@@ -273,6 +274,31 @@ def check_existing_payload(out, payload):
             fail(f"{out}: published payload differs from source at {relative}")
 
 
+def verify_archive(bundle):
+    """Read the pinned archive back and refuse unless size and SHA-256 match.
+
+    Runs only before a new application version is signed (ADR 001). It checks
+    integrity against the descriptor; it does not verify the bundle signature.
+    """
+    source = bundle["source"]
+    if not source.startswith("https://"):
+        fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    digest, size = hashlib.sha256(), 0
+    try:
+        with urllib.request.urlopen(source, timeout=60) as response:
+            while chunk := response.read(1 << 20):
+                size += len(chunk)
+                if size > bundle["archive_size"]:
+                    break
+                digest.update(chunk)
+    except OSError as error:
+        fail(f"{source}: cannot read the archive back: {error}")
+    if size != bundle["archive_size"]:
+        fail(f"{source}: archive size does not match the descriptor")
+    if digest.hexdigest() != bundle["archive_sha256"]:
+        fail(f"{source}: archive SHA-256 does not match the descriptor")
+
+
 def sign(manifest_path, bundle_path):
     cmd = ["cosign", "sign-blob", "--yes"]
     key = os.environ.get("COSIGN_KEY")
@@ -341,6 +367,9 @@ def build_one(source, check_only=False):
     if check_only:
         print(f"{reference}: source valid")
         return
+
+    if application is not None:
+        verify_archive(application["bundle"])
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
