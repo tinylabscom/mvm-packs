@@ -11,6 +11,7 @@ What does the pack permit, and what should operators do with it?
 - [ ] I reviewed every included group and direct network allowance.
 - [ ] I listed secret-binding names and allowed hosts, never values.
 - [ ] `pack/README.md` explains setup and use without claiming the policy is a runnable image.
+- [ ] The namespace is not `mvm`, `agent` or `runtime` (reserved for first-party packs).
 - [ ] The version is new; I did not edit a published version or generated files by hand.
 - [ ] `just check` passes.
 

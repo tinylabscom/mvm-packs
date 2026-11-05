@@ -7,13 +7,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME = re.compile(r"[a-z][a-z0-9-]*\Z")
+# Clients trust this registry's signing identity by default for agent/ and runtime/
+# (mvm ADR-055), and mvm/ is official, so submissions must not land there.
+RESERVED = ("mvm", "agent", "runtime")
 
 
 def create(root, namespace, name):
     if not NAME.fullmatch(namespace) or not NAME.fullmatch(name):
         raise ValueError("namespace and name must start with a lowercase letter and contain only a-z, 0-9, -")
-    if namespace == "mvm":
-        raise ValueError("mvm is reserved for official packs; choose another namespace")
+    if namespace in RESERVED:
+        raise ValueError(f"{namespace} is reserved for first-party packs; choose another namespace")
     source = root / "pack-sources" / namespace / name
     if source.is_symlink() or source.parent.is_symlink():
         raise ValueError("pack source paths must not be symlinks")

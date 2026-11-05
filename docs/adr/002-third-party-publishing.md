@@ -130,6 +130,23 @@ signed into the short-lived feed.
 - `publish.yml` must gain the archive check (section 4, step 3) before any
   application, first-party or not, is indexed.
 
+## Interim path: reviewed submission to this repository
+
+The reviewed policy-pack submission flow (`docs/publishing-a-pack.md`, the
+**Publish pack** template and `just new-pack`) is a stage before the model above.
+A submitter opens a pull request that adds a source under `pack-sources/`, and
+this repository's `publish.yml` signs it. That differs from the Decision in two
+ways, and both are accepted for the interim only:
+
+- The signing identity is the registry's, not the author's (Decision 2).
+- It covers policy packs only; application descriptors are out of scope.
+
+The registry identity is trusted by default for `agent/` and `runtime/`, so
+those namespaces, with `mvm/`, are reserved: `new-pack.py` refuses them and the
+template asks reviewers to check. Submissions go in an owner-named namespace and
+carry no official label. Moving a pack to author-signed publishing later is a
+new version under a publisher entry, not an edit.
+
 ## Open questions
 
 - **Reusable-workflow identity.** If the author's workflow calls a registry
