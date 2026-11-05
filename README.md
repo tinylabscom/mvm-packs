@@ -79,11 +79,11 @@ python3 scripts/validate-packs.py
 With [`just`](https://github.com/casey/just) installed, plain `just` lists the
 available recipes; `just check` runs these checks. Use `just pages` to regenerate
 `docs/registry/`, or `just pages-check` to check them without writing. To preview
-the Starlight site locally, use Node.js 22.23.4 or newer and install its
-dependencies:
+the Starlight site locally, use Node.js 22.23.4 or newer (`.node-version`).
+If `mise` is installed, the recipes select that version automatically:
 
 ```sh
-npm ci
+just pages-install
 just pages-dev
 ```
 

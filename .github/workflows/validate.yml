@@ -15,6 +15,7 @@ on:
       - "astro.config.mjs"
       - "package.json"
       - "package-lock.json"
+      - ".node-version"
       - "src/content.config.ts"
       - "justfile"
       - ".github/workflows/pages.yml"
