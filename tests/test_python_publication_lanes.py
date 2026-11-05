@@ -65,7 +65,8 @@ class PublicationLaneWorkflowTests(unittest.TestCase):
     def test_each_lane_has_least_privilege(self):
         self.assertIn("\npermissions: {}\n", self.workflow)
         expected = {
-            "sign_python_image": ["contents: read", "id-token: write"],
+            "sign_python_image": ["contents: read", "id-token: write",
+                                  "attestations: write"],
             "boot_python_image": ["contents: read"],
             "release_python_image": ["contents: write"],
             "publish_python_pack": ["contents: write", "id-token: write"],
