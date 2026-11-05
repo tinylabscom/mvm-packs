@@ -7,10 +7,12 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Pack registry',
+      customCss: ['./src/styles/registry.css'],
       sidebar: [
         { label: 'Packs', link: '/' },
         { label: 'Agents', items: [{ autogenerate: { directory: 'agent' } }] },
         { label: 'Runtimes', items: [{ autogenerate: { directory: 'runtime' } }] },
+        { label: 'Publish a pack', link: '/publish/' },
       ],
     }),
   ],

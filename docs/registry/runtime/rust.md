@@ -23,22 +23,26 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 |---|---|---|
 | `1.0.0` | `e9e27c4055186d2416af010804000410cbd54b86d530084aa706cb0bf79c344e` | no |
 
-## Policy (`1.0.0`)
+## Policy declarations (`1.0.0`)
 
-Included groups: none
+Included groups name other policies; they do not describe every effective permission.
 
-Secret bindings (names and allowed hosts only; no secret values are stored):
+| Declaration | Value |
+|---|---|
+| Direct network allow | `crates.io:443` |
+| Direct network allow | `index.crates.io:443` |
+| Direct network allow | `static.crates.io:443` |
+| Direct network allow | `static.rust-lang.org:443` |
+| Direct network allow | `github.com:443` |
+| Direct network allow | `objects.githubusercontent.com:443` |
 
-- none
+## Secret bindings
 
-Network allow list:
+Binding names and allowed hosts only; a binding is not proof that a secret is required, and no secret values are stored here.
 
-- `crates.io:443`
-- `index.crates.io:443`
-- `static.crates.io:443`
-- `static.rust-lang.org:443`
-- `github.com:443`
-- `objects.githubusercontent.com:443`
+| Binding | Allowed hosts |
+|---|---|
+| None declared | — |
 
 ## Publisher
 

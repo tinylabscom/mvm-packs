@@ -23,20 +23,24 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 |---|---|---|
 | `1.0.0` | `e10d2c7f070e00a1b5d8c713568c0aebe608cc4e346c091a4cb25057ffd25bd3` | no |
 
-## Policy (`1.0.0`)
+## Policy declarations (`1.0.0`)
 
-Included groups: none
+Included groups name other policies; they do not describe every effective permission.
 
-Secret bindings (names and allowed hosts only; no secret values are stored):
+| Declaration | Value |
+|---|---|
+| Direct network allow | `registry.npmjs.org:443` |
+| Direct network allow | `nodejs.org:443` |
+| Direct network allow | `github.com:443` |
+| Direct network allow | `objects.githubusercontent.com:443` |
 
-- none
+## Secret bindings
 
-Network allow list:
+Binding names and allowed hosts only; a binding is not proof that a secret is required, and no secret values are stored here.
 
-- `registry.npmjs.org:443`
-- `nodejs.org:443`
-- `github.com:443`
-- `objects.githubusercontent.com:443`
+| Binding | Allowed hosts |
+|---|---|
+| None declared | — |
 
 ## Publisher
 

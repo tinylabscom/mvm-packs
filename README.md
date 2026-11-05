@@ -18,6 +18,7 @@ human-readable index and individual pack details. The generator reads
 `revocations.toml`; the Markdown is rendered as a
 [static site](https://tinylabscom.github.io/mvm-packs/) and deployed from
 `main` by the Pages workflow.
+To submit a new policy pack, follow the [publishing guide](docs/publishing-a-pack.md).
 
 ### Initial supported pack: Claude
 
@@ -72,6 +73,7 @@ Run the repository checks:
 
 ```sh
 python3 -m unittest discover -s tests
+python3 scripts/build-packs.py --check-sources
 python3 scripts/build-pack-pages.py --check
 python3 scripts/validate-packs.py
 ```

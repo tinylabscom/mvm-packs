@@ -2,14 +2,18 @@
 
 # Pack registry
 
-| Pack | Description | Versions |
-|---|---|---|
-| [`agent/claude`](agent/claude.md) | Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding. | `1.0.1` |
-| [`agent/codex`](agent/codex.md) | OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack. | `1.0.0` |
-| [`agent/goose`](agent/goose.md) | Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings. | `1.0.0` |
-| [`agent/opencode`](agent/opencode.md) | opencode agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings. | `1.0.0` |
-| [`agent/pi`](agent/pi.md) | pi agent policy: LLM APIs and GitHub, with the Anthropic secret binding. | `1.0.0` |
-| [`runtime/go`](runtime/go.md) | Go runtime policy: the module proxy and checksum database, the Go vanity host, and GitHub for direct module fetches. | `1.0.0` |
-| [`runtime/node`](runtime/node.md) | Node.js runtime policy: the npm registry, Node downloads, and GitHub release assets for native-module prebuilds. | `1.0.0` |
-| [`runtime/python`](runtime/python.md) | Python runtime policy: package registries and common API hosts a Python workload needs. | `1.0.0` |
-| [`runtime/rust`](runtime/rust.md) | Rust runtime policy: crates.io and its CDNs, rustup/toolchain downloads, and GitHub for git dependencies. | `1.0.0` |
+Browse published packs and inspect their declared policies before pulling. Publication alone is not an official endorsement or proof of safety.
+
+[Publish a policy pack](publish.md) through a reviewed pull request.
+
+<ul class="registry-list">
+<li><a href="agent/claude.md"><strong>agent/claude</strong><span>Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding.</span><small>Latest: 1.0.1</small></a></li>
+<li><a href="agent/codex.md"><strong>agent/codex</strong><span>OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="agent/goose.md"><strong>agent/goose</strong><span>Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="agent/opencode.md"><strong>agent/opencode</strong><span>opencode agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="agent/pi.md"><strong>agent/pi</strong><span>pi agent policy: LLM APIs and GitHub, with the Anthropic secret binding.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="runtime/go.md"><strong>runtime/go</strong><span>Go runtime policy: the module proxy and checksum database, the Go vanity host, and GitHub for direct module fetches.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="runtime/node.md"><strong>runtime/node</strong><span>Node.js runtime policy: the npm registry, Node downloads, and GitHub release assets for native-module prebuilds.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="runtime/python.md"><strong>runtime/python</strong><span>Python runtime policy: package registries and common API hosts a Python workload needs.</span><small>Latest: 1.0.0</small></a></li>
+<li><a href="runtime/rust.md"><strong>runtime/rust</strong><span>Rust runtime policy: crates.io and its CDNs, rustup/toolchain downloads, and GitHub for git dependencies.</span><small>Latest: 1.0.0</small></a></li>
+</ul>

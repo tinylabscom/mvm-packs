@@ -28,6 +28,10 @@ value = "sk-SECRET-VALUE"
 def put_manifest(root, ns, name, version, manifest, files=None):
     directory = root / "packs" / ns / name / version
     directory.mkdir(parents=True)
+    if files and manifest.get("schema_version") == 1:
+        manifest = dict(manifest, files=[
+            {"path": relative, "sha256": hashlib.sha256(text.encode()).hexdigest(),
+             "size": len(text.encode())} for relative, text in files.items()])
     raw = json.dumps(manifest).encode()
     (directory / "manifest.json").write_bytes(raw)
     for relative, text in (files or {}).items():
@@ -58,6 +62,8 @@ class PackPageTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.revoked = []
         self.entries = []
+        (self.root / "docs").mkdir()
+        (self.root / "docs/publishing-a-pack.md").write_text("# Publish a policy pack\n")
 
     def add(self, ns, name, versions):
         """versions: list of (version, manifest, files), newest first."""
@@ -81,10 +87,33 @@ class PackPageTests(unittest.TestCase):
         self.assertIn("mvmctl pull agent/p@1.0.0", page)
         self.assertNotIn("mvmctl run", page)
         self.assertIn("is not runnable", page)
-        self.assertIn("`anthropic`: `api.example.test`", page)
-        self.assertIn("`llm-apis`", page)
+        self.assertIn("| `anthropic` | `api.example.test` |", page)
+        self.assertIn("| Included group | `llm-apis` |", page)
+        self.assertIn("a binding is not proof that a secret is required", page)
         self.assertNotIn("sk-SECRET-VALUE", "".join(generate(self.root).values()))
         self.assertTrue(page.startswith("<!-- generated"))
+
+    def test_readme_is_from_manifest_pinned_payload(self):
+        files = {"pack/profile.toml": PROFILE,
+                 "pack/README.md": "## Setup\n\nUse this policy. <script>alert(1)</script>\n"}
+        self.add("agent", "p", [("1.0.0", policy_manifest("agent/p@1.0.0"), files)])
+        self.finish()
+        page = generate(self.root)["agent/p.md"]
+        self.assertIn("## About this pack\n\n## Setup\n\nUse this policy.", page)
+        self.assertNotIn("<script>", page)
+        (self.root / "packs/agent/p/1.0.0/files/pack/README.md").write_text("changed")
+        with self.assertRaises(PageError):
+            generate(self.root)
+
+    def test_catalog_links_and_escapes_descriptions(self):
+        item = self.add("agent", "p", [("1.0.0", policy_manifest("agent/p@1.0.0"), None)])
+        item["description"] = "<script>alert(1)</script>"
+        self.finish()
+        result = generate(self.root)
+        self.assertIn('href="agent/p.md"', result["README.md"])
+        self.assertNotIn("<script>", result["README.md"])
+        self.assertNotIn("<script>", result["agent/p.md"])
+        self.assertIn("# Publish a policy pack", result["publish.md"])
 
     def test_application_page_shows_descriptor_and_defers_archive_fields(self):
         self.add("app", "a", [("1.0.0", app_manifest("app/a@1.0.0"), None)])

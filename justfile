@@ -5,7 +5,7 @@ default:
     @just --list
 
 # Run the repository checks
-check: test pages-check validate
+check: test sources-check pages-check validate
 
 # Run unit tests
 test:
@@ -14,6 +14,14 @@ test:
 # Validate the published registry
 validate:
     python3 scripts/validate-packs.py
+
+# Check draft pack sources without signing or publishing
+sources-check:
+    python3 scripts/build-packs.py --check-sources
+
+# Create an unpublished policy-pack draft (prompts for namespace and name)
+new-pack:
+    python3 scripts/new-pack.py
 
 # Regenerate the Markdown registry pages
 pages:

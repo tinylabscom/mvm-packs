@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def snapshot(root):
-    inputs = [root / "index.json", root / "revocations.toml", *(root / "packs").rglob("*")]
+    inputs = [root / "index.json", root / "revocations.toml",
+              root / "docs/publishing-a-pack.md", *(root / "packs").rglob("*")]
     return {
         path: (path.stat().st_mtime_ns, path.stat().st_size)
         for path in inputs if path.is_file()
