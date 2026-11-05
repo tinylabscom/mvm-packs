@@ -450,8 +450,13 @@ rootfs, provenance and evidence bundles under the publisher identity. If mvm
 moves its base lock between jobs, staging refuses, because the signed
 provenance names the old lock.
 
-1. `sign_python_image` (`contents: read`, `id-token: write`, KVM) is the
-   signing job described above. It uploads only the signed evidence.
+1. `sign_python_image` (`contents: read`, `id-token: write`,
+   `attestations: write`, KVM) is the signing job described above. After
+   signing it attests the composed `rootfs.ext4` with
+   `actions/attest-build-provenance` (keyless, this workflow's identity) and
+   checks it with `gh attestation verify --signer-workflow`. This is in
+   addition to the cosign-signed provenance statement; the descriptor does
+   not yet record the GitHub attestation. It uploads only the signed evidence.
 2. `boot_python_image` (`contents: read`, KVM) runs
    `scripts/run-python-image-boot-probe.sh`. It copies the re-staged
    `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash` and `mvm-meta.json`

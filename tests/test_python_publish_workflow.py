@@ -36,6 +36,20 @@ class PythonPublishWorkflowTests(unittest.TestCase):
         self.assertNotIn("git push origin HEAD:main", image_job)
         self.assertNotIn("python-candidate.yml", image_job)
 
+    def test_image_is_attested_keylessly_and_the_attestation_is_verified(self):
+        workflow = PUBLISH.read_text()
+        job = workflow.split("  sign_python_image:\n", 1)[1].split(
+            "\n  boot_python_image:\n", 1)[0]
+        self.assertIn("attestations: write", job)
+        self.assertNotIn("attestations: write", workflow.replace(job, ""))
+        self.assertRegex(job, r"actions/attest-build-provenance@[0-9a-f]{40}")
+        self.assertIn("signed-python-image/rootfs.ext4", job)
+        self.assertIn("gh attestation verify", job)
+        self.assertIn("--signer-workflow", job)
+        self.assertLess(job.index("run-python-image-publisher.sh"),
+                        job.index("attest-build-provenance"))
+        self.assertLess(job.index("gh attestation verify"), job.index("upload-artifact"))
+
     def test_reproduction_precedes_signing_without_release_or_registry_write(self):
         runner = RUNNER.read_text()
         ordered = (
