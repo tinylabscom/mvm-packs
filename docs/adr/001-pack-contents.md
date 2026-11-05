@@ -63,9 +63,11 @@ registry descriptor that pins it.
 A policy pack alone is not runnable: it has no kernel, rootfs, binary or
 entrypoint. A safe application release requires the completed archive and all
 its boot assets, read back and verified against the descriptor's digest and
-size. The current registry publisher validates descriptor fields but does not
-fetch or verify that archive before signing the descriptor; publication must
-remain gated on the separate artifact verification.
+size. Before signing a new application version, `build-packs.py` reads the
+archive back over HTTPS and refuses on any size or SHA-256 mismatch, an
+unreadable source or a non-HTTPS source. That is an integrity check only: it
+does not verify the bundle signature or its contents, which still need the
+separate artifact verification.
 
 ### 2. How index, manifest, descriptor and archive relate
 
