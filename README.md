@@ -12,6 +12,10 @@ It is the only catalog. Schema v2 lists each version together with the
 from published manifests, not unpublished source metadata, and validation
 requires every entry and digest to match. Do not edit it by hand.
 
+Browse the generated [pack registry pages](docs/registry/README.md) for a
+human-readable index and individual pack details. These are Markdown pages
+rendered by GitHub, not a separately hosted website.
+
 ### Initial supported pack: Claude
 
 `agent/claude@1.0.1` is the initial supported **Claude Code policy pack**.
@@ -65,8 +69,16 @@ Run the repository checks:
 
 ```sh
 python3 -m unittest discover -s tests
+python3 scripts/build-pack-pages.py --check
 python3 scripts/validate-packs.py
 ```
+
+With [`just`](https://github.com/casey/just) installed, `just check` runs these
+checks. Use `just pages` to regenerate `docs/registry/` after registry changes,
+`just pages-dev` to rebuild them as `index.json`, `revocations.toml`, or files
+under `packs/` change (Ctrl+C to stop), or `just pages-check` to check the
+generated pages without writing them. Pages are rendered as Markdown on GitHub;
+there is no separate local web server.
 
 To additionally verify publisher signatures (requires `cosign`):
 
