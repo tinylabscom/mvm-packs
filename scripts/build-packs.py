@@ -24,6 +24,7 @@ bundle on every pull and on every policy load, against the publisher trust
 policy.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -281,7 +282,7 @@ def sign(manifest_path, bundle_path):
     subprocess.run(cmd, check=True)
 
 
-def build_one(source):
+def build_one(source, check_only=False):
     namespace, name = source.parent.name, source.name
     if not COORD.match(namespace) or not COORD.match(name):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
@@ -322,6 +323,9 @@ def build_one(source):
                 fail(f"{out}: application cannot contain payload files or directories")
         else:
             check_existing_payload(out, payload)
+        if check_only:
+            print(f"{reference}: source valid")
+            return
         bundle = out / "manifest.sigstore.json"
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
@@ -334,6 +338,9 @@ def build_one(source):
             print(f"{reference}: unchanged")
             return
 
+    if check_only:
+        print(f"{reference}: source valid")
+        return
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -404,6 +411,10 @@ def rebuild_index():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check-sources", action="store_true",
+                        help="validate sources and version immutability without signing or writing")
+    args = parser.parse_args()
     if not SOURCES.is_dir():
         fail("pack-sources/ does not exist")
     sources = sorted(
@@ -412,8 +423,9 @@ def main():
     if not sources:
         fail("no pack sources under pack-sources/<namespace>/<name>/")
     for source in sources:
-        build_one(source)
-    rebuild_index()
+        build_one(source, check_only=args.check_sources)
+    if not args.check_sources:
+        rebuild_index()
 
 
 if __name__ == "__main__":

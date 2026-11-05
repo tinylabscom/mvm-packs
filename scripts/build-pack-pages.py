@@ -2,12 +2,13 @@
 """Generate one Markdown page per published pack, plus an index page.
 
 Reads only files already in the tree (index.json, packs/*/*/*/manifest.json
-and files/, revocations.toml). It never downloads or opens an archive.
+and files/, revocations.toml, docs/publishing-a-pack.md). It never downloads or opens an archive.
 Output goes to docs/registry/. Use --check to fail when it is stale.
 """
 
 import argparse
 import hashlib
+import html
 import json
 import runpy
 import sys
@@ -67,22 +68,38 @@ def load_manifest(path, expected_sha, reference):
     return manifest, raw
 
 
-def read_policy(version_dir):
+def read_payload(version_dir, manifest, relative):
+    entry = next((item for item in manifest.get("files", [])
+                  if isinstance(item, dict) and item.get("path") == relative), None)
+    if entry is None:
+        return None
+    path = version_dir / "files" / relative
+    try:
+        raw = path.read_bytes()
+        if len(raw) != entry["size"] or hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+            raise PageError(f"{path}: bytes do not match the signed manifest")
+        return raw.decode("utf-8")
+    except (OSError, UnicodeError, KeyError, TypeError) as error:
+        raise PageError(f"{path}: {error}") from error
+
+
+def read_policy(version_dir, manifest):
     """Names, hosts and groups only; any other profile field is ignored."""
     policy = {"groups": [], "bindings": [], "allow": []}
     for name in ("profile.toml", "group.toml"):
-        path = version_dir / "files" / "pack" / name
-        if not path.is_file():
+        relative = f"pack/{name}"
+        raw = read_payload(version_dir, manifest, relative)
+        if raw is None:
             continue
         try:
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
+            data = tomllib.loads(raw)
             policy["groups"] += list(data.get("groups", {}).get("include", []))
             binds = data.get("overrides", {}).get("secrets", {}).get("bind", [])
             policy["bindings"] += [(b["name"], list(b.get("hosts", []))) for b in binds]
             policy["allow"] += list(data.get("network", {}).get("allow", []))
-        except (OSError, UnicodeError, tomllib.TOMLDecodeError, KeyError, TypeError,
+        except (tomllib.TOMLDecodeError, KeyError, TypeError,
                 AttributeError) as error:
-            raise PageError(f"{path}: {error!r}") from error
+            raise PageError(f"{version_dir / 'files' / relative}: {error!r}") from error
     return policy
 
 
@@ -123,7 +140,7 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
     latest_version, _, latest, latest_dir, _, _ = loaded[0]
     is_app = latest.get("kind") == "application"
     has_app = any(m.get("kind") == "application" for _, _, m, _, _, _ in loaded)
-    out = [HEADER, f"# `{ref}`\n\n", f"{entry['description']}\n\n",
+    out = [HEADER, f"# `{ref}`\n\n", f"{html.escape(entry['description'])}\n\n",
            f"- Reference: `{ref}`\n",
            f"- Kind: {'application' if is_app else 'policy'}\n",
            f"- Latest version: `{latest_version}`\n\n"]
@@ -147,16 +164,27 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
         out.append(f"## Environment\n\nEntrypoint, resources, egress and secret slots: {IN_ARCHIVE}.\n\n"
                    f"Created date: {IN_ARCHIVE}.\n\n")
     else:
-        policy = read_policy(latest_dir)
-        out.append(f"## Policy (`{latest_version}`)\n\n")
-        out.append("Included groups: " + (", ".join(f"`{g}`" for g in policy["groups"]) or "none") + "\n\n")
-        out.append("Secret bindings (names and allowed hosts only; no secret values are stored):\n\n")
+        policy = read_policy(latest_dir, latest)
+        out.append(f"## Policy declarations (`{latest_version}`)\n\n"
+                   "Included groups name other policies; they do not describe every effective permission.\n\n"
+                   "| Declaration | Value |\n|---|---|\n")
+        for kind, values in (("Included group", policy["groups"]),
+                             ("Direct network allow", policy["allow"])):
+            for value in values:
+                out.append(f"| {kind} | `{value}` |\n")
+        if not policy["groups"] and not policy["allow"]:
+            out.append("| None declared | — |\n")
+        out.append("\n## Secret bindings\n\n"
+                   "Binding names and allowed hosts only; a binding is not proof that a secret "
+                   "is required, and no secret values are stored here.\n\n"
+                   "| Binding | Allowed hosts |\n|---|---|\n")
         for bname, hosts in policy["bindings"]:
-            out.append(f"- `{bname}`: " + ", ".join(f"`{h}`" for h in hosts) + "\n")
+            out.append(f"| `{bname}` | {', '.join(f'`{h}`' for h in hosts) or '—'} |\n")
         if not policy["bindings"]:
-            out.append("- none\n")
-        if policy["allow"]:
-            out.append("\nNetwork allow list:\n\n" + "".join(f"- `{h}`\n" for h in policy["allow"]))
+            out.append("| None declared | — |\n")
+        readme = read_payload(latest_dir, latest, "pack/README.md")
+        if readme:
+            out.append("\n## About this pack\n\n" + html.escape(readme.strip()) + "\n")
         out.append("\n")
     out.append("## Publisher\n\n"
                "Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow "
@@ -170,10 +198,29 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
 
 
 def render_index(packs):
-    rows = "".join(
-        f"| [`{p['namespace']}/{p['name']}`]({p['namespace']}/{p['name']}.md) | {p['description']} "
-        f"| {', '.join('`%s`' % v['version'] for v in p['versions'])} |\n" for p in packs)
-    return ("README.md", HEADER + "# Pack registry\n\n| Pack | Description | Versions |\n|---|---|---|\n" + rows)
+    rows = []
+    for pack in packs:
+        ref = f"{pack['namespace']}/{pack['name']}"
+        rows.append(
+            f'<li><a href="{html.escape(ref, quote=True)}.md">'
+            f'<strong>{html.escape(ref)}</strong>'
+            f'<span>{html.escape(pack["description"])}</span>'
+            f'<small>Latest: {html.escape(pack["versions"][0]["version"])}</small>'
+            '</a></li>\n'
+        )
+    return ("README.md", HEADER + "# Pack registry\n\n"
+            "Browse published packs and inspect their declared policies before pulling. "
+            "Publication alone is not an official endorsement or proof of safety.\n\n"
+            "[Publish a policy pack](publish.md) through a reviewed pull request.\n\n"
+            '<ul class="registry-list">\n' + "".join(rows) + '</ul>\n')
+
+
+def render_publish(root):
+    try:
+        guide = (root / "docs/publishing-a-pack.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as error:
+        raise PageError(f"docs/publishing-a-pack.md: {error}") from error
+    return "publish.md", HEADER + guide
 
 
 def generate(root):
@@ -185,7 +232,8 @@ def generate(root):
         raise PageError(f"index.json: {error}") from error
     ids, shas = load_revocations(root)
     ids, shas = set(ids), set(shas)
-    pages = [render_pack(p, root, ids, shas) for p in packs] + [render_index(packs)]
+    pages = [render_pack(p, root, ids, shas) for p in packs] + [
+        render_index(packs), render_publish(root)]
     return dict(pages)
 
 

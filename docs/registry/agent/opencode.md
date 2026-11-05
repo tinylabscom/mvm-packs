@@ -23,14 +23,23 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 |---|---|---|
 | `1.0.0` | `1304b068122bc84fbae7c795727d9d7ccf3bf852cbb8309ab2e9d4903fdf2a1a` | no |
 
-## Policy (`1.0.0`)
+## Policy declarations (`1.0.0`)
 
-Included groups: `llm-apis`, `github`
+Included groups name other policies; they do not describe every effective permission.
 
-Secret bindings (names and allowed hosts only; no secret values are stored):
+| Declaration | Value |
+|---|---|
+| Included group | `llm-apis` |
+| Included group | `github` |
 
-- `anthropic`: `api.anthropic.com`
-- `openai`: `api.openai.com`
+## Secret bindings
+
+Binding names and allowed hosts only; a binding is not proof that a secret is required, and no secret values are stored here.
+
+| Binding | Allowed hosts |
+|---|---|
+| `anthropic` | `api.anthropic.com` |
+| `openai` | `api.openai.com` |
 
 ## Publisher
 

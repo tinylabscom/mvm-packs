@@ -23,23 +23,27 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 |---|---|---|
 | `1.0.0` | `ce1ac86f67e6a9df7a1b1a46d63384fa20a30848fdd7e5967d2293bfb5ceec50` | no |
 
-## Policy (`1.0.0`)
+## Policy declarations (`1.0.0`)
 
-Included groups: none
+Included groups name other policies; they do not describe every effective permission.
 
-Secret bindings (names and allowed hosts only; no secret values are stored):
+| Declaration | Value |
+|---|---|
+| Direct network allow | `proxy.golang.org:443` |
+| Direct network allow | `sum.golang.org:443` |
+| Direct network allow | `index.golang.org:443` |
+| Direct network allow | `go.googlesource.com:443` |
+| Direct network allow | `github.com:443` |
+| Direct network allow | `api.github.com:443` |
+| Direct network allow | `codeload.github.com:443` |
 
-- none
+## Secret bindings
 
-Network allow list:
+Binding names and allowed hosts only; a binding is not proof that a secret is required, and no secret values are stored here.
 
-- `proxy.golang.org:443`
-- `sum.golang.org:443`
-- `index.golang.org:443`
-- `go.googlesource.com:443`
-- `github.com:443`
-- `api.github.com:443`
-- `codeload.github.com:443`
+| Binding | Allowed hosts |
+|---|---|
+| None declared | — |
 
 ## Publisher
 

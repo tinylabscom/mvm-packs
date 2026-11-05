@@ -1,0 +1,44 @@
+.registry-list {
+  list-style: none;
+  margin: 1.5rem 0 0;
+  padding: 0;
+}
+
+.registry-list li {
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+.registry-list a {
+  display: grid;
+  grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr) auto;
+  gap: 1.25rem;
+  align-items: baseline;
+  padding: 1rem 0.5rem;
+  color: var(--sl-color-text);
+  text-decoration: none;
+}
+
+.registry-list a:hover,
+.registry-list a:focus-visible {
+  background: var(--sl-color-gray-6);
+}
+
+.registry-list a:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+.registry-list strong {
+  color: var(--sl-color-accent-high);
+}
+
+.registry-list small {
+  white-space: nowrap;
+}
+
+@media (max-width: 50rem) {
+  .registry-list a {
+    grid-template-columns: 1fr;
+    gap: 0.25rem;
+  }
+}

@@ -8,11 +8,13 @@ on:
       - "revocations.toml"
       - "packs/**"
       - "docs/registry/**"
+      - "docs/publishing-a-pack.md"
       - "scripts/build-pack-pages.py"
       - "astro.config.mjs"
       - "package.json"
       - "package-lock.json"
       - "src/content.config.ts"
+      - "src/styles/**"
       - "scripts/stage-starlight-pages.mjs"
       - ".github/workflows/pages.yml"
   # The pack publisher commits with [skip ci], so its push cannot trigger this workflow.

@@ -23,21 +23,25 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 |---|---|---|
 | `1.0.0` | `80903c11a95708dcf493d673bf76a99f3828a41a4e640550e19b76fd8affa229` | no |
 
-## Policy (`1.0.0`)
+## Policy declarations (`1.0.0`)
 
-Included groups: none
+Included groups name other policies; they do not describe every effective permission.
 
-Secret bindings (names and allowed hosts only; no secret values are stored):
+| Declaration | Value |
+|---|---|
+| Direct network allow | `pypi.org:443` |
+| Direct network allow | `files.pythonhosted.org:443` |
+| Direct network allow | `github.com:443` |
+| Direct network allow | `api.github.com:443` |
+| Direct network allow | `objects.githubusercontent.com:443` |
 
-- none
+## Secret bindings
 
-Network allow list:
+Binding names and allowed hosts only; a binding is not proof that a secret is required, and no secret values are stored here.
 
-- `pypi.org:443`
-- `files.pythonhosted.org:443`
-- `github.com:443`
-- `api.github.com:443`
-- `objects.githubusercontent.com:443`
+| Binding | Allowed hosts |
+|---|---|
+| None declared | — |
 
 ## Publisher
 
