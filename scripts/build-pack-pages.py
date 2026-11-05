@@ -17,7 +17,9 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 from application_manifest import unique_object, validate_application  # noqa: E402
-from publisher_identity import CURRENT_IDENTITY, PUBLISHER_ISSUER  # noqa: E402
+from publisher_identity import (  # noqa: E402
+    CURRENT_IDENTITY, FORMER_IDENTITY, PUBLISHER_ISSUER, is_historical_manifest,
+)
 
 ROOT = SCRIPTS.parent
 OUT = "docs/registry"
@@ -62,7 +64,7 @@ def load_manifest(path, expected_sha, reference):
             raise PageError(f"{path}: {error}") from error
     elif manifest.get("schema_version") != 1 or not isinstance(manifest.get("files"), list):
         raise PageError(f"{path}: unsupported manifest shape")
-    return manifest
+    return manifest, raw
 
 
 def read_policy(version_dir):
@@ -82,6 +84,16 @@ def read_policy(version_dir):
                 AttributeError) as error:
             raise PageError(f"{path}: {error!r}") from error
     return policy
+
+
+def signer_identities(reference, raw):
+    """Every identity this version can be verified under. Uses the time-free
+    historical test (not accepts_former) so a page never changes with the date
+    and never under-reports revocation."""
+    ids = [CURRENT_IDENTITY]
+    if is_historical_manifest(reference, raw):
+        ids.append(FORMER_IDENTITY)
+    return ids
 
 
 def version_row(version, sha, manifest, revoked, has_app):
@@ -104,11 +116,13 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
     for item in entry["versions"]:
         version, sha = item["version"], item["manifest_sha256"]
         directory = root / "packs" / ns / name / version
-        manifest = load_manifest(directory / "manifest.json", sha, f"{ref}@{version}")
-        loaded.append((version, sha, manifest, directory))
-    latest_version, _, latest, latest_dir = loaded[0]
+        manifest, raw = load_manifest(directory / "manifest.json", sha, f"{ref}@{version}")
+        identities = signer_identities(f"{ref}@{version}", raw)
+        revoked = sha in revoked_shas or any(i in revoked_ids for i in identities)
+        loaded.append((version, sha, manifest, directory, identities, revoked))
+    latest_version, _, latest, latest_dir, _, _ = loaded[0]
     is_app = latest.get("kind") == "application"
-    has_app = any(m.get("kind") == "application" for _, _, m, _ in loaded)
+    has_app = any(m.get("kind") == "application" for _, _, m, _, _, _ in loaded)
     out = [HEADER, f"# `{ref}`\n\n", f"{entry['description']}\n\n",
            f"- Reference: `{ref}`\n",
            f"- Kind: {'application' if is_app else 'policy'}\n",
@@ -126,8 +140,7 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
     if has_app:
         head += ["Architecture", "Bundle SHA-256", "Bundle size (bytes)", "Bundle key ID"]
     out.append("| " + " | ".join(head) + " |\n|" + "---|" * len(head) + "\n")
-    for version, sha, manifest, _ in loaded:
-        revoked = sha in revoked_shas or CURRENT_IDENTITY in revoked_ids
+    for version, sha, manifest, _, _, revoked in loaded:
         out.append(version_row(version, sha, manifest, revoked, has_app) + "\n")
     out.append("\n")
     if is_app:
@@ -146,8 +159,10 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
             out.append("\nNetwork allow list:\n\n" + "".join(f"- `{h}`\n" for h in policy["allow"]))
         out.append("\n")
     out.append("## Publisher\n\n"
-               "Each manifest is signed keyless; `manifest.sigstore.json` binds it to workflow identity "
-               f"`{CURRENT_IDENTITY}` (issuer `{PUBLISHER_ISSUER}`).\n")
+               "Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow "
+               f"identity (issuer `{PUBLISHER_ISSUER}`). Identities each version can be verified under:\n\n")
+    for version, _, _, _, identities, _ in loaded:
+        out.append(f"- `{version}`: " + ", ".join(f"`{i}`" for i in identities) + "\n")
     if is_app:
         out.append("\nThe descriptor names a bundle key ID but does not enroll it; the consumer must "
                    "already trust that key.\n")

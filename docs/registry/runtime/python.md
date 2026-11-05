@@ -41,4 +41,6 @@ Network allow list:
 
 ## Publisher
 
-Each manifest is signed keyless; `manifest.sigstore.json` binds it to workflow identity `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main` (issuer `https://token.actions.githubusercontent.com`).
+Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow identity (issuer `https://token.actions.githubusercontent.com`). Identities each version can be verified under:
+
+- `1.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`, `https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main`

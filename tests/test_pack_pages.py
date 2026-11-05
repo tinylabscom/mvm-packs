@@ -5,6 +5,7 @@ import json
 import runpy
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,6 +104,34 @@ class PackPageTests(unittest.TestCase):
         page = generate(self.root)["agent/p.md"]
         self.assertRegex(page, r"\| `1\.0\.0` \| `[0-9a-f]{64}` \| yes \|")
         self.assertRegex(page, r"\| `1\.0\.1` \| `[0-9a-f]{64}` \| no \|")
+
+    def test_former_identity_revocation_marks_a_historical_version(self):
+        ids = runpy.run_path(str(ROOT / "scripts" / "publisher_identity.py"))
+        item = self.add("agent", "p", [("1.0.0", policy_manifest("agent/p@1.0.0"), None)])
+        sha = item["versions"][0]["manifest_sha256"]
+        historical = pages["signer_identities"].__globals__["is_historical_manifest"]
+        self.assertFalse(historical("agent/p@1.0.0", b"x"))
+        self.finish()
+        self._revoke_ids([ids["FORMER_IDENTITY"]])
+        # not historical: former identity is irrelevant, stays clear
+        self.assertRegex(generate(self.root)["agent/p.md"], r"\| `1\.0\.0` \| `%s` \| no \|" % sha)
+        with unittest.mock.patch.dict(pages["signer_identities"].__globals__,
+                                      {"is_historical_manifest": lambda r, b: True}):
+            page = generate(self.root)["agent/p.md"]
+        self.assertRegex(page, r"\| `1\.0\.0` \| `%s` \| yes \|" % sha)
+        self.assertIn(ids["FORMER_IDENTITY"], page)
+
+    def test_current_identity_revocation_marks_every_version(self):
+        ids = runpy.run_path(str(ROOT / "scripts" / "publisher_identity.py"))
+        self.add("agent", "p", [("1.0.0", policy_manifest("agent/p@1.0.0"), None)])
+        self.finish()
+        self._revoke_ids([ids["CURRENT_IDENTITY"]])
+        self.assertRegex(generate(self.root)["agent/p.md"], r"\| `[0-9a-f]{64}` \| yes \|")
+
+    def _revoke_ids(self, identities):
+        (self.root / "revocations.toml").write_text(
+            "schema_version = 1\nrevoked_identities = %s\nrevoked_manifests = []\n"
+            % json.dumps(identities))
 
     def test_malformed_manifest_is_refused(self):
         self.add("agent", "p", [("1.0.0", {"schema_version": 1, "reference": "agent/p@1.0.0"}, None)])
