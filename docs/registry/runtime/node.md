@@ -4,9 +4,9 @@
 
 Node.js runtime policy: the npm registry, Node downloads, and GitHub release assets for native-module prebuilds.
 
-- Reference: `runtime/node`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `runtime/node` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

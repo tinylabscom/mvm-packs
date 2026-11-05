@@ -123,6 +123,8 @@ class PackPageTests(unittest.TestCase):
         self.assertIn("| aarch64 | `" + "a" * 64 + "` | 123 | `" + "b" * 32 + "` |", page)
         self.assertIn("recorded in the signed archive; shown after `mvmctl pull`", page)
         self.assertNotIn("not runnable", page)
+        self.assertIn("| `app/a` | application | `1.0.0` | aarch64 | 123 B |", page)
+        self.assertIn("application · aarch64 · 123 B · latest 1.0.0", generate(self.root)["README.md"])
 
     def test_revoked_version_row(self):
         item = self.add("agent", "p", [

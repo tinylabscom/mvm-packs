@@ -4,9 +4,9 @@
 
 Go runtime policy: the module proxy and checksum database, the Go vanity host, and GitHub for direct module fetches.
 
-- Reference: `runtime/go`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `runtime/go` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

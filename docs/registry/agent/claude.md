@@ -4,9 +4,9 @@
 
 Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding.
 
-- Reference: `agent/claude`
-- Kind: policy
-- Latest version: `1.0.1`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `agent/claude` | policy | `1.0.1` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 

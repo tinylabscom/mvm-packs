@@ -4,9 +4,9 @@
 
 Rust runtime policy: crates.io and its CDNs, rustup/toolchain downloads, and GitHub for git dependencies.
 
-- Reference: `runtime/rust`
-- Kind: policy
-- Latest version: `1.0.0`
+| Reference | Kind | Latest | Architecture | Size | Publisher |
+|---|---|---|---|---|---|
+| `runtime/rust` | policy | `1.0.0` | — | — | tinylabscom/mvm-packs (official) |
 
 ## Use
 
