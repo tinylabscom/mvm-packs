@@ -30,8 +30,8 @@ RELATIVE = re.compile(r"[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*\Z")
 
 def validate_requirements(data):
     """Return {'packages': [...], 'commands': [...], 'binaries': [...]} or raise ValueError."""
-    if not isinstance(data, dict) or not data or set(data) - {"packages", "commands", "binaries"}:
-        raise ValueError("requirements must be a table with packages, commands and/or binaries")
+    if not isinstance(data, dict) or not data or set(data) - {"packages", "commands", "binaries", "environment_policy"}:
+        raise ValueError("requirements must be a table with packages, commands, binaries and/or environment_policy")
     result = {}
     for key in ("packages", "commands"):
         values = data.get(key, [])
@@ -56,9 +56,32 @@ def validate_requirements(data):
             raise ValueError("duplicate binary pin")
         seen.add((entry["package"], entry["path"]))
     result["binaries"] = binaries
-    if not (result["packages"] or result["commands"] or result["binaries"]):
-        raise ValueError("requirements must name at least one package, command or binary")
+    policy = data.get("environment_policy")
+    if policy is not None and (not isinstance(policy, dict) or not _plain_json(policy, depth=4)):
+        raise ValueError("environment_policy must be a small table of strings, integers, booleans, lists and tables")
+    result["environment_policy"] = policy
+    if not (result["packages"] or result["commands"] or result["binaries"] or policy is not None):
+        raise ValueError("requirements must name at least one package, command, binary or environment_policy")
     return result
+
+
+def _plain_json(value, depth):
+    """True for a small tree of dicts (string keys), lists, strings, ints and bools only."""
+    import json
+    if depth < 0:
+        return False
+    if isinstance(value, dict):
+        ok = all(isinstance(k, str) and _plain_json(v, depth - 1) for k, v in value.items())
+    elif isinstance(value, list):
+        ok = all(_plain_json(v, depth - 1) for v in value)
+    else:
+        ok = isinstance(value, (str, bool)) or type(value) is int
+    return ok and (depth < 4 or len(json.dumps(value)) <= 4096)
+
+
+def needs_rootfs(requirements):
+    """Whether any requirement must be checked against the root filesystem."""
+    return bool(requirements["packages"] or requirements["commands"] or requirements["binaries"])
 
 
 def _debugfs_path():

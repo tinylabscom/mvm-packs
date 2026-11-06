@@ -20,10 +20,16 @@ HASH = "a" * 32
 class ValidateTests(unittest.TestCase):
     def test_valid_and_invalid_requirement_tables(self):
         self.assertEqual(rr.validate_requirements({"packages": ["bash"]}),
-                         {"packages": ["bash"], "commands": [], "binaries": []})
+                         {"packages": ["bash"], "commands": [], "binaries": [], "environment_policy": None})
+        self.assertEqual(rr.validate_requirements({"environment_policy": {"allow_hosts": ["a:443"]}})
+                         ["environment_policy"], {"allow_hosts": ["a:443"]})
+        self.assertFalse(rr.needs_rootfs(rr.validate_requirements({"environment_policy": {"x": 1}})))
         for bad in ({}, {"packages": []}, {"extra": ["x"]}, {"packages": ["a", "a"]},
                     {"packages": ["../x"]}, {"commands": ["a b"]}, {"packages": "bash"},
                     {"packages": [f"p{i}" for i in range(65)]}, [], None,
+                    {"environment_policy": {"a": 1.5}}, {"environment_policy": [1]},
+                    {"environment_policy": {"a": {"b": {"c": {"d": {"e": 1}}}}}},
+                    {"environment_policy": {"a": "x" * 5000}},
                     {"binaries": [{"package": "a", "path": "../x", "sha256": "a" * 64, "size": 1}]},
                     {"binaries": [{"package": "a", "path": "/x", "sha256": "a" * 64, "size": 1}]},
                     {"binaries": [{"package": "a", "path": "bin/x", "sha256": "A" * 64, "size": 1}]},

@@ -261,7 +261,8 @@ TEST_KEY_ID = hashlib.sha256(TEST_PUBLIC).hexdigest()[:32]
 
 
 def make_mvmpkg(roles=("kernel", "rootfs"), key_id=TEST_KEY_ID, arch="aarch64", corrupt=None,
-                extra_members=(), repeat_artifact=0, raw_manifest=None, signing_secret=TEST_SECRET):
+                extra_members=(), repeat_artifact=0, raw_manifest=None, signing_secret=TEST_SECRET,
+                members=None):
     """Build a tiny synthetic .mvmpkg tar (manifest.json, manifest.sig, artifacts/)."""
     import io
     import tarfile
@@ -274,7 +275,10 @@ def make_mvmpkg(roles=("kernel", "rootfs"), key_id=TEST_KEY_ID, arch="aarch64", 
     if corrupt:
         files[f"artifacts/{corrupt}"] = b"tampered"
     artifacts += [artifacts[0]] * repeat_artifact
-    manifest = raw_manifest or json.dumps({"key_id": key_id, "arch": arch, "artifacts": artifacts}).encode()
+    body = {"key_id": key_id, "arch": arch, "artifacts": artifacts}
+    if members is not None:
+        body["members"] = members
+    manifest = raw_manifest or json.dumps(body).encode()
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         signature = ed25519_sign(signing_secret, manifest)[1]
@@ -350,6 +354,38 @@ class ArchiveReadBackTests(unittest.TestCase):
                 self.check(self.descriptor(data), data, key=key)
         with self.assertRaises(SystemExit):
             builder.bundle_key_url("https://bundles.example/app.tar")
+
+    POLICY = {"allow_hosts": ["api.anthropic.com:443"],
+              "request_budget": {"max_requests": 1, "max_spend_microusd": 500000,
+                                 "model": "claude-haiku-4-5-20251001"}}
+
+    def check_policy(self, members, expected):
+        import io
+        data = make_mvmpkg(members=members)
+
+        def serve(url, timeout=None):
+            return io.BytesIO(TEST_PUBLIC if url.endswith("-bundle-publisher.pub") else data)
+
+        with patch.object(builder.urllib.request, "urlopen", side_effect=serve):
+            builder.verify_archive(self.descriptor(data), {"environment_policy": expected, "packages": [],
+                                                           "commands": [], "binaries": []})
+
+    def test_the_signed_environment_policy_must_equal_the_declared_one_exactly(self):
+        env = lambda policy: [{"class": "environment", "policy": policy}]  # noqa: E731
+        self.check_policy(env(self.POLICY), self.POLICY)          # exact: accepted, rootfs never read
+        weak = {"allow_hosts": ["api.anthropic.com:443"]}
+        extra = dict(self.POLICY, allow_hosts=["api.anthropic.com:443", "evil.example:443"])
+        wider = dict(self.POLICY, request_budget=dict(self.POLICY["request_budget"], max_requests=2))
+        for label, members in {
+            "no request budget": env(weak),
+            "an extra allowed host": env(extra),
+            "a wider budget": env(wider),
+            "no environment member": [],
+            "two environment members": env(self.POLICY) + env(self.POLICY),
+            "no policy at all": [{"class": "environment"}],
+        }.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check_policy(members, self.POLICY)
 
     def test_declared_requirements_fail_closed_on_a_root_that_cannot_be_read(self):
         data = make_mvmpkg()   # its rootfs is not an ext4 image, so nothing can be confirmed
