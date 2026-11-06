@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from unittest.mock import patch
 
@@ -179,7 +181,13 @@ class PublisherVerificationTests(unittest.TestCase):
     def test_historical_signature_uses_only_the_pinned_former_identity(self):
         manifest = sorted((ROOT / "packs").glob("*/*/*/manifest.json"))[0]
         reference = json.loads(manifest.read_text())["reference"]
-        with patch.object(validator.subprocess, "run") as run:
+        # The former identity is accepted only before its cutoff; fix the clock so
+        # this stays a test of the pinned-identity order, not of today's date.
+        before_cutoff = partial(
+            validator.accepts_former, now=datetime(2026, 11, 5, tzinfo=timezone.utc)
+        )
+        with patch.object(validator, "accepts_former", before_cutoff), \
+                patch.object(validator.subprocess, "run") as run:
             run.side_effect = [
                 subprocess.CompletedProcess([], 1),
                 subprocess.CompletedProcess([], 0),
