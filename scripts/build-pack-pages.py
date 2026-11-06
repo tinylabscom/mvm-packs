@@ -18,6 +18,7 @@ from pathlib import Path
 SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 from application_manifest import unique_object, validate_application  # noqa: E402
+import pack_details  # noqa: E402
 from publisher_identity import (  # noqa: E402
     CURRENT_IDENTITY, FORMER_IDENTITY, PUBLISHER_ISSUER, is_historical_manifest,
 )
@@ -135,6 +136,28 @@ def version_row(version, sha, manifest, revoked, has_app):
     return "| " + " | ".join(cells) + " |"
 
 
+def load_details(root, ns, name, version, manifest):
+    """Recorded archive details for a version, cross-checked against its descriptor; None if absent."""
+    path = root / "pack-details" / ns / name / f"{version}.json"
+    if not path.is_file():
+        return None
+    try:
+        if path.stat().st_size > pack_details.MAX_BYTES:
+            raise ValueError("file is too large")
+        details = pack_details.validate(json.loads(path.read_text(encoding="utf-8"),
+                                                   object_pairs_hook=unique_object))
+        bundle = manifest["application"]["bundle"]
+        if (details["reference"] != f"{ns}/{name}@{version}"
+                or details["archive"]["sha256"] != bundle["archive_sha256"]
+                or details["archive"]["size"] != bundle["archive_size"]
+                or details["archive"]["key_id"] != bundle["key_id"]
+                or details["archive"]["arch"] != manifest["application"]["guest_arch"]):
+            raise ValueError("does not match the signed descriptor")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise PageError(f"{path}: {error}") from error
+    return details
+
+
 def render_pack(entry, root, revoked_ids, revoked_shas):
     ns, name = entry["namespace"], entry["name"]
     ref = f"{ns}/{name}"
@@ -176,8 +199,12 @@ def render_pack(entry, root, revoked_ids, revoked_shas):
         out.append(version_row(version, sha, manifest, revoked, has_app) + "\n")
     out.append("\n")
     if is_app:
-        out.append(f"## Environment\n\nEntrypoint, resources, egress and secret slots: {IN_ARCHIVE}.\n\n"
-                   f"Created date: {IN_ARCHIVE}.\n\n")
+        details = load_details(root, ns, name, latest_version, latest)
+        if details is not None:
+            out.extend(pack_details.render(details))
+        else:
+            out.append(f"## Environment\n\nEntrypoint, resources, egress and secret slots: {IN_ARCHIVE}.\n\n"
+                       f"Created date: {IN_ARCHIVE}.\n\n")
     else:
         policy = read_policy(latest_dir, latest)
         out.append(f"## Policy declarations (`{latest_version}`)\n\n"

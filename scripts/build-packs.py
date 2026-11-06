@@ -39,6 +39,7 @@ import urllib.request
 from pathlib import Path
 
 import ed25519
+import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import validate_application
@@ -53,6 +54,7 @@ from publisher_identity import (
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "pack-sources"
 PACKS = ROOT / "packs"
+DETAILS = ROOT / "pack-details"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
@@ -335,8 +337,45 @@ def check_embedded_requirements(archive, member, requirements, path):
             fail(f"{path}: {error}")
 
 
+def archive_details(manifest, application, requirements):
+    """What the gate saw in the archive, for pack pages (see pack_details.py). Not signed."""
+    bundle = application["bundle"]
+    members = [m for m in manifest.get("members", []) if isinstance(m, dict)]
+    environments = [m for m in members if m.get("class") == "environment"]
+    environment = ({k: environments[0][k] for k in pack_details.ENV_KEYS if k in environments[0]}
+                   if len(environments) == 1 else None)
+    return {
+        "schema_version": 1,
+        "reference": None,
+        "archive": {"sha256": bundle["archive_sha256"], "size": bundle["archive_size"],
+                    "key_id": bundle["key_id"], "arch": application["guest_arch"]},
+        "created_at": manifest.get("created_at") if isinstance(manifest.get("created_at"), str) else None,
+        "artifacts": [{"name": str(a.get("name", a["path"])), "role": str(a["role"]),
+                       "size_bytes": a["size_bytes"], "sha256": a["sha256"]} for a in manifest["artifacts"]],
+        "runtime": [{"class": m["class"], "version": str(m["version"])} for m in members
+                    if m.get("class") == "embedded_cli_boot_assets" and "version" in m],
+        "environment": environment,
+        "binaries": list((requirements or {}).get("binaries") or []),
+    }
+
+
+def write_details(namespace, name, version, details):
+    """Record the details next to the published version. Informational: never blocks signing."""
+    try:
+        details = dict(details, reference=f"{namespace}/{name}@{version}")
+        pack_details.validate(details)
+        target = DETAILS / namespace / name / f"{version}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".tmp")
+        partial.write_text(json.dumps(details, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        partial.replace(target)
+        print(f"{namespace}/{name}@{version}: recorded archive details")
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        print(f"{namespace}/{name}@{version}: archive details not recorded: {error}")
+
+
 def inspect_bundle(path, application, public_key, requirements=None):
-    """Refuse unless the archive embeds the application: a kernel and a root
+    """Return the recorded archive details after refusing unless the archive embeds the application: a kernel and a root
     filesystem whose hashes match the bundle manifest, for the descriptor's
     key ID and architecture, with a valid Ed25519 manifest.sig by that key.
     Members are read, never extracted.
@@ -392,9 +431,11 @@ def inspect_bundle(path, application, public_key, requirements=None):
                 check_environment_policy(manifest, requirements["environment_policy"], path)
             if requirements and rootfs_requirements.needs_rootfs(requirements):
                 check_embedded_requirements(archive, members[rootfs_path], requirements, path)
+            details = archive_details(manifest, application, requirements)
     except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError,
             RecursionError, MemoryError) as error:
         fail(f"{path}: not a valid application archive: {error!r}")
+    return details
 
 
 def _measure_file(path):
@@ -456,8 +497,7 @@ def verify_archive(application, requirements=None):
     cached = _cached_archive(bundle)
     if cached is not None:
         print(f"archive cache: using {cached.name} (re-verified)")
-        inspect_bundle(str(cached), application, public_key, requirements)
-        return
+        return inspect_bundle(str(cached), application, public_key, requirements)
     digest, size = hashlib.sha256(), 0
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
@@ -475,8 +515,9 @@ def verify_archive(application, requirements=None):
         if digest.hexdigest() != bundle["archive_sha256"]:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        inspect_bundle(spool.name, application, public_key, requirements)
+        details = inspect_bundle(spool.name, application, public_key, requirements)
         _store_in_cache(bundle, spool.name)
+        return details
 
 
 def sign(manifest_path, bundle_path):
@@ -548,8 +589,7 @@ def build_one(source, check_only=False):
         print(f"{reference}: source valid")
         return
 
-    if application is not None:
-        verify_archive(application, meta["requirements"])
+    details = verify_archive(application, meta["requirements"]) if application is not None else None
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -565,6 +605,8 @@ def build_one(source, check_only=False):
     sign(tmp / "manifest.json", tmp / "manifest.sigstore.json")
     shutil.rmtree(out, ignore_errors=True)
     tmp.rename(out)
+    if details is not None:
+        write_details(namespace, name, meta["version"], details)
     print(f"{reference}: published")
 
 
