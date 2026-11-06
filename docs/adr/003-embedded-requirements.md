@@ -48,14 +48,25 @@ An application source may add a `[requirements]` table to its `pack.toml`:
 
 ```toml
 [requirements]
-packages = ["claude-code-native", "mvm-agent", "bash", "coreutils", "glibc"]
+packages = ["claude-code-native", "mvm-agent", "bash", "coreutils", "musl"]
 commands = ["bash", "sh"]
+
+[[requirements.binaries]]
+package = "claude-code-native"
+path = "bin/claude"
+sha256 = "7544d5d74f38f78b7d5457728dea4bf3f467befda7c1a892021dcfbfda1ab4e1"
+size = 221263520
 ```
 
 - `packages`: Nix store package names without hash or version. Each must appear
   as `/nix/store/<hash>-<name>-<version>` in the root filesystem.
 - `commands`: executable names that must resolve to a regular executable file or
   symlink in `/bin`, `/usr/bin`, `/usr/local/bin` or a store package's `bin/`.
+- `binaries`: pins the application's own executable. Each entry is `package`,
+  `path` (relative to the store directory, for example `bin/claude`), `sha256` and
+  `size`. The check dumps that file from every store directory of the package and
+  refuses unless the bytes match exactly. A name-only check would accept any
+  program installed under the right name; a pin does not.
 
 `[requirements]` is registry-side build input. It is not in the signed descriptor,
 whose five fields and nested application schema are shared with the client and
@@ -90,11 +101,18 @@ Safeguards on the check (from the `mvm` client team's review):
 
 ### 3. Claude's list
 
-For `agent/claude@2.0.0` as built: `claude-code-native`, `mvm-agent`, `bash`,
-`coreutils`, `glibc`; commands `bash`, `sh`. Not required, and absent: `git`,
-`ripgrep`. The pinned Claude binary is glibc-linked (interpreter
-`/lib/ld-linux-aarch64.so.1`, glibc 2.40 in the closure), so its bundled ripgrep
-applies and `rg` need not be shipped.
+For `agent/claude@2.0.0` as built: packages `claude-code-native`, `mvm-agent`,
+`bash`, `coreutils`; commands `bash`, `sh`; and one binary pin for
+`claude-code-native` `bin/claude` (SHA-256 and size below).
+
+Correction: an earlier draft of this ADR said the embedded Claude binary is
+glibc-linked, so its bundled ripgrep applies. That was taken from the 2.1.312
+pin file, not from the archive, and it is wrong. The embedded binary uses the
+**musl** loader (see Evidence). The vendor's setup page says musl builds need a
+system `ripgrep` with `USE_BUILTIN_RIPGREP=0`, and `libgcc`, `libstdc++` and
+`bash`. The closure has the gcc libraries and bash and has no `ripgrep`, so
+search tools are probably unavailable in this archive; the web-fetch-only demo
+does not use them. This is unconfirmed until the boot test runs.
 
 Keep this pack minimal: the demo contract (`tinylabscom/mvm#4839`, one WebFetch
 over 3 turns) needs no `git` or `rg`. A coding-agent use needs more (at least
@@ -116,6 +134,28 @@ packs unchecked for contents (the intake already checks signature, kernel,
 rootfs and hashes), or add an optional `requirements` list to the community
 reference file, checked by intake the same way. The second is more consistent;
 it is not decided here.
+
+## Evidence: what is embedded (read from the draft archive, 2026-11-06)
+
+The embedded `claude` (`/nix/store/…-claude-code-native-2.1.273/bin/claude`) is
+the official **musl** build of Claude Code 2.1.273 with its ELF headers rewritten
+by a patcher:
+
+- Embedded file: 221263520 bytes, SHA-256
+  `7544d5d74f38f78b7d5457728dea4bf3f467befda7c1a892021dcfbfda1ab4e1`; loader
+  `/nix/store/…-musl-1.2.5/lib/ld-musl-aarch64.so.1`.
+- Upstream `claude-linux-arm64-musl.tar.gz` (v2.1.273): SHA-256
+  `ebf9f42fe97219969f7bcbd89460b57a177dd1bd26b4b25e9458cfbc9ecb4528`; its binary
+  is 221197984 bytes, SHA-256
+  `0ea64e932c6fac35ce4e992140612157fe1cecab052d59539873b350a594d3c6`, loader
+  `/lib/ld-musl-aarch64.so.1`.
+- The embedded file is 65536 bytes larger. All 375 sampled 64-byte slices of the
+  upstream code appear in the embedded file at a fixed offset of +65536, and the
+  program headers differ, as expected from a loader-path patch. That is
+  consistent with "official bytes, new loader path"; it is a sampled comparison,
+  not a full proof, and it is not the glibc `claude-linux-arm64` build.
+- `environment-inputs.json` records a different build (2.1.312, glibc). It does
+  not describe this archive.
 
 ## Consequences
 
