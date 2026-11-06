@@ -114,9 +114,19 @@ jobs:
         with:
           python-version: "3.12"
 
+      # An optimisation only: the gate re-hashes a cached archive against the pinned digest
+      # every time, so a stale or tampered cache entry is deleted and downloaded again.
+      - name: Restore the archive cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/mvm-archives
+          key: mvm-archives-${{ hashFiles('pack-sources/**/pack.toml') }}
+          restore-keys: mvm-archives-
+
       - name: Build, sign and verify packs
         env:
           COSIGN_YES: "true"
+          MVM_ARCHIVE_CACHE: ${{ runner.temp }}/mvm-archives
         run: |
           python3 -m unittest discover -s tests
           python3 scripts/build-packs.py
