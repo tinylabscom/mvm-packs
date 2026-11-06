@@ -106,13 +106,19 @@ For `agent/claude@2.0.0` as built: packages `claude-code-native`, `mvm-agent`,
 `claude-code-native` `bin/claude` (SHA-256 and size below).
 
 Correction: an earlier draft of this ADR said the embedded Claude binary is
-glibc-linked, so its bundled ripgrep applies. That was taken from the 2.1.312
-pin file, not from the archive, and it is wrong. The embedded binary uses the
-**musl** loader (see Evidence). The vendor's setup page says musl builds need a
-system `ripgrep` with `USE_BUILTIN_RIPGREP=0`, and `libgcc`, `libstdc++` and
-`bash`. The closure has the gcc libraries and bash and has no `ripgrep`, so
-search tools are probably unavailable in this archive; the web-fetch-only demo
-does not use them. This is unconfirmed until the boot test runs.
+glibc-linked (taken from the 2.1.312 pin file, wrong: it uses the **musl** loader,
+see Evidence), and a later draft said search is probably unavailable because the
+vendor's setup page says musl builds need a system `ripgrep` with
+`USE_BUILTIN_RIPGREP=0`. That second claim was also wrong. Reading the binary
+itself (a Bun standalone executable): its ripgrep selector uses the **embedded**
+ripgrep, re-running the binary with `argv0` `rg`, unless `USE_BUILTIN_RIPGREP` is
+explicitly `0`/`false`/`no`/`off`, and the binary contains ripgrep's usage text,
+flags and man page. So the closure needs no `ripgrep`, and `USE_BUILTIN_RIPGREP=0`
+must not be set (it would force the missing system `rg`). The vendor's musl note
+appears to concern non-standalone installs. This is static analysis only; the boot
+test should run one search to confirm the embedded mode works in the guest. The
+closure does carry the other musl runtime items the page lists (`bash`, the gcc
+library tree with libgcc/libstdc++).
 
 Keep this pack minimal: the demo contract (`tinylabscom/mvm#4839`, one WebFetch
 over 3 turns) needs no `git` or `rg`. A coding-agent use needs more (at least
