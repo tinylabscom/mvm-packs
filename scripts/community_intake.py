@@ -119,13 +119,13 @@ def resolve(root, list_releases, fetch, verify, read_back):
                         (staged / BUNDLE).write_bytes(bundle_raw)
                         if not verify(staged / MANIFEST, staged / BUNDLE, identity(publisher)):
                             raise ValueError("signature does not match the reference identity")
-                    read_back(manifest["application"]["bundle"])
+                    read_back(manifest["application"])
                     target = mirror / version
                     target.mkdir(parents=True, exist_ok=True)
                     (target / MANIFEST).write_bytes(raw)
                     (target / BUNDLE).write_bytes(bundle_raw)
-                except (ValueError, OSError) as error:
-                    report.append(f"{owner}/{name}: {release.get('tag_name')}: skipped: {error}")
+                except Exception as error:  # isolate one author's release from every other pack
+                    report.append(f"{owner}/{name}: {release.get('tag_name')}: skipped: {error!r}")
                     continue
                 versions[version] = (digest, manifest)
                 report.append(f"{owner}/{name}@{version}: listed")
@@ -178,10 +178,10 @@ def cosign_verify(manifest, bundle, expected_identity):
         capture_output=True, check=False).returncode == 0
 
 
-def archive_read_back(bundle):
+def archive_read_back(application):
     builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
     try:
-        builder["verify_archive"](bundle)
+        builder["verify_archive"](application)
     except SystemExit as error:
         raise ValueError(str(error)) from error
 

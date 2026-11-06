@@ -253,32 +253,77 @@ class ApplicationManifestTests(unittest.TestCase):
                 self.assertEqual(raw, path.read_bytes())
 
 
+def make_mvmpkg(roles=("kernel", "rootfs"), key_id="b" * 32, arch="aarch64", corrupt=None,
+                extra_members=(), repeat_artifact=0, raw_manifest=None):
+    """Build a tiny synthetic .mvmpkg tar (manifest.json, manifest.sig, artifacts/)."""
+    import io
+    import tarfile
+    files, artifacts = {}, []
+    for role in roles:
+        data = f"{role}-bytes".encode()
+        files[f"artifacts/{role}"] = data
+        artifacts.append({"name": role, "role": role, "path": f"artifacts/{role}",
+                          "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)})
+    if corrupt:
+        files[f"artifacts/{corrupt}"] = b"tampered"
+    artifacts += [artifacts[0]] * repeat_artifact
+    manifest = raw_manifest or json.dumps({"key_id": key_id, "arch": arch, "artifacts": artifacts}).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for name, data in {"manifest.json": manifest, "manifest.sig": b"s" * 64, **files}.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        for info in extra_members:
+            archive.addfile(info)
+    return buffer.getvalue()
+
+
 class ArchiveReadBackTests(unittest.TestCase):
-    DATA = b"x" * 100
+    def descriptor(self, data, **bundle_changes):
+        value = application()
+        value["bundle"] |= {"archive_size": len(data),
+                            "archive_sha256": hashlib.sha256(data).hexdigest()} | bundle_changes
+        return value
 
-    def bundle(self, **changes):
-        bundle = dict(application()["bundle"], archive_size=len(self.DATA),
-                      archive_sha256=hashlib.sha256(self.DATA).hexdigest())
-        return bundle | changes
-
-    def check(self, bundle, data=None):
+    def check(self, descriptor, data):
         import io
-        response = io.BytesIO(self.DATA if data is None else data)
-        with patch.object(builder.urllib.request, "urlopen", return_value=response):
-            builder.verify_archive(bundle)
+        with patch.object(builder.urllib.request, "urlopen", return_value=io.BytesIO(data)):
+            builder.verify_archive(descriptor)
 
-    def test_matching_archive_passes(self):
-        self.check(self.bundle())
+    def test_archive_embedding_a_kernel_and_rootfs_passes(self):
+        data = make_mvmpkg()
+        self.check(self.descriptor(data), data)
 
     def test_wrong_digest_size_or_scheme_is_refused(self):
-        for bundle, data in (
-            (self.bundle(archive_sha256="0" * 64), None),
-            (self.bundle(archive_size=len(self.DATA) - 1), None),
-            (self.bundle(archive_size=len(self.DATA) + 1), None),
-            (self.bundle(source="oci://registry.example/x@sha256:" + "a" * 64), None),
+        data = make_mvmpkg()
+        for descriptor in (
+            self.descriptor(data, archive_sha256="0" * 64),
+            self.descriptor(data, archive_size=len(data) - 1),
+            self.descriptor(data, archive_size=len(data) + 1),
+            self.descriptor(data, source="oci://registry.example/x@sha256:" + "a" * 64),
         ):
-            with self.subTest(bundle=bundle), self.assertRaises(SystemExit):
-                self.check(bundle, data)
+            with self.subTest(descriptor=descriptor["bundle"]), self.assertRaises(SystemExit):
+                self.check(descriptor, data)
+
+    def test_archive_without_the_application_is_refused(self):
+        import tarfile
+        symlink = tarfile.TarInfo("artifacts/link")
+        symlink.type = tarfile.SYMTYPE
+        symlink.linkname = "/etc/passwd"
+        for label, data in {
+            "no rootfs": make_mvmpkg(roles=("kernel",)),
+            "no kernel": make_mvmpkg(roles=("rootfs",)),
+            "wrong key": make_mvmpkg(key_id="c" * 32),
+            "wrong arch": make_mvmpkg(arch="x86_64"),
+            "tampered artifact": make_mvmpkg(corrupt="rootfs"),
+            "symlink member": make_mvmpkg(extra_members=(symlink,)),
+            "artifact listed twice": make_mvmpkg(repeat_artifact=1),
+            "deeply nested manifest": make_mvmpkg(raw_manifest=b"[" * 100000 + b"]" * 100000),
+            "not a tar": b"x" * 100,
+        }.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check(self.descriptor(data), data)
 
     def test_unreadable_archive_is_refused_before_signing(self):
         with tempfile.TemporaryDirectory() as tmp, \

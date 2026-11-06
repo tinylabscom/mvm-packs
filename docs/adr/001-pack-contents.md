@@ -65,9 +65,12 @@ entrypoint. A safe application release requires the completed archive and all
 its boot assets, read back and verified against the descriptor's digest and
 size. Before signing a new application version, `build-packs.py` reads the
 archive back over HTTPS and refuses on any size or SHA-256 mismatch, an
-unreadable source or a non-HTTPS source. That is an integrity check only: it
-does not verify the bundle signature or its contents, which still need the
-separate artifact verification.
+unreadable source or a non-HTTPS source. It then opens the tar without
+extracting it and refuses unless the bundle manifest's key ID and architecture
+match the descriptor, every listed artifact is present with the recorded size
+and SHA-256, and a kernel and a root filesystem are among them. It does not
+verify `manifest.sig`, because that needs a bundle key the consumer trusts, and
+it does not inspect the root filesystem.
 
 ### 2. How index, manifest, descriptor and archive relate
 

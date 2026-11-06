@@ -134,3 +134,15 @@ class IntakeTests(unittest.TestCase):
         report = self.run_intake()
         self.assertTrue(report and report[0].startswith("reference error"))
         self.assertFalse((self.root / "community/index.json").exists())
+
+    def test_an_unexpected_error_in_one_release_does_not_stop_the_others(self):
+        self.add("v1.0.0", "1.0.0")
+        self.add("v1.1.0", "1.1.0")
+        def explode(application):
+            if application["bundle"]["archive_size"] and self.read_back_calls:
+                raise RecursionError("deep")
+            self.read_back_calls.append(application)
+        report = resolve(self.root, lambda repo: self.releases, lambda url: self.files[url],
+                         lambda m, b, i: True, explode)
+        self.assertEqual(len(self.index()["packs"][0]["versions"]), 1)
+        self.assertTrue(any("RecursionError" in line for line in report))
