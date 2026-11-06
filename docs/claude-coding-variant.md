@@ -23,7 +23,7 @@ coreutils, busybox, glibc, musl, gcc runtime libraries, and
 | Need | Why | Status |
 | --- | --- | --- |
 | `git` | clone, diff, commit; a coding agent without it is crippled for repo work | add |
-| ripgrep | Claude's search; bundled in the glibc build, so not shipped | do not add |
+| ripgrep | Claude's search. The embedded binary is the **musl** build, and the vendor's setup page says musl builds need a system `ripgrep` with `USE_BUILTIN_RIPGREP=0` | add, and set the variable |
 | `curl`, `node`, `python3`, `jq` | only if an agent tool or bundled helper shells out to them | do not add speculatively |
 
 Anything beyond `git` is found empirically (below), not guessed: every added tool

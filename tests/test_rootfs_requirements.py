@@ -1,3 +1,4 @@
+import hashlib
 import os
 import shutil
 import subprocess
@@ -18,10 +19,16 @@ HASH = "a" * 32
 class ValidateTests(unittest.TestCase):
     def test_valid_and_invalid_requirement_tables(self):
         self.assertEqual(rr.validate_requirements({"packages": ["bash"]}),
-                         {"packages": ["bash"], "commands": []})
+                         {"packages": ["bash"], "commands": [], "binaries": []})
         for bad in ({}, {"packages": []}, {"extra": ["x"]}, {"packages": ["a", "a"]},
                     {"packages": ["../x"]}, {"commands": ["a b"]}, {"packages": "bash"},
-                    {"packages": [f"p{i}" for i in range(65)]}, [], None):
+                    {"packages": [f"p{i}" for i in range(65)]}, [], None,
+                    {"binaries": [{"package": "a", "path": "../x", "sha256": "a" * 64, "size": 1}]},
+                    {"binaries": [{"package": "a", "path": "/x", "sha256": "a" * 64, "size": 1}]},
+                    {"binaries": [{"package": "a", "path": "bin/x", "sha256": "A" * 64, "size": 1}]},
+                    {"binaries": [{"package": "a", "path": "bin/x", "sha256": "a" * 64, "size": 0}]},
+                    {"binaries": [{"package": "a", "path": "bin/x", "sha256": "a" * 64}]},
+                    {"binaries": [{"package": "a", "path": "bin/x", "sha256": "a" * 64, "size": 1}] * 2}):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 rr.validate_requirements(bad)
 
@@ -57,6 +64,35 @@ class RootfsTests(unittest.TestCase):
                     {"commands": ["git"]}, {"commands": ["readme"]}):   # readme exists but is not executable
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 rr.check_rootfs(self.image, rr.validate_requirements(bad))
+
+    def pin(self, **changes):
+        entry = {"package": "bash", "path": "bin/bash", "sha256": hashlib.sha256(b"x").hexdigest(), "size": 1}
+        return rr.validate_requirements({"binaries": [entry | changes]})
+
+    def test_a_pinned_binary_must_match_exactly(self):
+        rr.check_rootfs(self.image, self.pin())
+        for label, changes in {
+            "other bytes": {"sha256": hashlib.sha256(b"y").hexdigest()},
+            "other size": {"size": 2},
+            "missing file": {"path": "bin/nope"},
+            "missing package": {"package": "git"},
+        }.items():
+            with self.subTest(label), self.assertRaises(ValueError):
+                rr.check_rootfs(self.image, self.pin(**changes))
+
+    def test_a_swapped_binary_is_refused(self):
+        """Same package name and path, different bytes: the case a name-only check would pass."""
+        swapped = Path(self.tmp.name) / "swapped.ext4"
+        tree = Path(self.tmp.name) / "tree2"
+        binary = tree / "nix/store" / f"{HASH}-bash-5.3p3" / "bin" / "bash"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("not the pinned binary")
+        binary.chmod(0o755)
+        subprocess.run([MKE2FS, "-q", "-t", "ext4", "-d", str(tree), str(swapped), "8M"], check=True,
+                       capture_output=True)
+        rr.check_rootfs(swapped, rr.validate_requirements({"packages": ["bash"], "commands": ["bash"]}))
+        with self.assertRaises(ValueError):
+            rr.check_rootfs(swapped, self.pin())
 
     def test_a_root_without_a_nix_store_fails_closed(self):
         empty = Path(self.tmp.name) / "empty.ext4"
