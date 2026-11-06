@@ -34,6 +34,47 @@ kernel, a rootfs, an entrypoint), so they cannot double as a layer.
   entrypoint, an overlapping path without a reviewed ownership rule, or a changed
   digest.
 
+## Signature and trust
+
+Every pack needs a verified signature to run. A composed pack is new bytes, so the
+layers' signatures do not stand in for it.
+
+1. Each layer is signed on its own: a keyless-signed descriptor, and an Ed25519
+   bundle signature on the layer archive pinned by `key_id`. Each can be revoked
+   individually.
+2. The assembled `.mvmpkg` carries its own in-file signature over its final bytes
+   (ADR 004).
+3. That signature covers a provenance member: the ordered layers (reference,
+   manifest digest, signer), the composed-policy digest, the entrypoint owner and
+   the trust class.
+4. The registry descriptor pins the final archive; the publisher gate checks the
+   signature and that the provenance layer digests equal the descriptor pins.
+5. Admission re-checks at run time: it verifies the final signature against a
+   trusted key and every provenance layer digest against the revocation feed (a
+   layer revoked after assembly stops the pack), then intersects the composed
+   policy with host grants.
+
+Two trust classes live inside the signed provenance:
+
+- **dev** (default): signed with a local key generated on first use. The host
+  trusts that key for the dev class only, on that machine. A dev pack shows a dev
+  marker and cannot be published, used as a layer in a production build, or
+  indexed.
+- **production** (explicit, for example `pack build --production`): refuses to
+  start unless every input is pinned to an exact digest, registry-signed and
+  unrevoked, and it builds from the lock. It is signed with a publisher key the
+  host has explicitly trusted; the auto-generated dev key never qualifies.
+- Promotion is a rebuild. The class is inside the signature, so a dev archive cannot
+  be relabelled production.
+- Official remains a separate tier: only our keyless publish workflow.
+
+## Entrypoint
+
+Only an application owns the entrypoint; layers cannot set one. When several
+applications are stacked, the last in the locked order owns the entrypoint, earlier
+applications keep theirs as named non-default commands, and provenance records the
+owner and the shadowed entrypoints. Policy still composes across all of them.
+
 ## Status of the code
 
 `scripts/application_manifest.py` validates the layer descriptor and the pins,
