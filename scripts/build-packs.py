@@ -311,6 +311,17 @@ def fetch_bundle_key(bundle):
     return key
 
 
+def check_environment_policy(manifest, expected, path):
+    """The signed environment's policy must equal the declared one exactly: no missing request
+    budget, no extra host, no other difference. A missing budget would leave the spend ceiling
+    unenforced by admission."""
+    environments = [m for m in manifest.get("members", []) if isinstance(m, dict) and m.get("class") == "environment"]
+    if len(environments) != 1:
+        fail(f"{path}: the bundle manifest must carry exactly one environment member")
+    if environments[0].get("policy") != expected:
+        fail(f"{path}: the signed environment policy does not equal the declared environment_policy")
+
+
 def check_embedded_requirements(archive, member, requirements, path):
     """Copy the (already hash-checked) rootfs out of the tar and list it read-only."""
     with tempfile.NamedTemporaryFile(prefix="rootfs-") as image:
@@ -377,7 +388,9 @@ def inspect_bundle(path, application, public_key, requirements=None):
                 fail(f"{path}: artifacts are larger than the archive")
             if not {"kernel", "rootfs"} <= roles:
                 fail(f"{path}: archive does not embed a kernel and a root filesystem")
-            if requirements:
+            if requirements and requirements.get("environment_policy") is not None:
+                check_environment_policy(manifest, requirements["environment_policy"], path)
+            if requirements and rootfs_requirements.needs_rootfs(requirements):
                 check_embedded_requirements(archive, members[rootfs_path], requirements, path)
     except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError,
             RecursionError, MemoryError) as error:

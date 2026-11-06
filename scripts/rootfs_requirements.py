@@ -30,8 +30,8 @@ RELATIVE = re.compile(r"[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*\Z")
 
 def validate_requirements(data):
     """Return {'packages': [...], 'commands': [...], 'binaries': [...]} or raise ValueError."""
-    if not isinstance(data, dict) or not data or set(data) - {"packages", "commands", "binaries"}:
-        raise ValueError("requirements must be a table with packages, commands and/or binaries")
+    if not isinstance(data, dict) or not data or set(data) - {"packages", "commands", "binaries", "environment_policy"}:
+        raise ValueError("requirements must be a table with packages, commands, binaries and/or environment_policy")
     result = {}
     for key in ("packages", "commands"):
         values = data.get(key, [])
@@ -56,9 +56,32 @@ def validate_requirements(data):
             raise ValueError("duplicate binary pin")
         seen.add((entry["package"], entry["path"]))
     result["binaries"] = binaries
-    if not (result["packages"] or result["commands"] or result["binaries"]):
-        raise ValueError("requirements must name at least one package, command or binary")
+    policy = data.get("environment_policy")
+    if policy is not None and (not isinstance(policy, dict) or not _plain_json(policy, depth=4)):
+        raise ValueError("environment_policy must be a small table of strings, integers, booleans, lists and tables")
+    result["environment_policy"] = policy
+    if not (result["packages"] or result["commands"] or result["binaries"] or policy is not None):
+        raise ValueError("requirements must name at least one package, command, binary or environment_policy")
     return result
+
+
+def _plain_json(value, depth):
+    """True for a small tree of dicts (string keys), lists, strings, ints and bools only."""
+    import json
+    if depth < 0:
+        return False
+    if isinstance(value, dict):
+        ok = all(isinstance(k, str) and _plain_json(v, depth - 1) for k, v in value.items())
+    elif isinstance(value, list):
+        ok = all(_plain_json(v, depth - 1) for v in value)
+    else:
+        ok = isinstance(value, (str, bool)) or type(value) is int
+    return ok and (depth < 4 or len(json.dumps(value)) <= 4096)
+
+
+def needs_rootfs(requirements):
+    """Whether any requirement must be checked against the root filesystem."""
+    return bool(requirements["packages"] or requirements["commands"] or requirements["binaries"])
 
 
 def _debugfs_path():
@@ -165,6 +188,34 @@ def check_rootfs(image, requirements):
             raise ValueError(f"required command {command!r} is not in the root filesystem")
 
 
+def _file_in(image, start, package, path):
+    """Inode of the regular file `path` under the store directory `start`, walked by inode."""
+    entry = (start, 0o040000)
+    for component in path.split("/"):
+        entry = _entries(image, entry[0]).get(component) if entry[1] & 0o170000 == 0o040000 else None
+        if entry is None:
+            raise ValueError(f"{package!r} {path!r} is missing")
+    if entry[1] & 0o170000 != 0o100000:
+        raise ValueError(f"{package!r} {path!r} is not a regular file")
+    return entry[0]
+
+
+def _measure(image, inode):
+    """(sha256, size) of a file dumped by inode from the image."""
+    with tempfile.TemporaryDirectory(prefix="rootfs-binary-") as scratch:
+        target = os.path.join(scratch, "file")
+        if not SAFE_PATH.fullmatch(target):
+            raise ValueError("temporary path contains characters debugfs could misread")
+        _run(image, f"dump <{inode}> {target}")
+        if not os.path.isfile(target):
+            raise ValueError("debugfs did not produce the file")
+        digest = hashlib.sha256()
+        with open(target, "rb") as handle:
+            while chunk := handle.read(1 << 20):
+                digest.update(chunk)
+        return digest.hexdigest(), os.path.getsize(target)
+
+
 def _check_binary(image, store, pin):
     """The file must exist in every store directory of that package with exactly the pinned bytes."""
     package = pin["package"]
@@ -172,23 +223,22 @@ def _check_binary(image, store, pin):
     if not matches:
         raise ValueError(f"binary package {package!r} is not in the root filesystem")
     for start in matches:
-        entry = (start, 0o040000)
-        for component in pin["path"].split("/"):
-            entry = _entries(image, entry[0]).get(component) if entry[1] & 0o170000 == 0o040000 else None
-            if entry is None:
-                raise ValueError(f"{package!r} {pin['path']!r} is missing")
-        if entry[1] & 0o170000 != 0o100000:
-            raise ValueError(f"{package!r} {pin['path']!r} is not a regular file")
-        with tempfile.TemporaryDirectory(prefix="rootfs-binary-") as scratch:
-            target = os.path.join(scratch, "file")
-            if not SAFE_PATH.fullmatch(target):
-                raise ValueError("temporary path contains characters debugfs could misread")
-            _run(image, f"dump <{entry[0]}> {target}")
-            if not os.path.isfile(target) or os.path.getsize(target) != pin["size"]:
-                raise ValueError(f"{package!r} {pin['path']!r} has an unpinned size")
-            digest = hashlib.sha256()
-            with open(target, "rb") as handle:
-                while chunk := handle.read(1 << 20):
-                    digest.update(chunk)
-        if digest.hexdigest() != pin["sha256"]:
+        sha256, size = _measure(image, _file_in(image, start, package, pin["path"]))
+        if size != pin["size"]:
+            raise ValueError(f"{package!r} {pin['path']!r} has an unpinned size")
+        if sha256 != pin["sha256"]:
             raise ValueError(f"{package!r} {pin['path']!r} does not match its pinned SHA-256")
+
+
+def store_packages(image):
+    """Sorted plain package names (without hash) in /nix/store, for drafting a requirements list."""
+    return sorted({re.split(r"-(?=\d)", name, maxsplit=1)[0] for _, name in _store(image).values()})
+
+
+def derive_binary_pin(image, package, path):
+    """Measure the one binary a pin should name. Refuses if the package is absent or ambiguous."""
+    matches = [inode for inode, name in _store(image).values() if _matches(package, name)]
+    if len(matches) != 1:
+        raise ValueError(f"expected exactly one store directory for {package!r}, found {len(matches)}")
+    sha256, size = _measure(image, _file_in(image, matches[0], package, path))
+    return {"package": package, "path": path, "sha256": sha256, "size": size}
