@@ -1,0 +1,71 @@
+name: Update community index
+
+# Resolves community/publishers/*.toml references into community/index.json.
+# It verifies and copies authors' signed metadata; it never signs anything and
+# never runs code from an author's repository (ADR 002, docs/community-index.md).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "community/publishers/**"
+      - "scripts/community_intake.py"
+      - "scripts/community_index.py"
+      - "scripts/community_publishers.py"
+      - ".github/workflows/community-intake.yml"
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: community-intake
+  cancel-in-progress: false
+
+jobs:
+  intake:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install cosign v3
+        env:
+          COSIGN_V3_VERSION: "v3.1.1"
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfLO "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Resolve references
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/community_intake.py
+      - name: Validate the result
+        run: python3 scripts/validate-packs.py
+      - name: Commit the community index
+        run: |
+          set -euo pipefail
+          git add -A community/
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git -c user.name='MVM Pack Publisher' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'chore(community): update community index [skip ci]'
+          for attempt in 1 2 3; do
+            git pull --rebase origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
