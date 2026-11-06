@@ -44,7 +44,7 @@ def read_member(archive, name, limit):
     return archive.extractfile(info).read()
 
 
-def derive(archive_path, key_path, source, binaries, packages, commands, environment_policy=None):
+def derive(archive_path, key_path, source, binaries, packages, commands, environment_policy=None, show_files=()):
     """Return the text of the draft pack.toml blocks; raise ValueError on any failed check."""
     sha256, size = measure(archive_path)
     key = Path(key_path).read_bytes()
@@ -83,6 +83,7 @@ def derive(archive_path, key_path, source, binaries, packages, commands, environ
                 if rootfs_requirements.needs_rootfs(requirements):
                     rootfs_requirements.check_rootfs(image.name, requirements)
             present = rootfs_requirements.store_packages(image.name)
+            shown = [(spec, *rootfs_requirements.read_text(image.name, spec)) for spec in show_files]
     lines = ["[application]", "schema_version = 1", f'guest_arch = "{arch}"', "",
              "[application.bundle]", f'source = "{source}"', f'archive_sha256 = "{sha256}"',
              f"archive_size = {size}", f'key_id = "{key_id}"']
@@ -102,6 +103,10 @@ def derive(archive_path, key_path, source, binaries, packages, commands, environ
                       f'path = "{pin["path"]}"', f'sha256 = "{pin["sha256"]}"', f'size = {pin["size"]}']
     lines += ["", "# Packages present in the root filesystem (for choosing requirements; not a recommendation):",
               "#   " + ", ".join(present)]
+    for spec, digest, length, text in shown:
+        lines += ["", f"# ===== {spec}  ({length} bytes, sha256 {digest}); text below is verbatim except that",
+                  "# control characters other than newline and tab are shown as U+FFFD =====",
+                  text.rstrip("\n"), "# ===== end of file ====="]
     return "\n".join(lines) + "\n"
 
 
@@ -113,13 +118,15 @@ def main(argv=None):
     parser.add_argument("--binary", action="append", default=[], metavar="PACKAGE:PATH")
     parser.add_argument("--require-package", action="append", default=[])
     parser.add_argument("--require-command", action="append", default=[])
+    parser.add_argument("--show-file", action="append", default=[], metavar="PACKAGE:PATH|/ABS/PATH",
+                        help="print a small regular file from the root filesystem (<= 64 KiB) with its sha256")
     parser.add_argument("--environment-policy", metavar="FILE.json",
                         help="the policy the signed environment MUST equal exactly (a JSON file); verified, then printed")
     args = parser.parse_args(argv)
     try:
         sys.stdout.write(derive(args.archive, args.key, args.source, args.binary,
                                 args.require_package, args.require_command,
-                                json.loads(Path(args.environment_policy).read_text()) if args.environment_policy else None))
+                                json.loads(Path(args.environment_policy).read_text()) if args.environment_policy else None, args.show_file))
     except (ValueError, KeyError, OSError, tarfile.TarError) as error:
         sys.exit(f"derive-pack-pins: {error}")
 

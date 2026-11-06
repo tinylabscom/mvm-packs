@@ -77,6 +77,14 @@ class DerivePinsTests(unittest.TestCase):
         self.assertIn("size = 15", text)
         self.assertIn("#   helper, tool", text)
 
+    def test_shows_a_small_file_verbatim_with_its_hash_and_refuses_bad_specs(self):
+        text = derive(self.archive, self.key, SOURCE, [], [], [], None, ["tool:bin/tool"])
+        self.assertIn("# ===== tool:bin/tool  (15 bytes, sha256 " + self.rootfs_sha, text)
+        self.assertIn("the application", text)
+        for bad in ("tool:../x", "tool:bin/nope", "git:bin/git", "relative/path", "/nix/store", "/etc/../x"):
+            with self.subTest(bad), self.assertRaises(ValueError):
+                derive(self.archive, self.key, SOURCE, [], [], [], None, [bad])
+
     def test_refuses_a_wrong_key_a_missing_requirement_and_an_ambiguous_or_absent_binary(self):
         other = Path(self.tmp.name) / "other.pub"
         other.write_bytes(bytes(range(1, 33)))
