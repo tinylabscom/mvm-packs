@@ -242,3 +242,46 @@ def derive_binary_pin(image, package, path):
         raise ValueError(f"expected exactly one store directory for {package!r}, found {len(matches)}")
     sha256, size = _measure(image, _file_in(image, matches[0], package, path))
     return {"package": package, "path": path, "sha256": sha256, "size": size}
+
+
+MAX_TEXT = 64 << 10
+
+
+def read_text(image, spec):
+    """Return (sha256, size, text) of one small regular file, for a person to read or diff.
+
+    `spec` is PACKAGE:RELATIVE/PATH inside that package's single store directory, or an
+    absolute /path from the root. The file is located by inode and dumped, never executed.
+    Control characters other than newline and tab are replaced, so untrusted bytes cannot
+    drive a terminal; the hash is of the real bytes.
+    """
+    package, colon, path = spec.partition(":")
+    if colon:
+        if not NAME.fullmatch(package) or not RELATIVE.fullmatch(path) or ".." in path.split("/"):
+            raise ValueError(f"bad file spec {spec!r}")
+        matches = [inode for inode, name in _store(image).values() if _matches(package, name)]
+        if len(matches) != 1:
+            raise ValueError(f"expected exactly one store directory for {package!r}, found {len(matches)}")
+        inode = _file_in(image, matches[0], package, path)
+    else:
+        parts = spec.strip("/").split("/")
+        if not spec.startswith("/") or not all(RELATIVE.fullmatch(part) and part not in ("", "..") for part in parts):
+            raise ValueError(f"bad file spec {spec!r}")
+        found = _walk(image, parts)
+        if found is None or found[1] & 0o170000 != 0o100000:
+            raise ValueError(f"{spec!r} is not a regular file")
+        inode = found[0]
+    with tempfile.TemporaryDirectory(prefix="rootfs-text-") as scratch:
+        target = os.path.join(scratch, "file")
+        if not SAFE_PATH.fullmatch(target):
+            raise ValueError("temporary path contains characters debugfs could misread")
+        _run(image, f"dump <{inode}> {target}")
+        if not os.path.isfile(target):
+            raise ValueError("debugfs did not produce the file")
+        size = os.path.getsize(target)
+        if size > MAX_TEXT:
+            raise ValueError(f"{spec!r} is {size} bytes; only files up to {MAX_TEXT} bytes are shown")
+        raw = open(target, "rb").read()
+    text = raw.decode("utf-8", "replace")
+    text = "".join(c if c in "\n\t" or c >= " " and c != "\x7f" else "\ufffd" for c in text)
+    return hashlib.sha256(raw).hexdigest(), size, text
