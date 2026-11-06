@@ -21,7 +21,7 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 
 | Version | Manifest SHA-256 | Revoked |
 |---|---|---|
-| `1.0.0` | `63f7c363966fe3bacb894e50be1e04e720ea6ac4e9a2d878fb2c811dc21bea7c` | no |
+| `1.0.0` | `63f7c363966fe3bacb894e50be1e04e720ea6ac4e9a2d878fb2c811dc21bea7c` | yes |
 
 ## Policy declarations (`1.0.0`)
 
