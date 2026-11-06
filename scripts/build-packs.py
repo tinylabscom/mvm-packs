@@ -388,6 +388,33 @@ def build_one(source, check_only=False):
     print(f"{reference}: published")
 
 
+def resign_unsourced_historical(sourced):
+    """Re-sign pinned historical manifests that no longer have a source.
+
+    A version stays immutable after its source moves on (runtime/python is now
+    1.1.0), but the former signing identity is no longer trusted. Only an exact
+    pinned historical manifest whose old signature still verifies is re-signed,
+    over the same bytes; payload files and the manifest are not touched.
+    """
+    for manifest in sorted(PACKS.glob("*/*/*/manifest.json")):
+        version_dir = manifest.parent
+        namespace, name, version = version_dir.parent.parent.name, version_dir.parent.name, version_dir.name
+        if (namespace, name, version) in sourced:
+            continue
+        reference = f"{namespace}/{name}@{version}"
+        raw = manifest.read_bytes()
+        bundle = version_dir / "manifest.sigstore.json"
+        if not is_historical_manifest(reference, raw) or verify_bundle(manifest, bundle, CURRENT_IDENTITY):
+            continue
+        if not verify_bundle(manifest, bundle, FORMER_IDENTITY):
+            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
+        tmp = bundle.with_name(bundle.name + ".tmp")
+        tmp.unlink(missing_ok=True)
+        sign(manifest, tmp)
+        tmp.replace(bundle)
+        print(f"{reference}: re-signed existing manifest bytes under the current identity")
+
+
 def version_key(value):
     match = re.match(r"(\d+)\.(\d+)\.(\d+)", value)
     return [int(part) for part in match.groups()] if match else [0, 0, 0]
@@ -454,6 +481,10 @@ def main():
     for source in sources:
         build_one(source, check_only=args.check_sources)
     if not args.check_sources:
+        resign_unsourced_historical({
+            (source.parent.name, source.name, parse_pack_toml(source / "pack.toml")["version"])
+            for source in sources
+        })
         rebuild_index()
 
 

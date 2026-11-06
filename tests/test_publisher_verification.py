@@ -331,3 +331,43 @@ class PublisherVerificationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResignUnsourcedHistoricalTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.packs = Path(temporary.name) / "packs"
+        self.dir = self.packs / "runtime" / "python" / "1.0.0"
+        self.dir.mkdir(parents=True)
+        (self.dir / "manifest.json").write_bytes(b'{"x": 1}')
+        (self.dir / "manifest.sigstore.json").write_text("old")
+        digest = hashlib.sha256(b'{"x": 1}').hexdigest()
+        patcher = patch.object(builder, "is_historical_manifest", lambda ref, raw: hashlib.sha256(raw).hexdigest() == digest)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def run_step(self, verify, sourced=frozenset()):
+        def fake_sign(_, bundle):
+            bundle.write_text("new")
+        with patch.object(builder, "PACKS", self.packs), \
+                patch.object(builder, "verify_bundle", side_effect=verify), \
+                patch.object(builder, "sign", side_effect=fake_sign) as sign:
+            builder.resign_unsourced_historical(sourced)
+            return sign.call_count
+
+    def test_resigns_when_only_the_former_signature_verifies(self):
+        calls = self.run_step(lambda m, b, identity: identity == builder.FORMER_IDENTITY)
+        self.assertEqual(calls, 1)
+        self.assertEqual((self.dir / "manifest.sigstore.json").read_text(), "new")
+        self.assertEqual((self.dir / "manifest.json").read_bytes(), b'{"x": 1}')
+
+    def test_leaves_current_signed_and_sourced_versions_alone(self):
+        self.assertEqual(self.run_step(lambda m, b, identity: True), 0)
+        self.assertEqual(self.run_step(lambda m, b, identity: False,
+                                       {("runtime", "python", "1.0.0")}), 0)
+
+    def test_refuses_when_no_known_signature_verifies(self):
+        with self.assertRaises(SystemExit):
+            self.run_step(lambda m, b, identity: False)
+        self.assertEqual((self.dir / "manifest.sigstore.json").read_text(), "old")
