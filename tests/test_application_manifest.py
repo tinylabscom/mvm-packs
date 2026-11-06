@@ -254,7 +254,7 @@ class ApplicationManifestTests(unittest.TestCase):
 
 
 def make_mvmpkg(roles=("kernel", "rootfs"), key_id="b" * 32, arch="aarch64", corrupt=None,
-                extra_members=()):
+                extra_members=(), repeat_artifact=0, raw_manifest=None):
     """Build a tiny synthetic .mvmpkg tar (manifest.json, manifest.sig, artifacts/)."""
     import io
     import tarfile
@@ -266,7 +266,8 @@ def make_mvmpkg(roles=("kernel", "rootfs"), key_id="b" * 32, arch="aarch64", cor
                           "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)})
     if corrupt:
         files[f"artifacts/{corrupt}"] = b"tampered"
-    manifest = json.dumps({"key_id": key_id, "arch": arch, "artifacts": artifacts}).encode()
+    artifacts += [artifacts[0]] * repeat_artifact
+    manifest = raw_manifest or json.dumps({"key_id": key_id, "arch": arch, "artifacts": artifacts}).encode()
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
         for name, data in {"manifest.json": manifest, "manifest.sig": b"s" * 64, **files}.items():
@@ -317,6 +318,8 @@ class ArchiveReadBackTests(unittest.TestCase):
             "wrong arch": make_mvmpkg(arch="x86_64"),
             "tampered artifact": make_mvmpkg(corrupt="rootfs"),
             "symlink member": make_mvmpkg(extra_members=(symlink,)),
+            "artifact listed twice": make_mvmpkg(repeat_artifact=1),
+            "deeply nested manifest": make_mvmpkg(raw_manifest=b"[" * 100000 + b"]" * 100000),
             "not a tar": b"x" * 100,
         }.items():
             with self.subTest(label), self.assertRaises(SystemExit):

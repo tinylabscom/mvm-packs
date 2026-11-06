@@ -289,7 +289,8 @@ def inspect_bundle(path, application):
             members = {}
             for info in archive:
                 parts = info.name.split("/")
-                if (not info.isreg() or info.name in members or info.name.startswith("/")
+                if (info.type not in (tarfile.REGTYPE, tarfile.AREGTYPE) or info.name in members
+                        or info.name.startswith("/")
                         or ".." in parts or "" in parts):
                     fail(f"{path}: unsafe or duplicate archive member {info.name!r}")
                 members[info.name] = info
@@ -303,8 +304,11 @@ def inspect_bundle(path, application):
             artifacts = manifest.get("artifacts")
             if not isinstance(artifacts, list) or not artifacts:
                 fail(f"{path}: bundle manifest lists no artifacts")
-            roles = set()
+            roles, hashed = set(), set()
             for artifact in artifacts:
+                if artifact["path"] in hashed:
+                    fail(f"{path}: artifact {artifact['path']!r} is listed twice")
+                hashed.add(artifact["path"])
                 info = members.get(artifact["path"])
                 if info is None or info.size != artifact["size_bytes"]:
                     fail(f"{path}: artifact {artifact['path']!r} is missing or has the wrong size")
@@ -314,10 +318,13 @@ def inspect_bundle(path, application):
                 if digest.hexdigest() != artifact["sha256"]:
                     fail(f"{path}: artifact {artifact['path']!r} does not match its recorded SHA-256")
                 roles.add(artifact["role"])
+            if sum(members[p].size for p in hashed) > bundle["archive_size"]:
+                fail(f"{path}: artifacts are larger than the archive")
             if not {"kernel", "rootfs"} <= roles:
                 fail(f"{path}: archive does not embed a kernel and a root filesystem")
-    except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError) as error:
-        fail(f"{path}: not a valid application archive: {error}")
+    except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError,
+            RecursionError, MemoryError) as error:
+        fail(f"{path}: not a valid application archive: {error!r}")
 
 
 def verify_archive(application):

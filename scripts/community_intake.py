@@ -124,8 +124,8 @@ def resolve(root, list_releases, fetch, verify, read_back):
                     target.mkdir(parents=True, exist_ok=True)
                     (target / MANIFEST).write_bytes(raw)
                     (target / BUNDLE).write_bytes(bundle_raw)
-                except (ValueError, OSError) as error:
-                    report.append(f"{owner}/{name}: {release.get('tag_name')}: skipped: {error}")
+                except Exception as error:  # isolate one author's release from every other pack
+                    report.append(f"{owner}/{name}: {release.get('tag_name')}: skipped: {error!r}")
                     continue
                 versions[version] = (digest, manifest)
                 report.append(f"{owner}/{name}@{version}: listed")
