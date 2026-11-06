@@ -9,7 +9,7 @@ from community_publishers import validate_directory, validate_reference  # noqa:
 
 def good(**changes):
     data = {"repository": "acme/packs", "workflow": ".github/workflows/publish-pack.yml",
-            "ref_pattern": "refs/tags/v*", "environment": "", "packs": ["tool"]}
+            "ref": "refs/heads/main", "environment": "", "packs": ["tool"]}
     return data | changes
 
 
@@ -23,9 +23,11 @@ class CommunityPublisherTests(unittest.TestCase):
             ("agent", good(repository="agent/x")),            # reserved namespace
             ("acme", good(repository="other/packs")),          # owner != namespace
             ("acme", good(workflow="scripts/x.yml")),          # outside .github/workflows
-            ("acme", good(ref_pattern="refs/tags/*")),         # every tag
-            ("acme", good(ref_pattern="refs/*")),              # not tags/heads
-            ("acme", good(ref_pattern="refs/tags/v*/../x")),   # traversal
+            ("acme", good(ref="refs/tags/*")),               # wildcard
+            ("acme", good(ref="refs/*")),                    # not tags/heads
+            ("acme", good(ref="refs/tags/v*")),                # pattern, not exact
+            ("acme", good(ref="refs/heads/")),                 # no name
+            ("acme", good(ref="refs/heads/a/../x")),   # traversal
             ("acme", good(packs=[])),
             ("acme", good(packs=["a", "a"])),
             ("acme", good(packs=["Bad Name"])),
@@ -42,7 +44,7 @@ class CommunityPublisherTests(unittest.TestCase):
             root = Path(tmp)
             (root / "acme.toml").write_text(
                 'repository = "acme/packs"\nworkflow = ".github/workflows/p.yml"\n'
-                'ref_pattern = "refs/tags/v*"\npacks = ["tool"]\n')
+                'ref = "refs/heads/main"\npacks = ["tool"]\n')
             self.assertEqual(validate_directory(root), [])
             (root / "other.toml").write_text('repository = "acme/packs"\n')
             (root / "notes.md").write_text("x")

@@ -12,16 +12,17 @@ RESERVED = frozenset({"mvm", "agent", "runtime"})
 OWNER = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\Z")
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]*\Z")
 WORKFLOW = re.compile(r"\.github/workflows/[A-Za-z0-9_.-]+\.ya?ml\Z")
-REF = re.compile(r"refs/(?:tags|heads)/[A-Za-z0-9._/-]+\*?\Z")
-FIELDS = {"repository", "workflow", "ref_pattern", "environment", "packs"}
+# One exact ref (no pattern): the client matches exact signing identities.
+REF = re.compile(r"refs/(?:tags|heads)/[A-Za-z0-9._/-]+\Z")
+FIELDS = {"repository", "workflow", "ref", "environment", "packs"}
 
 
 def validate_reference(owner, data):
     """Raise ValueError unless `data` is a safe reference for namespace `owner`."""
     if not OWNER.fullmatch(owner) or owner in RESERVED:
         raise ValueError(f"{owner!r} is not a usable community namespace")
-    if not isinstance(data, dict) or set(data) - FIELDS or {"repository", "workflow", "ref_pattern", "packs"} - set(data):
-        raise ValueError("reference must have repository, workflow, ref_pattern, packs and optional environment")
+    if not isinstance(data, dict) or set(data) - FIELDS or {"repository", "workflow", "ref", "packs"} - set(data):
+        raise ValueError("reference must have repository, workflow, ref, packs and optional environment")
     repository = data["repository"]
     # Namespace must equal the signing repository's owner (as nono enforces at pull).
     if not isinstance(repository, str) or repository.partition("/")[0].lower() != owner \
@@ -29,11 +30,9 @@ def validate_reference(owner, data):
         raise ValueError("repository must be <owner>/<repo> with the owner equal to the namespace")
     if not isinstance(data["workflow"], str) or not WORKFLOW.fullmatch(data["workflow"]):
         raise ValueError("workflow must be a file under .github/workflows/")
-    ref = data["ref_pattern"]
-    if not isinstance(ref, str) or not REF.fullmatch(ref) or ref.count("*") > 1 or ".." in ref:
-        raise ValueError("ref_pattern must be refs/tags/ or refs/heads/ with at most a trailing *")
-    if ref.rstrip("*") in ("refs/tags/", "refs/heads/"):
-        raise ValueError("ref_pattern must name a prefix, not every tag or branch")
+    ref = data["ref"]
+    if not isinstance(ref, str) or not REF.fullmatch(ref) or ".." in ref or ref.endswith("/"):
+        raise ValueError("ref must be one exact refs/heads/<branch> or refs/tags/<tag>, with no wildcard")
     environment = data.get("environment", "")
     if not isinstance(environment, str) or not re.fullmatch(r"[A-Za-z0-9._-]*", environment):
         raise ValueError("environment must be a GitHub environment name or empty")
