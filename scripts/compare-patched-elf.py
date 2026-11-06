@@ -1,42 +1,202 @@
 #!/usr/bin/env python3
-"""Compare an ELF file with a loader-patched copy and report every byte that differs.
+"""Verify that a loader-patched ELF is its upstream file plus a loader-path patch.
 
-A patcher such as patchelf can rewrite the interpreter path by moving the program
-headers and inserting padding, which shifts everything after the insertion point
-by a fixed amount. This tool aligns the two files at that shift and lists the
-byte ranges that are NOT identical, so a reviewer can see that the whole
-executable body is unchanged and only header structures differ.
+A patcher such as patchelf can change the interpreter path by inserting padding at
+the front of the file, writing a new ELF header, program header table and
+interpreter string there, and shifting everything else by a fixed amount. This tool
+checks that claim instead of assuming it, and exits 0 only if ALL of these hold:
+
+1. The new ELF header equals the old one except the program header count, which may
+   grow, and the section-table offset, which must move by exactly the shift.
+2. Every upstream program header except PT_PHDR and PT_INTERP reappears unchanged
+   (flags, addresses, sizes, alignment) with its file offset moved by exactly the shift.
+   Extra headers are allowed only as PT_PHDR, PT_INTERP, or one non-executable PT_LOAD
+   wholly inside the inserted bytes whose addresses overlap no upstream segment; the new
+   PT_PHDR and PT_INTERP must lie inside it.
+3. In the inserted bytes, everything outside the ELF header, the program header table
+   and the interpreter string is zero.
+4. The old ELF header and program header table are zero in the patched file; the old
+   interpreter string is zero or the patcher's 'X' filler.
+5. Sections are matched by name (the patcher reorders them): same type, flags, address,
+   size and alignment, file offset moved by exactly the shift, and link and info indexes
+   that name the same section in both files. Only .interp may differ, and it must match
+   the new PT_INTERP.
+6. Every other byte of the body is identical at the shift, except dynamic-symbol
+   section-index fields that name the same-named section in both files.
 
 Usage: compare-patched-elf.py UPSTREAM PATCHED
-It reads both files, changes nothing, and exits 0 only if every differing range
-lies inside the ELF header, program header table, section header table, or the
-interpreter string area, or is a dynamic symbol's section-index field that
-names the same section in both files (sections get renumbered).
+It reads both files and prints the new interpreter path.
 """
 
 import struct
 import sys
 
+PT_LOAD, PT_INTERP, PT_PHDR = 1, 3, 6
+PF_X = 1
+EHDR = "<16sHHIQQQIHHHHHH"
+PHDR = "<IIQQQQQQ"
+SHDR = "<IIQQQQIIQQ"
 
-def read_elf(data):
+
+def parse(data):
     if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
         raise SystemExit("only 64-bit little-endian ELF files are supported")
-    phoff, shoff = struct.unpack_from("<QQ", data, 0x20)[0], struct.unpack_from("<Q", data, 0x28)[0]
-    phentsize, phnum, shentsize, shnum = struct.unpack_from("<HHHH", data, 0x36)
-    return {"phoff": phoff, "phnum": phnum, "phentsize": phentsize, "shoff": shoff,
-            "shnum": shnum, "shentsize": shentsize}
+    e = struct.unpack_from(EHDR, data, 0)
+    info = {"ident": e[0], "type": e[1], "machine": e[2], "version": e[3], "entry": e[4],
+            "phoff": e[5], "shoff": e[6], "flags": e[7], "ehsize": e[8], "phentsize": e[9],
+            "phnum": e[10], "shentsize": e[11], "shnum": e[12], "shstrndx": e[13]}
+    if info["phentsize"] != 56 or info["shentsize"] != 64:
+        raise SystemExit("unexpected program or section header entry size")
+    info["phdrs"] = [dict(zip(("type", "flags", "offset", "vaddr", "paddr", "filesz", "memsz", "align"),
+                              struct.unpack_from(PHDR, data, info["phoff"] + i * 56)))
+                     for i in range(info["phnum"])]
+    info["shdrs"] = [dict(zip(("name", "type", "flags", "addr", "offset", "size", "link", "info",
+                               "addralign", "entsize"),
+                              struct.unpack_from(SHDR, data, info["shoff"] + i * 64)))
+                     for i in range(info["shnum"])]
+    strtab = info["shdrs"][info["shstrndx"]]["offset"]
+    for section in info["shdrs"]:
+        end = data.index(b"\0", strtab + section["name"])
+        section["label"] = data[strtab + section["name"]:end].decode("ascii", "replace")
+    interp = next((p for p in info["phdrs"] if p["type"] == PT_INTERP), None)
+    info["interp"] = None if interp is None else (interp["offset"], interp["offset"] + interp["filesz"])
+    return info
 
 
-def expected_ranges(data, info, shift_after=None):
-    """Byte ranges of structures a loader patch is expected to rewrite."""
-    ranges = [(0, 64),
-              (info["phoff"], info["phoff"] + info["phnum"] * info["phentsize"]),
-              (info["shoff"], info["shoff"] + info["shnum"] * info["shentsize"])]
-    for marker in (b"/lib/ld-musl", b"/lib/ld-linux", b"/nix/store"):
-        i = data.find(marker)
-        if 0 <= i < 1 << 16:
-            ranges.append((i, i + 256))
-    return ranges
+def verify(up, patched):
+    """Return (problems, interpreter) for the pair."""
+    problems = []
+    shift = len(patched) - len(up)
+    if shift <= 0:
+        return ["the patched file is not larger than the upstream file"], None
+    u, p = parse(up), parse(patched)
+    if u["interp"] is None or p["interp"] is None:
+        return ["both files must have a PT_INTERP segment"], None
+
+    # 1. ELF header
+    for key in ("ident", "type", "machine", "version", "entry", "flags", "ehsize", "phentsize",
+                "shentsize", "shnum", "shstrndx"):
+        if u[key] != p[key]:
+            problems.append(f"ELF header field {key} differs")
+    if p["shoff"] != u["shoff"] + shift:
+        problems.append("section header table did not move by exactly the shift")
+    if p["phnum"] < u["phnum"]:
+        problems.append("the patched file has fewer program headers")
+
+    # 2. program headers
+    def key(h):
+        return (h["type"], h["flags"], h["vaddr"], h["paddr"], h["filesz"], h["memsz"], h["align"])
+
+    remaining = list(p["phdrs"])
+    for header in u["phdrs"]:
+        if header["type"] in (PT_PHDR, PT_INTERP):
+            continue
+        match = next((q for q in remaining if key(q) == key(header) and q["offset"] == header["offset"] + shift), None)
+        if match is None:
+            problems.append(f"upstream program header type {header['type']:#x} is missing or changed")
+        else:
+            remaining.remove(match)
+    upstream_loads = [(h["vaddr"], h["vaddr"] + h["memsz"]) for h in u["phdrs"] if h["type"] == PT_LOAD]
+    new_loads = []
+    for header in remaining:
+        if header["type"] in (PT_PHDR, PT_INTERP):
+            continue
+        end = header["vaddr"] + header["memsz"]
+        ok = (header["type"] == PT_LOAD and not header["flags"] & PF_X
+              and header["offset"] + header["filesz"] <= shift
+              and header["filesz"] == header["memsz"]
+              and not any(header["vaddr"] < b and a < end for a, b in upstream_loads))
+        if ok:
+            new_loads.append(header)
+        else:
+            problems.append(f"extra program header type {header['type']:#x} flags {header['flags']:#x} is not allowed")
+    # The new PT_PHDR and PT_INTERP must live inside one new non-executable segment.
+    for header in p["phdrs"]:
+        if header["type"] in (PT_PHDR, PT_INTERP):
+            inside = next((q for q in new_loads if q["offset"] <= header["offset"]
+                           and header["offset"] + header["filesz"] <= q["offset"] + q["filesz"]), None)
+            if inside is None or header["vaddr"] != inside["vaddr"] + header["offset"] - inside["offset"]:
+                problems.append(f"program header type {header['type']:#x} is not inside the new segment")
+
+    # 3. inserted bytes: only the ELF header, the program header table and the interpreter string
+    table_end = p["phoff"] + p["phnum"] * 56
+    allowed = [(0, 64), (p["phoff"], table_end), p["interp"]]
+    if p["interp"][1] > shift or table_end > shift:
+        problems.append("headers or the interpreter string extend past the inserted bytes")
+    for i in range(shift):
+        if patched[i] and not any(a <= i < b for a, b in allowed):
+            problems.append(f"nonzero byte at offset {i} in the inserted bytes outside the headers")
+            break
+    if patched[p["interp"][1] - 1] != 0:
+        problems.append("the new interpreter string is not NUL-terminated")
+
+    # 4. the old header area: ELF header and program header table zeroed, old interpreter string
+    #    zero or overwritten with the patcher's 'X' filler
+    old_table_end = u["phoff"] + u["phnum"] * 56
+    if any(patched[shift:shift + old_table_end]):
+        problems.append("the old ELF header and program header table were not zeroed")
+    old_interp = patched[shift + u["interp"][0]:shift + u["interp"][1]]
+    if any(byte not in (0, 0x58) for byte in old_interp):
+        problems.append("the old interpreter string was not zeroed or overwritten with filler")
+    old_end = max(old_table_end, u["interp"][1])
+
+    # 5. section headers, matched by name because the patcher reorders them
+    labels = [x["label"] for x in u["shdrs"]]
+    new_labels = [x["label"] for x in p["shdrs"]]
+    if len(set(labels)) != len(labels) or sorted(labels) != sorted(new_labels):
+        problems.append("section names are ambiguous or differ between the files")
+    else:
+        by_name = {x["label"]: x for x in p["shdrs"]}
+        for a in u["shdrs"]:
+            b = by_name[a["label"]]
+            name = a["label"]
+            for field in ("type", "flags", "entsize"):
+                if a[field] != b[field]:
+                    problems.append(f"section {name!r} field {field} differs")
+            if name == ".interp":
+                if (b["offset"], b["size"], b["addr"]) != (p["interp"][0], p["interp"][1] - p["interp"][0],
+                                                           next(h["vaddr"] for h in p["phdrs"] if h["type"] == PT_INTERP)):
+                    problems.append("the .interp section does not match the new PT_INTERP segment")
+            else:
+                for field in ("addr", "size", "addralign"):
+                    if a[field] != b[field]:
+                        problems.append(f"section {name!r} field {field} differs")
+                if a["type"] not in (0, 8) and b["offset"] != a["offset"] + shift:
+                    problems.append(f"section {name!r} offset did not move by exactly the shift")
+            for field, translate in (("link", True), ("info", a["flags"] & 0x40 != 0 and a["type"] in (4, 9))):
+                if translate and a[field]:
+                    same = a[field] < len(labels) and b[field] < len(new_labels) and labels[a[field]] == new_labels[b[field]]
+                else:
+                    same = a[field] == b[field]
+                if not same:
+                    problems.append(f"section {name!r} field {field} points at a different section")
+
+    # 6. the body, excluding the header area and the section header table
+    table = (u["shoff"], u["shoff"] + u["shnum"] * 64)
+    if table[1] != len(up):
+        problems.append("the section header table is not the end of the file")
+    dynsym = next((x for x in u["shdrs"] if x["label"] == ".dynsym" and x["type"] == 11), None)
+    start = old_end
+    while start < table[0] and not problems:
+        end = min(table[0], start + (1 << 20))
+        a, b = up[start:end], patched[start + shift:end + shift]
+        if a != b:
+            for i in range(len(a)):
+                if a[i] == b[i]:
+                    continue
+                offset = start + i
+                if (dynsym and dynsym["offset"] <= offset < dynsym["offset"] + dynsym["size"]
+                        and (offset - dynsym["offset"]) % 24 in (6, 7)):
+                    entry = offset - (offset - dynsym["offset"]) % 24
+                    old_i = struct.unpack_from("<H", up, entry + 6)[0]
+                    new_i = struct.unpack_from("<H", patched, entry + 6 + shift)[0]
+                    if old_i < len(labels) and new_i < len(new_labels) and labels[old_i] == new_labels[new_i]:
+                        continue
+                problems.append(f"byte at upstream offset {offset} differs outside the permitted structures")
+                break
+        start = end
+    interpreter = patched[p["interp"][0]:p["interp"][1]].split(b"\0")[0].decode("ascii", "replace")
+    return problems, interpreter
 
 
 def differing_ranges(up, patched, shift):
@@ -64,67 +224,19 @@ def differing_ranges(up, patched, shift):
     return out
 
 
-def sections(data, info):
-    """[(name, type, offset, size, entsize)] from the section header table."""
-    entries = [struct.unpack_from("<IIQQQQIIQQ", data, info["shoff"] + i * info["shentsize"])
-               for i in range(info["shnum"])]
-    strndx = struct.unpack_from("<H", data, 0x3E)[0]
-    base = entries[strndx][4]
-
-    def name(offset):
-        end = data.index(b"\0", base + offset)
-        return data[base + offset:end].decode("ascii", "replace")
-
-    return [(name(e[0]), e[1], e[4], e[5], e[9]) for e in entries]
-
-
-def symbol_index_remap(up, patched, up_info, patched_info, shift, start, end):
-    """True if [start, end) of upstream is the st_shndx of a dynamic symbol whose new
-    section index is exactly the patched file's index for the same-named section."""
-    up_secs, new_secs = sections(up, up_info), sections(patched, patched_info)
-    for name, kind, offset, size, entsize in up_secs:
-        if name == ".dynsym" and kind == 11 and offset <= start and end <= offset + size and entsize == 24:
-            entry = offset + (start - offset) // 24 * 24
-            if not entry + 6 <= start and end <= entry + 8:
-                return False
-            old_index = struct.unpack_from("<H", up, entry + 6)[0]
-            new_index = struct.unpack_from("<H", patched, entry + 6 + shift)[0]
-            if old_index >= len(up_secs) or new_index >= len(new_secs):
-                return False
-            return up_secs[old_index][0] == new_secs[new_index][0]
-    return False
-
-
 def main(argv):
     if len(argv) != 3:
         raise SystemExit(__doc__)
     up, patched = open(argv[1], "rb").read(), open(argv[2], "rb").read()
-    shift = len(patched) - len(up)
-    print(f"upstream {len(up)} bytes, patched {len(patched)} bytes, shift {shift}")
-    # The first structural bytes differ before the shift applies; compare the bodies at the shift.
-    ui, pi = read_elf(up), read_elf(patched)
-    print("upstream headers:", ui)
-    print("patched headers: ", pi)
-    ranges = differing_ranges(up, patched, shift)
-    outside = []
-    allowed = expected_ranges(up, ui)
-    remapped = 0
-    for start, end in ranges:
-        if any(a <= start and end <= b for a, b in allowed):
-            continue
-        if symbol_index_remap(up, patched, ui, pi, shift, start, end):
-            remapped += 1
-        else:
-            outside.append((start, end))
-    total = sum(e - s for s, e in ranges)
-    print(f"{len(ranges)} differing range(s) at shift {shift}, {total} bytes in total")
-    for start, end in ranges[:20]:
-        print(f"  upstream offset {start}..{end} ({end - start} bytes)")
-    if outside:
-        print(f"{len(outside)} range(s) lie outside the expected header structures")
+    problems, interpreter = verify(up, patched)
+    print(f"upstream {len(up)} bytes, patched {len(patched)} bytes, shift {len(patched) - len(up)}")
+    if problems:
+        for problem in problems[:20]:
+            print("PROBLEM:", problem)
         return 1
-    print(f"every differing range is a header structure or one of {remapped} dynamic-symbol "
-          "section-index fields that point at the same-named section in the patched file")
+    print(f"patched interpreter: {interpreter}")
+    print("verified: only the loader-path patch (new headers, zeroed old header area, shifted "
+          "offsets, renumbered dynamic-symbol section indexes); all other bytes identical")
     return 0
 
 

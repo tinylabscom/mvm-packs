@@ -149,16 +149,28 @@ by a patcher:
   is 221197984 bytes, SHA-256
   `0ea64e932c6fac35ce4e992140612157fe1cecab052d59539873b350a594d3c6`, loader
   `/lib/ld-musl-aarch64.so.1`.
-- The embedded file is 65536 bytes larger. `scripts/compare-patched-elf.py`
-  aligns the two files at that fixed shift and compares every byte, not a sample.
-  Result: 324 bytes differ in total, in 174 small ranges. All lie in the ELF
-  header, the program header table (one entry added), the section header table
-  (offsets moved by the shift), the loader-path string, or are 7 one-byte
-  section-index fields in `.dynsym` that name the same section in both files
-  (sections were renumbered). The program code and data, 221 MB, are identical.
-  The tool exits non-zero if any other byte differs; a one-bit change deep in the
-  body makes it fail. So the embedded file is the official musl 2.1.273 binary
-  with only a loader-path patch.
+- The embedded file is 65536 bytes larger. `scripts/compare-patched-elf.py` checks,
+  rather than assumes, that it is the upstream file plus a loader-path patch, and
+  exits non-zero otherwise. Against the real pair it verifies that: the ELF header
+  is unchanged except one more program header and the section table moved by
+  exactly the shift; every upstream program header reappears unchanged with its
+  file offset moved by exactly the shift; the one extra header is a new
+  **writable, non-executable** `PT_LOAD` (flags RW) of 64 KiB inside the inserted
+  bytes, adjacent to and not overlapping any upstream segment, holding the new
+  program header table and the new loader string; everything else in the inserted
+  bytes is zero; the old ELF header and program header table are zeroed and the
+  old loader string is overwritten with `X` filler; every section matches by name
+  with only its file offset shifted (`.interp` moved to the new segment); and all
+  other bytes of the 221 MB body are identical, except 7 one-byte `.dynsym`
+  section-index fields that name the same section in both files. Nine tampering
+  attempts on the real pair (a flipped bit in the code, a changed entry point, an
+  executable new segment, a nonzero padding byte, a changed section address, an
+  unrelated `.dynsym` byte, extra bytes in the old loader area, a shrunk segment)
+  are each refused. The new loader is
+  `/nix/store/…-musl-1.2.5/lib/ld-musl-aarch64.so.1`.
+  Limits: the comparison itself is only exercised against this real pair (no
+  synthetic ELF fixtures), and a writable header segment is the patcher's design,
+  not something this repository can remove.
 - The upstream tarball is authentic as far as the vendor's own signature goes:
   `SHASUMS256.txt` for v2.1.273 verifies with `gpg` ("Good signature from
   Anthropic Claude Code Release Signing") against a key whose fingerprint
