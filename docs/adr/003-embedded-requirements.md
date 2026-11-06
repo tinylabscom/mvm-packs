@@ -196,7 +196,8 @@ by a patcher:
   tarball hash above. Checked 2026-11-06 in a throwaway keyring; the key was
   fetched from the vendor's site, so this trusts that site and the setup page
   together, not an independent channel.
-- `environment-inputs.json` records a different build (2.1.312, glibc). It does
+- `docs/claude-environment-inputs.json` (moved out of the source directory, which
+  may hold only `pack.toml`) records a different build (2.1.312, glibc). It does
   not describe this archive.
 
 ## Consequences

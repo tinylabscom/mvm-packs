@@ -128,7 +128,7 @@ Neither step is launch authorization; bundle admission still decides.
 - No host credentials or host home mounts.
 - No proprietary binary in git. Archives are release assets of this repository;
   git carries only the descriptor with the archive SHA-256, size and key ID.
-  `pack-sources/agent/claude/environment-inputs.json` records an upstream
+  `docs/claude-environment-inputs.json` records an upstream
   archive and executable digest as input evidence only; it is not a
   descriptor and is outside the policy pack's payload
   (`docs/application-packages.md`).

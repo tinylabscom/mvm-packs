@@ -13,7 +13,7 @@ signature, freshness checks, local approval or admission.
 
 ## Recorded native input
 
-The [versioned native input record](../pack-sources/agent/claude/environment-inputs.json)
+The [versioned native input record](claude-environment-inputs.json)
 pins the upstream archive and executable bytes inspected for the arm64 Linux
 agent environment. It is outside the policy pack's published payload. It is
 not a runnable package descriptor, compiler lock, build recipe or published
