@@ -1,0 +1,30 @@
+[
+ {"name": "denies_union_across_sections",
+  "layers": [
+   {"secrets": {"bind": ["gh", "npm"]}, "env": {"allow": ["MODE", "TOKEN_HINT"]}, "tools": {"allow": ["git", "curl"]}},
+   {"secrets": {"deny": ["npm"]}, "env": {"deny": ["TOKEN_HINT"]}, "tools": {"deny": ["curl"]}}],
+  "expect": {"secrets": {"bind": ["gh"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["git"], "ask": []}, "shares": {"mount": []}, "resources": {}}},
+ {"name": "every_resource_bound_takes_the_smallest",
+  "layers": [
+   {"resources": {"cpu_millicores": 500, "wall_clock_secs": 60, "max_cpus": 4, "max_memory": "2G"}},
+   {"resources": {"cpu_millicores": 1500, "wall_clock_secs": 30, "max_cpus": 8, "max_memory": "512M"}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": [], "ask": []}, "shares": {"mount": []},
+   "resources": {"cpu_millicores": 500, "wall_clock_secs": 30, "max_cpus": 4, "max_memory": "512M"}}},
+ {"name": "tools_ask_unions_and_beats_allow",
+  "layers": [{"tools": {"allow": ["git", "bash"]}}, {"tools": {"ask": ["git"], "allow": ["make"]}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": ["bash", "make"], "ask": ["git"]}, "shares": {"mount": []}, "resources": {}}},
+ {"name": "tools_deny_beats_ask_and_allow",
+  "layers": [{"tools": {"allow": ["git"], "ask": ["curl"]}}, {"tools": {"deny": ["git", "curl"]}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": [], "ask": []}, "shares": {"mount": []}, "resources": {}}},
+ {"name": "a_denied_share_source_is_dropped",
+  "layers": [{"shares": {"mount": [{"host": "/home/me/.ssh", "guest": "/ssh"}, {"host": "/work", "guest": "/work"}]}}, {"shares": {"deny": ["/home/me"]}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": [], "ask": []},
+   "shares": {"mount": [{"host": "/work", "guest": "/work", "writable": false}]}, "resources": {}}},
+ {"name": "shares_writable_only_if_every_layer_says_so",
+  "layers": [{"shares": {"mount": [{"host": "/w", "guest": "/w", "writable": true}]}}, {"shares": {"mount": [{"host": "/w", "guest": "/w"}]}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": [], "ask": []},
+   "shares": {"mount": [{"host": "/w", "guest": "/w", "writable": false}]}, "resources": {}}},
+ {"name": "two_sources_for_one_guest_path_are_refused",
+  "layers": [{"shares": {"mount": [{"host": "/work", "guest": "/work"}]}}, {"shares": {"mount": [{"host": "/elsewhere", "guest": "/work"}]}}],
+  "error": "shares.mount.guest"}
+]
