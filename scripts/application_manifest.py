@@ -94,12 +94,42 @@ def validate_source(source):
     validate_authority(parsed.netloc, https=True)
 
 
+REFERENCE = re.compile(r"[a-z][a-z0-9-]*/[a-z][a-z0-9-]*@(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+MAX_LAYERS = 16
+
+
+def validate_layer_pins(layers):
+    """Ordered, exact, digest-pinned runtime layers an application composes (ADR 005)."""
+    if not isinstance(layers, list) or not 0 < len(layers) <= MAX_LAYERS:
+        raise ValueError(f"layers must be a list of 1..{MAX_LAYERS} pins")
+    seen = set()
+    for pin in layers:
+        if not isinstance(pin, dict) or set(pin) != {"reference", "manifest_sha256"}:
+            raise ValueError("each layer pin must contain exactly reference and manifest_sha256")
+        if not isinstance(pin["reference"], str) or not REFERENCE.fullmatch(pin["reference"]):
+            raise ValueError("layer reference must be an exact namespace/name@major.minor.patch")
+        if not isinstance(pin["manifest_sha256"], str) or not HEX64.fullmatch(pin["manifest_sha256"]):
+            raise ValueError("layer manifest_sha256 must be 64 lowercase hex characters")
+        if pin["reference"] in seen:
+            raise ValueError(f"duplicate layer {pin['reference']}")
+        seen.add(pin["reference"])
+
+
+def validate_layer(layer):
+    """A runtime layer pins a layer archive (payload + policy, no kernel, rootfs or entrypoint)."""
+    if not isinstance(layer, dict) or "layers" in layer:
+        raise ValueError("a layer cannot itself compose layers")
+    validate_application(layer)
+
+
 def validate_application(application):
     """Raise ValueError for any unsupported application descriptor field."""
-    if not isinstance(application, dict) or set(application) != {
+    if not isinstance(application, dict) or not {
         "schema_version", "guest_arch", "bundle"
-    }:
-        raise ValueError("application must contain exactly schema_version/guest_arch/bundle")
+    } <= set(application) <= {"schema_version", "guest_arch", "bundle", "layers"}:
+        raise ValueError("application must contain schema_version/guest_arch/bundle and optionally layers")
+    if "layers" in application:
+        validate_layer_pins(application["layers"])
     if type(application["schema_version"]) is not int or application["schema_version"] != 1:
         raise ValueError("application schema_version must be integer 1")
     if application["guest_arch"] not in ("x86_64", "aarch64"):
@@ -116,6 +146,17 @@ def validate_application(application):
         raise ValueError("bundle archive_size must be a positive u64 integer")
     if not isinstance(bundle["key_id"], str) or not HEX32.fullmatch(bundle["key_id"]):
         raise ValueError("bundle key_id must be 32 lowercase hex characters")
+
+
+def layer_manifest_bytes(reference, description, layer):
+    validate_layer(layer)
+    return (json.dumps({
+        "schema_version": 2,
+        "kind": "layer",
+        "reference": reference,
+        "description": description,
+        "layer": layer,
+    }, indent=2, sort_keys=True) + "\n").encode()
 
 
 def manifest_bytes(reference, description, application):

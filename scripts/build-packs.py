@@ -42,7 +42,7 @@ import ed25519
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import validate_application
+from application_manifest import validate_application, validate_layer
 from publisher_identity import (
     CURRENT_IDENTITY,
     FORMER_IDENTITY,
@@ -87,8 +87,15 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build", "application", "requirements"}:
+    if set(data) - {"version", "description", "image", "image_build", "application", "requirements", "layer"}:
         fail(f"{path}: unknown pack metadata fields")
+    if "layer" in data:
+        if "application" in data or "image" in data or "image_build" in data or "requirements" in data:
+            fail(f"{path}: a layer cannot also declare application, image, image_build or requirements")
+        try:
+            validate_layer(data["layer"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     application = data.get("application")
     if "application" in data:
         try:
@@ -117,7 +124,7 @@ def parse_pack_toml(path):
         fail(f"{path}: [image] and [image_build] cannot both be present")
     return {"version": version, "description": description, "image": image,
             "image_build": image_build, "application": application,
-            "requirements": requirements}
+            "requirements": requirements, "layer": data.get("layer")}
 
 
 def validate_image_build_intent(intent, reference):
@@ -541,8 +548,12 @@ def build_one(source, check_only=False):
     if meta["image"] is not None:
         validate_built_image_descriptor(meta["image"], reference)
         fail(f"{reference}: built image packs are not publishable until consumer verification is available")
-    payload = source / "pack"
+    if meta["layer"] is not None:
+        fail(f"{reference}: layer packs are not publishable until the mvm layer archive format and its gate exist (ADR 005)")
     application = meta["application"]
+    if application is not None and "layers" in application:
+        fail(f"{reference}: applications that compose layers are not publishable until the layer gate exists (ADR 005)")
+    payload = source / "pack"
     if application is not None:
         if any(path.name != "pack.toml" or path.is_symlink() for path in source.iterdir()):
             fail(f"{source}: application source cannot contain payload files or directories")
