@@ -17,3 +17,9 @@ class ReservedNamespaceTests(unittest.TestCase):
         self.assertEqual(violations(["pack-sources/agent/x/pack.toml"], "MEMBER"), [])
         self.assertEqual(violations(["pack-sources/agent/x/pack.toml"], "OWNER"), [])
         self.assertEqual(violations(["pack-sources/acme/x/pack.toml", "agentx/y", "README.md"], "NONE"), [])
+
+    def test_a_branch_in_this_repository_counts_as_a_maintainer(self):
+        # The Actions token reports private org members as CONTRIBUTOR; a same-repo branch needs write access.
+        self.assertEqual(violations(["pack-sources/agent/x/pack.toml"], "CONTRIBUTOR", same_repo=True), [])
+        self.assertEqual(violations(["pack-sources/agent/x/pack.toml"], "CONTRIBUTOR", same_repo=False),
+                         ["pack-sources/agent/x/pack.toml"])

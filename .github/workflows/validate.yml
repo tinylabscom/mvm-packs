@@ -41,9 +41,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
           gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION"
+            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION" "$SAME_REPO"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
