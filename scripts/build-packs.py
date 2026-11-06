@@ -32,6 +32,8 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -274,29 +276,78 @@ def check_existing_payload(out, payload):
             fail(f"{out}: published payload differs from source at {relative}")
 
 
-def verify_archive(bundle):
-    """Read the pinned archive back and refuse unless size and SHA-256 match.
+def inspect_bundle(path, application):
+    """Refuse unless the archive embeds the application: a kernel and a root
+    filesystem whose hashes match the bundle manifest, for the descriptor's
+    key ID and architecture. Members are read, never extracted.
 
-    Runs only before a new application version is signed (ADR 001). It checks
-    integrity against the descriptor; it does not verify the bundle signature.
+    It does not verify manifest.sig: that needs a bundle key the consumer trusts.
     """
+    bundle = application["bundle"]
+    try:
+        with tarfile.open(path, "r:") as archive:
+            members = {}
+            for info in archive:
+                parts = info.name.split("/")
+                if (not info.isreg() or info.name in members or info.name.startswith("/")
+                        or ".." in parts or "" in parts):
+                    fail(f"{path}: unsafe or duplicate archive member {info.name!r}")
+                members[info.name] = info
+            if "manifest.json" not in members or "manifest.sig" not in members:
+                fail(f"{path}: archive has no manifest.json and manifest.sig")
+            if members["manifest.sig"].size != 64 or members["manifest.json"].size > 1 << 20:
+                fail(f"{path}: manifest.sig must be 64 bytes and manifest.json at most 1 MiB")
+            manifest = json.loads(archive.extractfile("manifest.json").read())
+            if manifest.get("key_id") != bundle["key_id"] or manifest.get("arch") != application["guest_arch"]:
+                fail(f"{path}: bundle key ID or architecture does not match the descriptor")
+            artifacts = manifest.get("artifacts")
+            if not isinstance(artifacts, list) or not artifacts:
+                fail(f"{path}: bundle manifest lists no artifacts")
+            roles = set()
+            for artifact in artifacts:
+                info = members.get(artifact["path"])
+                if info is None or info.size != artifact["size_bytes"]:
+                    fail(f"{path}: artifact {artifact['path']!r} is missing or has the wrong size")
+                digest, handle = hashlib.sha256(), archive.extractfile(info)
+                while chunk := handle.read(1 << 20):
+                    digest.update(chunk)
+                if digest.hexdigest() != artifact["sha256"]:
+                    fail(f"{path}: artifact {artifact['path']!r} does not match its recorded SHA-256")
+                roles.add(artifact["role"])
+            if not {"kernel", "rootfs"} <= roles:
+                fail(f"{path}: archive does not embed a kernel and a root filesystem")
+    except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError) as error:
+        fail(f"{path}: not a valid application archive: {error}")
+
+
+def verify_archive(application):
+    """Read the pinned archive back before signing a new application version.
+
+    Refuses unless size and SHA-256 match the descriptor and the archive embeds
+    the application (inspect_bundle). Runs only for new versions (ADR 001).
+    """
+    bundle = application["bundle"]
     source = bundle["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")
     digest, size = hashlib.sha256(), 0
-    try:
-        with urllib.request.urlopen(source, timeout=60) as response:
-            while chunk := response.read(1 << 20):
-                size += len(chunk)
-                if size > bundle["archive_size"]:
-                    break
-                digest.update(chunk)
-    except OSError as error:
-        fail(f"{source}: cannot read the archive back: {error}")
-    if size != bundle["archive_size"]:
-        fail(f"{source}: archive size does not match the descriptor")
-    if digest.hexdigest() != bundle["archive_sha256"]:
-        fail(f"{source}: archive SHA-256 does not match the descriptor")
+    with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
+        try:
+            with urllib.request.urlopen(source, timeout=60) as response:
+                while chunk := response.read(1 << 20):
+                    size += len(chunk)
+                    if size > bundle["archive_size"]:
+                        break
+                    digest.update(chunk)
+                    spool.write(chunk)
+        except OSError as error:
+            fail(f"{source}: cannot read the archive back: {error}")
+        if size != bundle["archive_size"]:
+            fail(f"{source}: archive size does not match the descriptor")
+        if digest.hexdigest() != bundle["archive_sha256"]:
+            fail(f"{source}: archive SHA-256 does not match the descriptor")
+        spool.flush()
+        inspect_bundle(spool.name, application)
 
 
 def sign(manifest_path, bundle_path):
@@ -369,7 +420,7 @@ def build_one(source, check_only=False):
         return
 
     if application is not None:
-        verify_archive(application["bundle"])
+        verify_archive(application)
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
