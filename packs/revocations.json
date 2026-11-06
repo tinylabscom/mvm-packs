@@ -1,8 +1,13 @@
 {
-  "issued_at": "2026-11-06T22:07:51Z",
-  "not_after": "2026-11-08T10:07:51Z",
+  "issued_at": "2026-11-06T23:43:03Z",
+  "not_after": "2026-11-08T11:43:03Z",
   "revoked_identities": [],
-  "revoked_manifests": [],
+  "revoked_manifests": [
+    "63f7c363966fe3bacb894e50be1e04e720ea6ac4e9a2d878fb2c811dc21bea7c",
+    "80903c11a95708dcf493d673bf76a99f3828a41a4e640550e19b76fd8affa229",
+    "c4be773ef57a0f4365730858e522207c5e609f9fda76f1499eab3d6b0c6293f5",
+    "e10d2c7f070e00a1b5d8c713568c0aebe608cc4e346c091a4cb25057ffd25bd3"
+  ],
   "schema_version": 1,
-  "sequence": 82
+  "sequence": 83
 }
