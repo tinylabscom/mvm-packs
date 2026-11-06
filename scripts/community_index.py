@@ -35,8 +35,8 @@ def validate_index(index):
         if not isinstance(name, str) or not NAME.fullmatch(name) or not isinstance(pack["description"], str):
             raise ValueError(f"{namespace}/{name}: invalid name or description")
         publisher = pack["publisher"]
-        if not isinstance(publisher, dict) or set(publisher) != {"repository", "workflow", "ref_pattern", "environment"}:
-            raise ValueError(f"{namespace}/{name}: publisher must have exactly repository, workflow, ref_pattern, environment")
+        if not isinstance(publisher, dict) or set(publisher) != {"repository", "workflow", "ref", "environment"}:
+            raise ValueError(f"{namespace}/{name}: publisher must have exactly repository, workflow, ref, environment")
         validate_reference(namespace, dict(publisher, packs=[name]))
         versions = pack["versions"]
         if not isinstance(versions, list) or not versions:

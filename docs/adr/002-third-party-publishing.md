@@ -63,13 +63,18 @@ An author opens a pull request adding one file, `community/publishers/<owner>.to
 ```toml
 repository = "owner/repo"
 workflow   = ".github/workflows/publish-pack.yml"
-ref_pattern = "refs/tags/v*"
+ref         = "refs/heads/main"   # one exact ref, no pattern
 environment = ""   # optional GitHub environment, empty for none
 packs      = ["name", "other-name"]
 ```
 
 The fields mirror what keyless identity binds (issuer is always GitHub
-Actions): repository, workflow and ref. Review checks namespace ownership
+Actions): repository, workflow and ref. The ref is one exact
+branch or tag, never a pattern: the client matches exact signing identities, so
+the author's workflow signs from a fixed ref (for example `refs/heads/main`) and
+attaches the signed files to the release for the version in `pack.toml`. The
+trusted identity then stays the same across releases. nono accepts tag patterns
+server-side; this registry does not, to avoid pattern matching in the client. Review checks namespace ownership
 (the opener controls the repository), name collisions and impersonation, not the
 software. The entry grants indexing, nothing else.
 
@@ -140,7 +145,7 @@ community pack. An author's whole contribution is a reference to a pack their
 own repository already signs and releases (Decision 2).
 
 **The reference.** One pull request adds `community/publishers/<owner>.toml`
-(Decision 3): repository, workflow, ref pattern and the pack names it may list.
+(Decision 3): repository, workflow, one exact ref and the pack names it may list.
 That is the only reviewed change. No pack source, payload or archive is added
 to this repository.
 
@@ -162,7 +167,7 @@ revoked by identity without touching official packs. The reserved namespaces
 `mvm`, `agent` and `runtime` cannot appear in the community index.
 
 **Index schema.** The community index needs a publisher block (repository,
-workflow, ref pattern) and manifest URLs per version, which the official
+workflow, ref) and manifest URLs per version, which the official
 schema v2 does not carry. It is a new schema version, and the client must
 parse it before any community pack can be pulled. That client work is tracked
 in the `mvm` repository; until it ships, community entries are listed on the

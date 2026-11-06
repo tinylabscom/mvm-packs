@@ -11,7 +11,7 @@ def index():
     return {"schema_version": 3, "kind": "community", "packs": [{
         "namespace": "acme", "name": "tool", "description": "d",
         "publisher": {"repository": "acme/packs", "workflow": ".github/workflows/p.yml",
-                      "ref_pattern": "refs/tags/v*", "environment": ""},
+                      "ref": "refs/heads/main", "environment": ""},
         "versions": [
             {"version": "1.1.0", "manifest_sha256": "a" * 64, "tags": ["latest"],
              "guest_arch": "aarch64", "size_bytes": 5},
@@ -36,7 +36,7 @@ class CommunityIndexTests(unittest.TestCase):
             "extra top field": change(lambda v: v.update(x=1)),
             "reserved namespace": change(lambda v: pack(v).update(namespace="agent")),
             "owner mismatch": change(lambda v: pack(v)["publisher"].update(repository="other/packs")),
-            "bad ref": change(lambda v: pack(v)["publisher"].update(ref_pattern="refs/tags/*")),
+            "bad ref": change(lambda v: pack(v)["publisher"].update(ref="refs/tags/*")),
             "bad digest": change(lambda v: pack(v)["versions"][0].update(manifest_sha256="A" * 64)),
             "bad arch": change(lambda v: pack(v)["versions"][0].update(guest_arch="arm")),
             "bad size": change(lambda v: pack(v)["versions"][0].update(size_bytes=0)),

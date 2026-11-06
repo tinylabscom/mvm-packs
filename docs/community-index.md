@@ -38,7 +38,7 @@ never copied and stay release assets of the author's repository.
       "publisher": {
         "repository": "acme/packs",
         "workflow": ".github/workflows/publish-pack.yml",
-        "ref_pattern": "refs/tags/v*",
+        "ref": "refs/heads/main",
         "environment": ""
       },
       "versions": [
@@ -67,7 +67,7 @@ copied from the reference file and must still equal it.
   never `3`, so an old client rejects this file instead of misreading it.
 - `namespace` is lowercase, not `mvm`, `agent` or `runtime`, and equals the
   owner of `publisher.repository`.
-- `publisher` has exactly `repository`, `workflow`, `ref_pattern` and
+- `publisher` has exactly `repository`, `workflow`, `ref` and
   `environment`, and passes the same checks as a reference file.
 - `manifest_sha256` is 64 lowercase hex; versions are unique; tags are unique
   across a pack's versions.
@@ -98,26 +98,21 @@ The client team's engineering input; the `mvm` owners still have to approve it.
 6. A community namespace never gets the built-in trust of `agent/` or `runtime/`;
    `mvm` stays reserved.
 
-### Open decision: ref pattern or exact identity
+### Decision: one exact ref, no pattern
 
-The client matches exact identity strings, and a signing identity includes the
-git ref (`.../publish-pack.yml@refs/tags/v1.0.0`). The `publisher.ref_pattern` in
-this schema is looser than that. Options:
+The client matches exact signing identity strings, and an identity includes the
+git ref (`.../publish-pack.yml@refs/heads/main`). So `publisher.ref` is one exact
+`refs/heads/<branch>` or `refs/tags/<tag>`; wildcards are refused. The author's
+workflow signs from that fixed ref and attaches the signed files to the release
+for the version in `pack.toml`, so the identity a user trusts is the same for
+every release. This is how the official packs already work
+(`publish.yml@refs/heads/main`) and needs no pattern matching in the client.
 
-- **Exact ref (recommended, no new client attack surface).** Replace
-  `ref_pattern` with one exact `ref`, for example `refs/heads/main`. The author's
-  workflow signs from that fixed ref and attaches the signed files to the
-  release for the version in `pack.toml`, so the trusted identity is the same for
-  every release. This is how the official packs already work
-  (`publish.yml@refs/heads/main`).
-- **Pattern matching in the client.** Keeps tag-triggered signing
-  (`refs/tags/v*`, as nono does server-side) but adds pattern matching to
-  identity verification, which is new attack surface.
-- **Exact identity per version in the index.** The user re-trusts on every
-  release, which is poor UX.
-
-Until the owners choose, this PR keeps `ref_pattern` and the validator's
-prefix-only rule.
+Rejected: client-side pattern matching (as nono does server-side for
+`refs/tags/v*`), which adds attack surface to identity verification, and an exact
+identity per version, which makes the user re-trust on every release. The `mvm`
+owners can revisit this if tag-triggered signing matters more than a smaller
+verifier.
 
 ## Intake (next step, not built)
 
