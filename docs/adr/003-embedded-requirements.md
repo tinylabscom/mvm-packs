@@ -76,13 +76,35 @@ package works or is the right version, and not that the binary is unmodified
 (for Claude Code 2.1.273, about 64% of sampled bytes match the official release,
 so this ADR does not claim byte identity).
 
+Safeguards on the check (from the `mvm` client team's review):
+
+- It runs on the exact rootfs bytes whose digest chains to the signed descriptor:
+  the member is read from the already digest-checked archive and hash-checked
+  against the bundle manifest, never from a rebuilt copy.
+- `debugfs` is invoked read-only with `-R`, with a time limit and an output size
+  limit, and its output is treated as untrusted text (never interpreted, escaped
+  when printed).
+- The table is not authority and changes nothing the client trusts.
+
 ### 3. Claude's list
 
 For `agent/claude@2.0.0` as built: `claude-code-native`, `mvm-agent`, `bash`,
 `coreutils`, `glibc`; commands `bash`, `sh`. Not required, and absent: `git`,
-`ripgrep`. If the product target is a general coding agent, `git` is added to
-`packages` and the archive is rebuilt as a new version; the descriptor never
-changes after signing.
+`ripgrep`. The pinned Claude binary is glibc-linked (interpreter
+`/lib/ld-linux-aarch64.so.1`, glibc 2.40 in the closure), so its bundled ripgrep
+applies and `rg` need not be shipped.
+
+Keep this pack minimal: the demo contract (`tinylabscom/mvm#4839`, one WebFetch
+over 3 turns) needs no `git` or `rg`. A coding-agent use needs more (at least
+`git`), which belongs in a separate variant pack with its own version and
+digest, not in a larger default; the descriptor never changes after signing.
+Tools are not added speculatively (`curl`, `node`, `python3`, `jq`): each one is
+attack surface in a sealed root filesystem and enlarges the signed digest.
+
+The right list for a workload is found empirically: boot the draft rootfs through
+the builder/consumer path, run the intended workload class, and record which
+commands fail with "not found". Until that is done the list above is the
+minimum, not a proven sufficient set.
 
 ### 4. Community packs
 
@@ -105,8 +127,8 @@ it is not decided here.
 
 ## Open questions
 
-- Which tools the Claude pack must carry (is `git` required?). Needs the product
-  owner and the client team.
+- Whether to ship a separate coding variant of `agent/claude`, and who runs the
+  empirical boot test that finds its missing commands. The product owner decides.
 - Whether `commands` should also check that the file is executable and for the
   right architecture (`debugfs` can read mode and an ELF header via `dump`).
 - Whether to verify the Sigstore sidecar bundles in the archive, which needs
