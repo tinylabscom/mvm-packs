@@ -55,9 +55,9 @@ never copied and stay release assets of the author's repository.
 }
 ```
 
-Versions use the same optional `tags`, `guest_arch` and `size_bytes` as the
-official index extension (`mvm` contract `pack-registry-index-tags-platform`),
-with the same rules: advisory only, a tag names at most one version, one
+Versions carry optional `tags`, `guest_arch` and `size_bytes`. They are defined
+here and do not depend on the official-index extension (`mvm` contract
+`pack-registry-index-tags-platform`) shipping first; the rules match it: advisory only, a tag names at most one version, one
 architecture per version. Unknown fields are refused. The `publisher` block is
 copied from the reference file and must still equal it.
 
@@ -74,21 +74,50 @@ copied from the reference file and must still equal it.
 - Packs are sorted by `namespace/name`, versions newest first, so output is
   deterministic.
 
-## What a client must do (proposal for the `mvm` owners)
+## What a client must do (proposal, reviewed against `mvm` main by its client team)
 
-1. Fetch `manifest.json` and `manifest.sigstore.json` from the community root
-   and refuse unless the manifest bytes hash to the index pin.
-2. Verify the bundle's certificate identity equals
-   `https://github.com/<publisher.repository>/<publisher.workflow>@<ref>` with
-   `<ref>` matching `publisher.ref_pattern` (and the environment, if set), under
-   the GitHub Actions issuer.
-3. Refuse unless the signer's repository owner equals the pack namespace.
-4. Treat the index publisher block as discovery only: install only if the user
-   has trusted that identity, either with an explicit `--trust-publisher` on
-   first pull or a trust policy entry. Then pin it in a lockfile; a different
-   signer for the same pack is an error.
-5. Never grant a community namespace the built-in trust of `agent/` or
-   `runtime/`.
+The client team's engineering input; the `mvm` owners still have to approve it.
+
+1. **Separate root.** A community registry is a different `registry_url`, never a
+   flag inside the official index. The official trust policy stays untouched and
+   the client fails closed. A client that does not know schema 3 must refuse the
+   file by `schema_version`.
+2. Fetch `manifest.json` and `manifest.sigstore.json` from the community root and
+   refuse unless the manifest bytes hash to the index pin.
+3. **Trust lives in the operator policy.** Verification reads the operator's
+   publisher policy (namespace -> OIDC issuer and exact signing identities). An
+   explicit `--trust-publisher` on first use writes that policy entry; a lockfile
+   pin alone is not enough. The prompt shows the exact workflow identity,
+   repository, ref and environment being trusted. The index can never pre-fill an
+   enrollment: discovery enrolls nothing.
+4. **Owner = namespace is an extra refusal, not a substitute.** The client does not
+   derive a GitHub owner from the signer today. If added, it is new logic that
+   refuses a signer whose repository owner differs from the namespace, on top of
+   the policy entry.
+5. A different signer for the same pack is an error, not an update.
+6. A community namespace never gets the built-in trust of `agent/` or `runtime/`;
+   `mvm` stays reserved.
+
+### Open decision: ref pattern or exact identity
+
+The client matches exact identity strings, and a signing identity includes the
+git ref (`.../publish-pack.yml@refs/tags/v1.0.0`). The `publisher.ref_pattern` in
+this schema is looser than that. Options:
+
+- **Exact ref (recommended, no new client attack surface).** Replace
+  `ref_pattern` with one exact `ref`, for example `refs/heads/main`. The author's
+  workflow signs from that fixed ref and attaches the signed files to the
+  release for the version in `pack.toml`, so the trusted identity is the same for
+  every release. This is how the official packs already work
+  (`publish.yml@refs/heads/main`).
+- **Pattern matching in the client.** Keeps tag-triggered signing
+  (`refs/tags/v*`, as nono does server-side) but adds pattern matching to
+  identity verification, which is new attack surface.
+- **Exact identity per version in the index.** The user re-trusts on every
+  release, which is poor UX.
+
+Until the owners choose, this PR keeps `ref_pattern` and the validator's
+prefix-only rule.
 
 ## Intake (next step, not built)
 
