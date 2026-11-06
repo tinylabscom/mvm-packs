@@ -351,6 +351,24 @@ class ArchiveReadBackTests(unittest.TestCase):
         with self.assertRaises(SystemExit):
             builder.bundle_key_url("https://bundles.example/app.tar")
 
+    def test_declared_requirements_fail_closed_on_a_root_that_cannot_be_read(self):
+        data = make_mvmpkg()   # its rootfs is not an ext4 image, so nothing can be confirmed
+        import io
+
+        def serve(url, timeout=None):
+            return io.BytesIO(TEST_PUBLIC if url.endswith("-bundle-publisher.pub") else data)
+
+        with patch.object(builder.urllib.request, "urlopen", side_effect=serve), \
+                self.assertRaises(SystemExit):
+            builder.verify_archive(self.descriptor(data), {"packages": ["bash"], "commands": []})
+
+    def test_requirements_are_only_allowed_on_application_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pack.toml"
+            path.write_text('version = "1.0.0"\ndescription = "d"\n[requirements]\npackages = ["bash"]\n')
+            with self.assertRaises(SystemExit):
+                builder.parse_pack_toml(path)
+
     def test_unreadable_archive_is_refused_before_signing(self):
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(builder.urllib.request, "urlopen", side_effect=OSError("404")), \

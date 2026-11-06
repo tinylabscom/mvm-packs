@@ -39,6 +39,7 @@ import urllib.request
 from pathlib import Path
 
 import ed25519
+import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import validate_application
 from publisher_identity import (
@@ -84,7 +85,7 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build", "application"}:
+    if set(data) - {"version", "description", "image", "image_build", "application", "requirements"}:
         fail(f"{path}: unknown pack metadata fields")
     application = data.get("application")
     if "application" in data:
@@ -96,6 +97,14 @@ def parse_pack_toml(path):
             fail(f"{path}: application version must be canonical semver without build metadata")
         if "image" in data or "image_build" in data:
             fail(f"{path}: application cannot declare image or image_build")
+    requirements = None
+    if "requirements" in data:
+        if "application" not in data:
+            fail(f"{path}: [requirements] is only allowed on an application source")
+        try:
+            requirements = rootfs_requirements.validate_requirements(data["requirements"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     image = data.get("image")
     if image is not None and not isinstance(image, dict):
         fail(f"{path}: [image] must be a table")
@@ -105,7 +114,8 @@ def parse_pack_toml(path):
     if image is not None and image_build is not None:
         fail(f"{path}: [image] and [image_build] cannot both be present")
     return {"version": version, "description": description, "image": image,
-            "image_build": image_build, "application": application}
+            "image_build": image_build, "application": application,
+            "requirements": requirements}
 
 
 def validate_image_build_intent(intent, reference):
@@ -301,7 +311,20 @@ def fetch_bundle_key(bundle):
     return key
 
 
-def inspect_bundle(path, application, public_key):
+def check_embedded_requirements(archive, member, requirements, path):
+    """Copy the (already hash-checked) rootfs out of the tar and list it read-only."""
+    with tempfile.NamedTemporaryFile(prefix="rootfs-") as image:
+        source = archive.extractfile(member)
+        while chunk := source.read(1 << 20):
+            image.write(chunk)
+        image.flush()
+        try:
+            rootfs_requirements.check_rootfs(image.name, requirements)
+        except ValueError as error:
+            fail(f"{path}: {error}")
+
+
+def inspect_bundle(path, application, public_key, requirements=None):
     """Refuse unless the archive embeds the application: a kernel and a root
     filesystem whose hashes match the bundle manifest, for the descriptor's
     key ID and architecture, with a valid Ed25519 manifest.sig by that key.
@@ -334,7 +357,7 @@ def inspect_bundle(path, application, public_key):
             artifacts = manifest.get("artifacts")
             if not isinstance(artifacts, list) or not artifacts:
                 fail(f"{path}: bundle manifest lists no artifacts")
-            roles, hashed = set(), set()
+            roles, hashed, rootfs_path = set(), set(), None
             for artifact in artifacts:
                 if artifact["path"] in hashed:
                     fail(f"{path}: artifact {artifact['path']!r} is listed twice")
@@ -348,16 +371,20 @@ def inspect_bundle(path, application, public_key):
                 if digest.hexdigest() != artifact["sha256"]:
                     fail(f"{path}: artifact {artifact['path']!r} does not match its recorded SHA-256")
                 roles.add(artifact["role"])
+                if artifact["role"] == "rootfs":
+                    rootfs_path = artifact["path"]
             if sum(members[p].size for p in hashed) > bundle["archive_size"]:
                 fail(f"{path}: artifacts are larger than the archive")
             if not {"kernel", "rootfs"} <= roles:
                 fail(f"{path}: archive does not embed a kernel and a root filesystem")
+            if requirements:
+                check_embedded_requirements(archive, members[rootfs_path], requirements, path)
     except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError,
             RecursionError, MemoryError) as error:
         fail(f"{path}: not a valid application archive: {error!r}")
 
 
-def verify_archive(application):
+def verify_archive(application, requirements=None):
     """Read the pinned archive back before signing a new application version.
 
     Refuses unless size and SHA-256 match the descriptor and the archive embeds
@@ -385,7 +412,7 @@ def verify_archive(application):
         if digest.hexdigest() != bundle["archive_sha256"]:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        inspect_bundle(spool.name, application, public_key)
+        inspect_bundle(spool.name, application, public_key, requirements)
 
 
 def sign(manifest_path, bundle_path):
@@ -458,7 +485,7 @@ def build_one(source, check_only=False):
         return
 
     if application is not None:
-        verify_archive(application)
+        verify_archive(application, meta["requirements"])
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
