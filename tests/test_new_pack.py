@@ -10,23 +10,35 @@ create = runpy.run_path(str(ROOT / "scripts/new-pack.py"))["create"]
 
 
 class NewPackTests(unittest.TestCase):
-    def test_creates_unprivileged_policy_draft_without_secrets(self):
+    def test_creates_application_draft_that_must_be_filled_in(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = create(root, "acme", "example")
             self.assertIn('version = "0.1.0"', (source / "pack.toml").read_text())
-            self.assertIn("allow = []", (source / "pack/group.toml").read_text())
-            self.assertIn("never include values", (source / "pack/README.md").read_text())
-            with patch.object(builder, "PACKS", root / "packs"):
+            self.assertIn("[application.bundle]", (source / "pack.toml").read_text())
+            self.assertEqual([p.name for p in source.iterdir()], ["pack.toml"])
+            with patch.object(builder, "PACKS", root / "packs"), self.assertRaises(SystemExit):
                 builder.build_one(source, check_only=True)
             self.assertFalse((root / "packs").exists())
             with self.assertRaises(FileExistsError):
                 create(root, "acme", "example")
 
+    def test_policy_only_source_cannot_be_published(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "pack-sources/acme/policy"
+            (source / "pack").mkdir(parents=True)
+            (source / "pack.toml").write_text('version = "1.0.0"\ndescription = "Policy"\n')
+            (source / "pack/group.toml").write_text("[network]\nallow = []\n")
+            with patch.object(builder, "PACKS", Path(directory) / "packs"), \
+                    self.assertRaisesRegex(SystemExit, "embed its application binary"):
+                builder.build_one(source, check_only=True)
+
     def test_source_check_refuses_changes_to_published_version(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = create(root, "acme", "example")
+            (source / "pack.toml").write_text(
+                (source / "pack.toml").read_text().replace("REPLACE.mvmpkg", "x.mvmpkg"))
             published = root / "packs/acme/example/0.1.0"
             published.mkdir(parents=True)
             (published / "manifest.json").write_text("different bytes")
