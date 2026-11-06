@@ -149,11 +149,24 @@ by a patcher:
   is 221197984 bytes, SHA-256
   `0ea64e932c6fac35ce4e992140612157fe1cecab052d59539873b350a594d3c6`, loader
   `/lib/ld-musl-aarch64.so.1`.
-- The embedded file is 65536 bytes larger. All 375 sampled 64-byte slices of the
-  upstream code appear in the embedded file at a fixed offset of +65536, and the
-  program headers differ, as expected from a loader-path patch. That is
-  consistent with "official bytes, new loader path"; it is a sampled comparison,
-  not a full proof, and it is not the glibc `claude-linux-arm64` build.
+- The embedded file is 65536 bytes larger. `scripts/compare-patched-elf.py`
+  aligns the two files at that fixed shift and compares every byte, not a sample.
+  Result: 324 bytes differ in total, in 174 small ranges. All lie in the ELF
+  header, the program header table (one entry added), the section header table
+  (offsets moved by the shift), the loader-path string, or are 7 one-byte
+  section-index fields in `.dynsym` that name the same section in both files
+  (sections were renumbered). The program code and data, 221 MB, are identical.
+  The tool exits non-zero if any other byte differs; a one-bit change deep in the
+  body makes it fail. So the embedded file is the official musl 2.1.273 binary
+  with only a loader-path patch.
+- The upstream tarball is authentic as far as the vendor's own signature goes:
+  `SHASUMS256.txt` for v2.1.273 verifies with `gpg` ("Good signature from
+  Anthropic Claude Code Release Signing") against a key whose fingerprint
+  `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE` is the one the vendor's
+  setup page publishes, and its `claude-linux-arm64-musl.tar.gz` line equals the
+  tarball hash above. Checked 2026-11-06 in a throwaway keyring; the key was
+  fetched from the vendor's site, so this trusts that site and the setup page
+  together, not an independent channel.
 - `environment-inputs.json` records a different build (2.1.312, glibc). It does
   not describe this archive.
 
