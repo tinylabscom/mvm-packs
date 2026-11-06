@@ -68,6 +68,17 @@ size = 221263520
   refuses unless the bytes match exactly. A name-only check would accept any
   program installed under the right name; a pin does not.
 
+- `environment_policy`: the policy the archive's **signed environment** must carry,
+  compared for exact equality with the policy in the bundle manifest's single
+  `environment` member (no missing field, no extra host, no wider budget). It exists
+  so a spend or egress ceiling the maintainer consented to cannot be silently absent
+  from what admission enforces. For `agent/claude` the consented policy is
+  `{"allow_hosts":["api.anthropic.com:443"],"request_budget":{"max_requests":1,
+  "max_spend_microusd":500000,"model":"claude-haiku-4-5-20251001"}}`
+  (`mvm` `scripts/claude-demo-consumer.md`). This check reads only the bundle
+  manifest, not the root filesystem. The draft 2026-10-25 archive carries
+  `{"allow_hosts":["api.anthropic.com:443"]}` and would be refused.
+
 `[requirements]` is registry-side build input. It is not in the signed descriptor,
 whose five fields and nested application schema are shared with the client and
 stay unchanged. It states what the publisher claims the archive contains; the

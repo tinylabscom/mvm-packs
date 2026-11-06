@@ -44,7 +44,7 @@ def read_member(archive, name, limit):
     return archive.extractfile(info).read()
 
 
-def derive(archive_path, key_path, source, binaries, packages, commands):
+def derive(archive_path, key_path, source, binaries, packages, commands, environment_policy=None):
     """Return the text of the draft pack.toml blocks; raise ValueError on any failed check."""
     sha256, size = measure(archive_path)
     key = Path(key_path).read_bytes()
@@ -72,11 +72,16 @@ def derive(archive_path, key_path, source, binaries, packages, commands):
             image.flush()
             pins = [rootfs_requirements.derive_binary_pin(image.name, package, path)
                     for package, _, path in (b.partition(":") for b in binaries)]
-            requirements = rootfs_requirements.validate_requirements(
-                {"packages": packages, "commands": commands, "binaries": pins}) if (
-                    packages or commands or pins) else None
+            wanted = {"packages": packages, "commands": commands, "binaries": pins}
+            if environment_policy is not None:
+                wanted["environment_policy"] = environment_policy
+            requirements = rootfs_requirements.validate_requirements(wanted) if (
+                packages or commands or pins or environment_policy is not None) else None
             if requirements:
-                rootfs_requirements.check_rootfs(image.name, requirements)
+                if environment_policy is not None:
+                    builder["check_environment_policy"](manifest, environment_policy, str(archive_path))
+                if rootfs_requirements.needs_rootfs(requirements):
+                    rootfs_requirements.check_rootfs(image.name, requirements)
             present = rootfs_requirements.store_packages(image.name)
     lines = ["[application]", "schema_version = 1", f'guest_arch = "{arch}"', "",
              "[application.bundle]", f'source = "{source}"', f'archive_sha256 = "{sha256}"',
@@ -85,6 +90,13 @@ def derive(archive_path, key_path, source, binaries, packages, commands):
         lines += ["", "[requirements]"]
         lines += [f"{key} = {json.dumps(requirements[key])}" for key in ("packages", "commands")
                   if requirements[key]]
+        policy = requirements.get("environment_policy")
+        if policy is not None:
+            lines += ["", "[requirements.environment_policy]"]
+            lines += [f"{k} = {json.dumps(v)}" for k, v in policy.items() if not isinstance(v, dict)]
+            for k, v in policy.items():
+                if isinstance(v, dict):
+                    lines += ["", f"[requirements.environment_policy.{k}]"] + [f"{kk} = {json.dumps(vv)}" for kk, vv in v.items()]
         for pin in requirements["binaries"]:
             lines += ["", "[[requirements.binaries]]", f'package = "{pin["package"]}"',
                       f'path = "{pin["path"]}"', f'sha256 = "{pin["sha256"]}"', f'size = {pin["size"]}']
@@ -101,10 +113,13 @@ def main(argv=None):
     parser.add_argument("--binary", action="append", default=[], metavar="PACKAGE:PATH")
     parser.add_argument("--require-package", action="append", default=[])
     parser.add_argument("--require-command", action="append", default=[])
+    parser.add_argument("--environment-policy", metavar="FILE.json",
+                        help="the policy the signed environment MUST equal exactly (a JSON file); verified, then printed")
     args = parser.parse_args(argv)
     try:
         sys.stdout.write(derive(args.archive, args.key, args.source, args.binary,
-                                args.require_package, args.require_command))
+                                args.require_package, args.require_command,
+                                json.loads(Path(args.environment_policy).read_text()) if args.environment_policy else None))
     except (ValueError, KeyError, OSError, tarfile.TarError) as error:
         sys.exit(f"derive-pack-pins: {error}")
 
