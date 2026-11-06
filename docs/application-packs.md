@@ -93,6 +93,16 @@ verifies; each declared package, command and binary pin is present in the root f
 (by inode, read-only, nothing executed); the signed environment policy equals the declared
 one exactly. Anything else fails the build, and no manifest is signed.
 
+## What readers see
+
+When the publisher signs a new application version it also writes
+`pack-details/<namespace>/<name>/<version>.json`: the architecture, creation time, runtime
+asset versions, artifact hashes, the signed environment (entrypoint, resources, policy, secret
+slots, capabilities) and the pinned executables it saw in the archive. The pack page shows
+this under "Recorded at signing", labelled as **not signed registry metadata**. `validate-packs`
+refuses a record that does not match the signed descriptor. A failure to write the record never
+blocks signing, and a pull re-verifies the archive itself.
+
 ## Traps we have already hit
 
 - **A draft release cannot be read.** The publisher downloads anonymously. Merging a

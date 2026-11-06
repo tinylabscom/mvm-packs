@@ -21,6 +21,7 @@ from pathlib import Path
 
 from application_manifest import unique_object, validate_application
 from community_publishers import validate_directory
+import pack_details
 from community_index import validate_index as validate_community_index
 from publisher_identity import (
     CURRENT_IDENTITY,
@@ -292,6 +293,35 @@ def validate_index():
     )
 
 
+def validate_details():
+    """Recorded archive details must be well formed and match the signed descriptor they describe."""
+    directory = ROOT / "pack-details"
+    if not directory.is_dir():
+        return
+    for path in sorted(directory.rglob("*")):
+        rel = path.relative_to(ROOT).as_posix()
+        if path.is_dir():
+            continue
+        parts = path.relative_to(directory).parts
+        if path.is_symlink() or len(parts) != 3 or path.suffix != ".json":
+            problems.append(f"{rel}: not a recorded-details file (expected <ns>/<name>/<version>.json)")
+            continue
+        namespace, name, version = parts[0], parts[1], path.stem
+        try:
+            details = pack_details.validate(json.loads(path.read_text(encoding="utf-8"),
+                                                       object_pairs_hook=unique_object))
+            manifest = json.loads((PACKS / namespace / name / version / "manifest.json").read_text(),
+                                  object_pairs_hook=unique_object)
+            bundle = manifest["application"]["bundle"]
+            if (details["reference"] != f"{namespace}/{name}@{version}"
+                    or details["archive"]["sha256"] != bundle["archive_sha256"]
+                    or details["archive"]["size"] != bundle["archive_size"]
+                    or details["archive"]["key_id"] != bundle["key_id"]):
+                raise ValueError("does not match the signed descriptor")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"{rel}: {error}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-signatures", action="store_true", help="verify every bundle against the publisher identity")
@@ -308,6 +338,7 @@ def main(argv=None):
         validate_manifest(manifest, args.verify_signatures)
     validate_index()
     problems.extend(validate_directory(ROOT / "community" / "publishers"))
+    validate_details()
     community_index = ROOT / "community" / "index.json"
     if community_index.is_file():
         try:

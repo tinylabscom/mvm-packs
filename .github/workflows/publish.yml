@@ -141,7 +141,8 @@ jobs:
           path: |
             index.json
             packs/
-          if-no-files-found: error
+            pack-details/
+          if-no-files-found: ignore
 
   publish:
     needs: sign
@@ -194,6 +195,7 @@ jobs:
           set -euo pipefail
           python3 scripts/build-pack-pages.py
           git add index.json packs/
+          git add -A pack-details/ 2>/dev/null || true
           git add -A docs/registry/
           if git diff --cached --quiet; then
             exit 0
