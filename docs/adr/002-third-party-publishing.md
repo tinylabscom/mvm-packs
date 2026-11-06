@@ -1,6 +1,6 @@
 # ADR 002: Third-party pack publishing
 
-Status: proposed
+Status: proposed (community index section revised)
 Date: 2026-11-05
 Related: [ADR 001](001-pack-contents.md), `mvm` ADR-055 (pack naming and trust)
 
@@ -58,12 +58,13 @@ ADR 001; git carries only the descriptor.
 
 ### 3. A publisher entry is the only thing reviewed
 
-An author opens a pull request adding one file, `publishers/<owner>.toml`:
+An author opens a pull request adding one file, `community/publishers/<owner>.toml`:
 
 ```toml
 repository = "owner/repo"
 workflow   = ".github/workflows/publish-pack.yml"
 ref_pattern = "refs/tags/v*"
+environment = ""   # optional GitHub environment, empty for none
 packs      = ["name", "other-name"]
 ```
 
@@ -84,8 +85,9 @@ version it:
 2. runs the same validation as first-party packs (`validate-packs.py`);
 3. for an application, downloads the archive and checks size and SHA-256
    against the descriptor before indexing; a failure blocks the version;
-4. copies the manifest and signature bytes verbatim into `packs/` and adds the
-   exact-byte `manifest_sha256` pin to `index.json`.
+4. copies the manifest and signature bytes verbatim under `community/packs/` and
+   adds the exact-byte `manifest_sha256` pin to `community/index.json` (see
+   Community index below); it never signs them.
 
 The registry never executes anything from the author's repository and never
 runs on a `pull_request_target` with author code. Published bytes are
@@ -130,26 +132,83 @@ signed into the short-lived feed.
 - `publish.yml` must gain the archive check (section 4, step 3) before any
   application, first-party or not, is indexed.
 
-## Interim path: reviewed submission to this repository
+## Community index: references, not packs
 
-The reviewed policy-pack submission flow (`docs/publishing-a-pack.md`, the
-**Publish pack** template and `just new-pack`) is a stage before the model above.
-A submitter opens a pull request that adds a source under `pack-sources/`, and
-this repository's `publish.yml` signs it. That differs from the Decision in two
-ways, and both are accepted for the interim only:
+Community packs are listed in a separate root, `community/index.json`, and are
+never in the official `index.json`. The registry does not host, build or sign a
+community pack. An author's whole contribution is a reference to a pack their
+own repository already signs and releases (Decision 2).
 
-- The signing identity is the registry's, not the author's (Decision 2).
-- It covers policy packs only; application descriptors are out of scope.
+**The reference.** One pull request adds `community/publishers/<owner>.toml`
+(Decision 3): repository, workflow, ref pattern and the pack names it may list.
+That is the only reviewed change. No pack source, payload or archive is added
+to this repository.
 
-The registry identity is trusted by default for `agent/` and `runtime/`, so
-those namespaces, with `mvm/`, are reserved: `new-pack.py` refuses them and the
-template asks reviewers to check. Submissions go in an owner-named namespace and
-carry no official label. Moving a pack to author-signed publishing later is a
-new version under a publisher entry, not an edit.
+**The index.** A registry workflow resolves each reference (Decision 4) and
+writes `community/index.json`: for every verified release, the pack name,
+version, the author's `manifest.json` and `manifest.sigstore.json` URLs, and the
+`manifest_sha256` of the exact manifest bytes. It also keeps a verbatim copy of
+those two small files (never an application archive) so validation and the
+generated pages work offline. Application archives stay release assets in the
+author's repository and are read back and checked against the descriptor
+before a version is listed.
+
+**Trust.** The index is discovery only and is not signed. Listing says nothing
+about safety. A client installs a community pack only after the user trusts the
+author's signing identity (repository, workflow, ref); a namespace in the
+community index never inherits the registry's built-in trust. The registry
+identity signs nothing community, so a community pack can be delisted or
+revoked by identity without touching official packs. The reserved namespaces
+`mvm`, `agent` and `runtime` cannot appear in the community index.
+
+**Index schema.** The community index needs a publisher block (repository,
+workflow, ref pattern) and manifest URLs per version, which the official
+schema v2 does not carry. It is a new schema version, and the client must
+parse it before any community pack can be pulled. That client work is tracked
+in the `mvm` repository; until it ships, community entries are listed on the
+pages but not installable with `mvmctl`.
+
+**What this replaces.** The reviewed submission flow (`docs/publishing-a-pack.md`,
+`just new-pack`) puts an author's source in this repository, where the registry
+workflow signs it under the identity clients trust by default for `agent/` and
+`runtime/`. That is not a community path. It remains only for packs the
+maintainers accept as first-party, with `mvm`, `agent` and `runtime` reserved
+(`new-pack.py` and the maintainer check), and should be retired for community
+submissions once the reference flow exists.
+
+## Prior art
+
+How the registries we are matching actually work (read from their docs on
+2026-11-05):
+
+- **nono** (registry.nono.sh) hosts uploaded files. The author logs in with
+  GitHub, creates the pack, and registers a trusted publisher: repository,
+  workflow path, ref pattern and optional environment. The namespace must equal
+  the publishing GitHub org. The author's workflow signs keyless and exchanges
+  a GitHub OIDC token for a short-lived upload token. On pull, the client
+  verifies the Sigstore bundles, checks that the signer's org matches the
+  namespace, and pins the signer in a lockfile. A reusable workflow reports its
+  own path as the signing identity, so each pack inlines its workflow.
+- **smolmachines** pushes to any OCI registry (`smolvm pack push ... ghcr.io/you/x:v1`)
+  and keeps `library/` for official entries. Its docs do not describe third-party
+  listing.
+
+This ADR keeps the author-hosted side (a reference, not an upload) and takes
+nono's identity binding:
+
+- The namespace equals the GitHub owner of the signing repository, and the
+  client refuses a pack whose signer owner differs (Decision 1).
+- The signer identity is pinned in a client lockfile on first pull; a different
+  signer for the same pack is an error, not an update.
+- The author's workflow is inlined in the author's repository. The version is
+  `pack.toml`'s semver, and the tag only triggers the run.
+- A trusted-publisher entry has an optional `environment`, as in nono.
 
 ## Open questions
 
-- **Reusable-workflow identity.** If the author's workflow calls a registry
+- **Reusable-workflow identity.** nono reports that a reusable workflow's
+  signing identity is the called file, not the caller, which is why it inlines
+  workflows; confirm with a test run here. If the author's workflow calls a registry
   reusable workflow, which workflow ref appears in the signing certificate: the
   caller or the called one? The publisher entry format depends on this. Needs
   a test signing run, not an assumption.
@@ -165,12 +224,15 @@ new version under a publisher entry, not an edit.
 
 ## Follow-ups
 
-1. Add the archive check to the publisher path (also required by ADR 001).
+1. Done: the archive read-back before signing (#100). The community intake runs
+   the same check before listing an application version.
 2. Run a test keyless signing from a throwaway repository to settle the
    reusable-workflow identity question.
-3. Define `publishers/<owner>.toml`, its validator and tests.
-4. Add the intake workflow and an author-facing guide (`docs/publishing.md`).
-5. Extend the generated pages for the official/community label and publisher
-   identity.
-6. Index schema change and matching `mvm` client work, tracked in the `mvm`
-   repository.
+3. Define `community/publishers/<owner>.toml`, its validator and tests.
+4. Add the intake workflow that resolves references into `community/index.json`
+   and an author-facing guide (`docs/publishing.md`).
+5. Extend the generated pages with a Community section and the author's
+   signing identity.
+6. New index schema version and the matching `mvm` client work (community
+   root, per-identity trust), tracked in the `mvm` repository.
+7. Retire the in-repo submission flow for community packs.
