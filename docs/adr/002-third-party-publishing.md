@@ -194,9 +194,10 @@ How the registries we are matching actually work (read from their docs on
   verifies the Sigstore bundles, checks that the signer's org matches the
   namespace, and pins the signer in a lockfile. A reusable workflow reports its
   own path as the signing identity, so each pack inlines its workflow.
-- **smolmachines** pushes to any OCI registry (`smolvm pack push ... ghcr.io/you/x:v1`)
-  and keeps `library/` for official entries. Its docs do not describe third-party
-  listing.
+- **An OCI-based microVM tool** (compared in
+  [prior-art-pack-distribution.md](../prior-art-pack-distribution.md)) lets the author
+  push to any OCI registry and keeps an official namespace for its own entries. Its
+  public documents do not describe third-party listing.
 
 This ADR keeps the author-hosted side (a reference, not an upload) and takes
 nono's identity binding:
