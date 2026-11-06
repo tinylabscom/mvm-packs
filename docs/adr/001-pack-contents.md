@@ -69,8 +69,13 @@ unreadable source or a non-HTTPS source. It then opens the tar without
 extracting it and refuses unless the bundle manifest's key ID and architecture
 match the descriptor, every listed artifact is present with the recorded size
 and SHA-256, and a kernel and a root filesystem are among them. It does not
-verify `manifest.sig`, because that needs a bundle key the consumer trusts, and
-it does not inspect the root filesystem.
+inspect the root filesystem. It also checks `manifest.sig`: the Ed25519
+public key is fetched from `<archive stem>-bundle-publisher.pub` beside the
+archive, must hash (SHA-256, first 32 hex characters) to the descriptor's
+`key_id`, and must validate the signature over the exact `manifest.json` bytes.
+That shows the archive is consistent under the key the descriptor names; it does
+not make the key trusted, which stays the consumer's decision (the key is never
+taken from the archive).
 
 ### 2. How index, manifest, descriptor and archive relate
 

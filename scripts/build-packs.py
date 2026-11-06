@@ -38,6 +38,7 @@ import tomllib
 import urllib.request
 from pathlib import Path
 
+import ed25519
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import validate_application
 from publisher_identity import (
@@ -276,12 +277,38 @@ def check_existing_payload(out, payload):
             fail(f"{out}: published payload differs from source at {relative}")
 
 
-def inspect_bundle(path, application):
+def bundle_key_url(source):
+    """The bundle public key is published beside the archive: <stem>-bundle-publisher.pub."""
+    if not source.startswith("https://") or not source.endswith(".mvmpkg"):
+        fail(f"{source}: cannot locate the bundle public key beside a non-.mvmpkg source")
+    return source[: -len(".mvmpkg")] + "-bundle-publisher.pub"
+
+
+def fetch_bundle_key(bundle):
+    """Download the 32-byte Ed25519 key and bind it to the descriptor's key_id.
+
+    key_id is the first 32 hex characters of the key's SHA-256, so an author
+    cannot supply a different key. Trusting that key stays with the consumer.
+    """
+    url = bundle_key_url(bundle["source"])
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            key = response.read(65)
+    except OSError as error:
+        fail(f"{url}: cannot read the bundle public key: {error}")
+    if len(key) != 32 or hashlib.sha256(key).hexdigest()[:32] != bundle["key_id"]:
+        fail(f"{url}: not a 32-byte key matching the descriptor key_id")
+    return key
+
+
+def inspect_bundle(path, application, public_key):
     """Refuse unless the archive embeds the application: a kernel and a root
     filesystem whose hashes match the bundle manifest, for the descriptor's
-    key ID and architecture. Members are read, never extracted.
+    key ID and architecture, with a valid Ed25519 manifest.sig by that key.
+    Members are read, never extracted.
 
-    It does not verify manifest.sig: that needs a bundle key the consumer trusts.
+    A valid signature shows the archive is internally consistent under the key
+    the descriptor names. It does not make that key trusted: the consumer decides.
     """
     bundle = application["bundle"]
     try:
@@ -298,7 +325,10 @@ def inspect_bundle(path, application):
                 fail(f"{path}: archive has no manifest.json and manifest.sig")
             if members["manifest.sig"].size != 64 or members["manifest.json"].size > 1 << 20:
                 fail(f"{path}: manifest.sig must be 64 bytes and manifest.json at most 1 MiB")
-            manifest = json.loads(archive.extractfile("manifest.json").read())
+            manifest_raw = archive.extractfile("manifest.json").read()
+            if not ed25519.verify(public_key, manifest_raw, archive.extractfile("manifest.sig").read()):
+                fail(f"{path}: manifest.sig is not a valid signature by the descriptor's bundle key")
+            manifest = json.loads(manifest_raw)
             if manifest.get("key_id") != bundle["key_id"] or manifest.get("arch") != application["guest_arch"]:
                 fail(f"{path}: bundle key ID or architecture does not match the descriptor")
             artifacts = manifest.get("artifacts")
@@ -331,12 +361,13 @@ def verify_archive(application):
     """Read the pinned archive back before signing a new application version.
 
     Refuses unless size and SHA-256 match the descriptor and the archive embeds
-    the application (inspect_bundle). Runs only for new versions (ADR 001).
+    the application and carries a valid bundle signature (inspect_bundle). Runs only for new versions (ADR 001).
     """
     bundle = application["bundle"]
     source = bundle["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    public_key = fetch_bundle_key(bundle)
     digest, size = hashlib.sha256(), 0
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
@@ -354,7 +385,7 @@ def verify_archive(application):
         if digest.hexdigest() != bundle["archive_sha256"]:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        inspect_bundle(spool.name, application)
+        inspect_bundle(spool.name, application, public_key)
 
 
 def sign(manifest_path, bundle_path):

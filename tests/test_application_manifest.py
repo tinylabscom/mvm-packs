@@ -253,8 +253,15 @@ class ApplicationManifestTests(unittest.TestCase):
                 self.assertEqual(raw, path.read_bytes())
 
 
-def make_mvmpkg(roles=("kernel", "rootfs"), key_id="b" * 32, arch="aarch64", corrupt=None,
-                extra_members=(), repeat_artifact=0, raw_manifest=None):
+from tests.test_ed25519 import sign as ed25519_sign  # noqa: E402
+
+TEST_SECRET = bytes(range(32))
+TEST_PUBLIC = ed25519_sign(TEST_SECRET, b"")[0]
+TEST_KEY_ID = hashlib.sha256(TEST_PUBLIC).hexdigest()[:32]
+
+
+def make_mvmpkg(roles=("kernel", "rootfs"), key_id=TEST_KEY_ID, arch="aarch64", corrupt=None,
+                extra_members=(), repeat_artifact=0, raw_manifest=None, signing_secret=TEST_SECRET):
     """Build a tiny synthetic .mvmpkg tar (manifest.json, manifest.sig, artifacts/)."""
     import io
     import tarfile
@@ -270,7 +277,8 @@ def make_mvmpkg(roles=("kernel", "rootfs"), key_id="b" * 32, arch="aarch64", cor
     manifest = raw_manifest or json.dumps({"key_id": key_id, "arch": arch, "artifacts": artifacts}).encode()
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
-        for name, data in {"manifest.json": manifest, "manifest.sig": b"s" * 64, **files}.items():
+        signature = ed25519_sign(signing_secret, manifest)[1]
+        for name, data in {"manifest.json": manifest, "manifest.sig": signature, **files}.items():
             info = tarfile.TarInfo(name)
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
@@ -282,13 +290,21 @@ def make_mvmpkg(roles=("kernel", "rootfs"), key_id="b" * 32, arch="aarch64", cor
 class ArchiveReadBackTests(unittest.TestCase):
     def descriptor(self, data, **bundle_changes):
         value = application()
-        value["bundle"] |= {"archive_size": len(data),
+        value["bundle"] |= {"archive_size": len(data), "key_id": TEST_KEY_ID,
                             "archive_sha256": hashlib.sha256(data).hexdigest()} | bundle_changes
         return value
 
-    def check(self, descriptor, data):
+    def check(self, descriptor, data, key=TEST_PUBLIC):
         import io
-        with patch.object(builder.urllib.request, "urlopen", return_value=io.BytesIO(data)):
+
+        def serve(url, timeout=None):
+            if url.endswith("-bundle-publisher.pub"):
+                if key is None:
+                    raise OSError("404")
+                return io.BytesIO(key)
+            return io.BytesIO(data)
+
+        with patch.object(builder.urllib.request, "urlopen", side_effect=serve):
             builder.verify_archive(descriptor)
 
     def test_archive_embedding_a_kernel_and_rootfs_passes(self):
@@ -314,7 +330,8 @@ class ArchiveReadBackTests(unittest.TestCase):
         for label, data in {
             "no rootfs": make_mvmpkg(roles=("kernel",)),
             "no kernel": make_mvmpkg(roles=("rootfs",)),
-            "wrong key": make_mvmpkg(key_id="c" * 32),
+            "wrong key id in manifest": make_mvmpkg(key_id="c" * 32),
+            "signed by another key": make_mvmpkg(signing_secret=bytes(range(1, 33))),
             "wrong arch": make_mvmpkg(arch="x86_64"),
             "tampered artifact": make_mvmpkg(corrupt="rootfs"),
             "symlink member": make_mvmpkg(extra_members=(symlink,)),
@@ -324,6 +341,15 @@ class ArchiveReadBackTests(unittest.TestCase):
         }.items():
             with self.subTest(label), self.assertRaises(SystemExit):
                 self.check(self.descriptor(data), data)
+
+    def test_bundle_key_must_exist_and_match_the_descriptor_key_id(self):
+        data = make_mvmpkg()
+        for label, key in {"missing key": None, "wrong key": bytes(range(1, 33)),
+                           "short key": TEST_PUBLIC[:16]}.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check(self.descriptor(data), data, key=key)
+        with self.assertRaises(SystemExit):
+            builder.bundle_key_url("https://bundles.example/app.tar")
 
     def test_unreadable_archive_is_refused_before_signing(self):
         with tempfile.TemporaryDirectory() as tmp, \
