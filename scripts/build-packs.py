@@ -585,6 +585,11 @@ def build_one(source, check_only=False):
             print(f"{reference}: unchanged")
             return
 
+    if application is None and not out.exists():
+        fail(
+            f"{reference}: a pack must embed its application binary in the .mvmpkg; "
+            "policy-only versions cannot be published or signed (add an [application] bundle)"
+        )
     if check_only:
         print(f"{reference}: source valid")
         return

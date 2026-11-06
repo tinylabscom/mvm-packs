@@ -48,6 +48,14 @@ class ImageReleaseError(Exception):
     """The published image release did not pass authentication."""
 
 
+# Policy-only versions published before binaries were required; immutable, never to grow.
+LEGACY_POLICY_ONLY = frozenset({
+    "agent/claude@1.0.1", "agent/codex@1.0.0", "agent/goose@1.0.0", "agent/opencode@1.0.0",
+    "agent/pi@1.0.0", "runtime/go@1.0.0", "runtime/node@1.0.0", "runtime/python@1.0.0",
+    "runtime/rust@1.0.0",
+})
+
+
 def check(condition, message):
     if not condition:
         problems.append(message)
@@ -129,6 +137,11 @@ def validate_manifest(path, verify_signatures=False):
         and manifest["schema_version"] in (1, 2),
         f"{rel}: schema_version must be integer 1 or 2",
     )
+    if not is_application:
+        check(
+            manifest.get("reference") in LEGACY_POLICY_ONLY,
+            f"{rel}: a pack must embed its application binary; policy-only manifests are legacy",
+        )
     if is_application:
         check(manifest.get("kind") == "application", f"{rel}: kind must be application")
         try:

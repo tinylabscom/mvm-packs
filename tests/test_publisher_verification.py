@@ -138,9 +138,20 @@ class PublisherVerificationTests(unittest.TestCase):
             source, published = self.make_source_and_published_pack(root)
             self.assertTrue(source.is_dir())
             with patch.object(validator, "ROOT", root), \
-                    patch.object(validator, "PACKS", root / "packs"):
+                    patch.object(validator, "PACKS", root / "packs"), \
+                    patch.object(validator, "LEGACY_POLICY_ONLY", {"runtime/example@1.0.0"}):
                 validator.validate_manifest(published / "manifest.json")
             self.assertFalse(validator.problems)
+
+    def test_new_policy_only_manifest_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, published = self.make_source_and_published_pack(root)
+            with patch.object(validator, "ROOT", root), \
+                    patch.object(validator, "PACKS", root / "packs"):
+                validator.validate_manifest(published / "manifest.json")
+            self.assertTrue(any("embed its application binary" in p for p in validator.problems))
+            validator.problems.clear()
 
     def test_pr_validation_checks_signatures_and_public_release_bytes(self):
         workflow = (ROOT / ".github" / "workflows" / "validate.yml").read_text()
