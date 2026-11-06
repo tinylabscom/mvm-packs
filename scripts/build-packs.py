@@ -397,17 +397,67 @@ def inspect_bundle(path, application, public_key, requirements=None):
         fail(f"{path}: not a valid application archive: {error!r}")
 
 
+def _measure_file(path):
+    digest, size = hashlib.sha256(), 0
+    with open(path, "rb") as handle:
+        while chunk := handle.read(1 << 20):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _cached_archive(bundle):
+    """Path of a previously downloaded copy that still matches the descriptor, else None.
+
+    The cache only saves a download. A cached file is re-hashed every time and a copy that
+    does not match the pinned SHA-256 and size is deleted, so trust never rests on the cache.
+    """
+    directory = os.environ.get("MVM_ARCHIVE_CACHE")
+    if not directory:
+        return None
+    path = Path(directory) / f"{bundle['archive_sha256']}.mvmpkg"
+    if not path.is_file() or path.is_symlink():
+        return None
+    sha256, size = _measure_file(path)
+    if sha256 == bundle["archive_sha256"] and size == bundle["archive_size"]:
+        return path
+    path.unlink(missing_ok=True)
+    return None
+
+
+def _store_in_cache(bundle, spooled):
+    """Keep a verified download for later runs. Never fatal: a cache failure only costs time."""
+    directory = os.environ.get("MVM_ARCHIVE_CACHE")
+    if not directory:
+        return
+    try:
+        target = Path(directory) / f"{bundle['archive_sha256']}.mvmpkg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        shutil.copyfile(spooled, partial)
+        partial.replace(target)
+    except OSError as error:
+        print(f"archive cache: not stored: {error}")
+
+
 def verify_archive(application, requirements=None):
     """Read the pinned archive back before signing a new application version.
 
     Refuses unless size and SHA-256 match the descriptor and the archive embeds
-    the application and carries a valid bundle signature (inspect_bundle). Runs only for new versions (ADR 001).
+    the application and carries a valid bundle signature (inspect_bundle). Runs only for
+    new versions (ADR 001). With MVM_ARCHIVE_CACHE set, a digest-named copy of an earlier
+    verified download is reused after being re-hashed.
     """
     bundle = application["bundle"]
     source = bundle["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")
     public_key = fetch_bundle_key(bundle)
+    cached = _cached_archive(bundle)
+    if cached is not None:
+        print(f"archive cache: using {cached.name} (re-verified)")
+        inspect_bundle(str(cached), application, public_key, requirements)
+        return
     digest, size = hashlib.sha256(), 0
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
@@ -426,6 +476,7 @@ def verify_archive(application, requirements=None):
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
         inspect_bundle(spool.name, application, public_key, requirements)
+        _store_in_cache(bundle, spool.name)
 
 
 def sign(manifest_path, bundle_path):

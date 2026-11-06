@@ -405,6 +405,46 @@ class ArchiveReadBackTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 builder.parse_pack_toml(path)
 
+    def test_a_digest_named_cache_saves_the_download_but_is_always_re_verified(self):
+        import io
+        import os
+        data = make_mvmpkg()
+        descriptor = self.descriptor(data)
+        calls = []
+
+        def serve(url, timeout=None):
+            calls.append(url)
+            return io.BytesIO(TEST_PUBLIC if url.endswith("-bundle-publisher.pub") else data)
+
+        with tempfile.TemporaryDirectory() as cache, patch.dict(os.environ, {"MVM_ARCHIVE_CACHE": cache}), \
+                patch.object(builder.urllib.request, "urlopen", side_effect=serve):
+            builder.verify_archive(descriptor)
+            archive_calls = [c for c in calls if not c.endswith("-bundle-publisher.pub")]
+            self.assertEqual(len(archive_calls), 1)
+            cached = Path(cache) / f"{descriptor['bundle']['archive_sha256']}.mvmpkg"
+            self.assertTrue(cached.is_file())
+            builder.verify_archive(descriptor)                      # reused: no second archive download
+            self.assertEqual(len([c for c in calls if not c.endswith("-bundle-publisher.pub")]), 1)
+            cached.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))   # a corrupted cache entry
+            builder.verify_archive(descriptor)                      # deleted, downloaded again, still verified
+            self.assertEqual(len([c for c in calls if not c.endswith("-bundle-publisher.pub")]), 2)
+            self.assertEqual(cached.read_bytes(), data)
+
+    def test_a_download_that_fails_verification_is_never_cached(self):
+        import io
+        import os
+        data = make_mvmpkg()
+        bad = self.descriptor(data, archive_sha256="0" * 64)
+
+        def serve(url, timeout=None):
+            return io.BytesIO(TEST_PUBLIC if url.endswith("-bundle-publisher.pub") else data)
+
+        with tempfile.TemporaryDirectory() as cache, patch.dict(os.environ, {"MVM_ARCHIVE_CACHE": cache}), \
+                patch.object(builder.urllib.request, "urlopen", side_effect=serve):
+            with self.assertRaises(SystemExit):
+                builder.verify_archive(bad)
+            self.assertEqual(list(Path(cache).iterdir()), [])
+
     def test_unreadable_archive_is_refused_before_signing(self):
         with tempfile.TemporaryDirectory() as tmp, \
                 patch.object(builder.urllib.request, "urlopen", side_effect=OSError("404")), \
