@@ -1,6 +1,7 @@
 # ADR 003: Declaring and checking what an application pack embeds
 
-Status: proposed
+Status: proposed; the pre-sign check is implemented for first-party sources in
+`build-packs.py` (`scripts/rootfs_requirements.py`)
 Date: 2026-11-06
 Related: [ADR 001](001-pack-contents.md), [ADR 002](002-third-party-publishing.md)
 
@@ -12,7 +13,8 @@ assumed on the host. ADR 001 puts the software in the archive; this ADR adds a
 way to say what "everything it needs" is and to check it before the registry
 signs the descriptor.
 
-Nothing here is implemented.
+The `[requirements]` check is implemented for first-party sources. No published
+pack declares requirements yet, because no application pack is published.
 
 ## Context: what the registry can check today
 

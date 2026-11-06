@@ -106,6 +106,9 @@ jobs:
           hash -r
           cosign version
 
+      - name: Install ext4 inspection tool
+        run: sudo apt-get update && sudo apt-get install --yes e2fsprogs
+
       - name: Install Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
