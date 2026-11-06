@@ -107,28 +107,39 @@ jobs:
       - name: Reproduce the unsigned image inside the builder VM
         run: |
           set -euo pipefail
+          # Determinism check: the same builder, runner and pinned inputs run twice. This is not an
+          # independent reconstruction and does not satisfy an independent-rebuild requirement.
+          # candidate.json holds only file digest records, so it is compared whole.
+          for suffix in "" "-rebuild"; do
+            work_dir="$RUNNER_TEMP/python-image-work$suffix"
+            output="$RUNNER_TEMP/python-image-output$suffix"
+            release_dir="$RUNNER_TEMP/image-set-release"
+            mkdir -p "$work_dir/pack-sources/runtime" "$work_dir/base" "$output"
+            cp -R scripts "$work_dir/scripts"
+            cp -R pack-sources/runtime/python "$work_dir/pack-sources/runtime/python"
+            binary="$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl"
+            install -m 0755 "$binary" "$work_dir/mvmctl"
+            sha256sum "$work_dir/mvmctl" | cut -d ' ' -f 1 > "$work_dir/mvmctl.sha256"
+            cp "$RUNNER_TEMP/images.lock" "$work_dir/images.lock"
+            cp "$release_dir/image-set.json" "$work_dir/image-set.json"
+            cp "$release_dir/image-set.json.bundle" "$work_dir/image-set.json.bundle"
+            for name in default-microvm-vmlinux-x86_64 \
+              default-microvm-rootfs-x86_64.ext4 \
+              default-microvm-rootfs-x86_64.verity \
+              default-microvm-rootfs-x86_64.roothash; do
+              cp "$release_dir/$name" "$work_dir/base/$name"
+            done
+            MVM_HOME="$RUNNER_TEMP/mvm-home$suffix" "$binary" \
+              --builder firecracker __builder-shell-job \
+              --script "$GITHUB_WORKSPACE/scripts/run-python-image-builder.sh" \
+              --work-dir "$work_dir" --artifact-out "$output"
+          done
+          first="$RUNNER_TEMP/python-image-output/python-image"
+          second="$RUNNER_TEMP/python-image-output-rebuild/python-image"
+          cmp "$first/candidate.json" "$second/candidate.json"
+          diff -rq "$first/composition" "$second/composition"
           work_dir="$RUNNER_TEMP/python-image-work"
           output="$RUNNER_TEMP/python-image-output"
-          release_dir="$RUNNER_TEMP/image-set-release"
-          mkdir -p "$work_dir/pack-sources/runtime" "$work_dir/base" "$output"
-          cp -R scripts "$work_dir/scripts"
-          cp -R pack-sources/runtime/python "$work_dir/pack-sources/runtime/python"
-          binary="$RUNNER_TEMP/mvmctl-x86_64-unknown-linux-gnu/mvmctl"
-          install -m 0755 "$binary" "$work_dir/mvmctl"
-          sha256sum "$work_dir/mvmctl" | cut -d ' ' -f 1 > "$work_dir/mvmctl.sha256"
-          cp "$RUNNER_TEMP/images.lock" "$work_dir/images.lock"
-          cp "$release_dir/image-set.json" "$work_dir/image-set.json"
-          cp "$release_dir/image-set.json.bundle" "$work_dir/image-set.json.bundle"
-          for name in default-microvm-vmlinux-x86_64 \
-            default-microvm-rootfs-x86_64.ext4 \
-            default-microvm-rootfs-x86_64.verity \
-            default-microvm-rootfs-x86_64.roothash; do
-            cp "$release_dir/$name" "$work_dir/base/$name"
-          done
-          MVM_HOME="$RUNNER_TEMP/mvm-home" "$binary" \
-            --builder firecracker __builder-shell-job \
-            --script "$GITHUB_WORKSPACE/scripts/run-python-image-builder.sh" \
-            --work-dir "$work_dir" --artifact-out "$output"
           test -s "$output/python-image/candidate.json"
           test -s "$output/python-image/composition/rootfs.ext4"
           test -s "$output/python-image/composition/composition.json"

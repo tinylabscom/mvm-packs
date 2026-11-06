@@ -60,6 +60,17 @@ class PythonCandidateWorkflowTests(unittest.TestCase):
         self.assertNotIn("contents: write", workflow)
         self.assertNotIn("id-token: write", workflow)
 
+    def test_unsigned_lane_builds_twice_and_refuses_any_difference(self):
+        workflow = WORKFLOW.read_text()
+        build = workflow.index("__builder-shell-job")
+        self.assertEqual(workflow.count("__builder-shell-job"), 1)
+        self.assertIn('for suffix in "" "-rebuild"; do', workflow)
+        compare = workflow.index('diff -rq "$first/composition" "$second/composition"')
+        self.assertIn('cmp "$first/candidate.json" "$second/candidate.json"', workflow)
+        self.assertLess(build, compare)
+        self.assertLess(compare, workflow.index("python3 scripts/build-python-sidecar.py"))
+        self.assertIn("not an\n          # independent reconstruction", workflow)
+
     def test_candidate_workflow_changes_run_pull_request_validation(self):
         validation = (ROOT / ".github/workflows/validate.yml").read_text()
         self.assertIn('".github/workflows/python-candidate.yml"', validation)
