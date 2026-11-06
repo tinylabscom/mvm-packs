@@ -23,3 +23,13 @@ package = "claude-code-native"
 path = "bin/claude"
 sha256 = "7544d5d74f38f78b7d5457728dea4bf3f467befda7c1a892021dcfbfda1ab4e1"
 size = 221263520
+
+# The signed environment must carry exactly the consented policy (mvm#3716 consent record;
+# mvm scripts/claude-demo-consumer.md): one request, under $0.50, the pinned model, one host.
+[requirements.environment_policy]
+allow_hosts = ["api.anthropic.com:443"]
+
+[requirements.environment_policy.request_budget]
+max_requests = 1
+max_spend_microusd = 500000
+model = "claude-haiku-4-5-20251001"
