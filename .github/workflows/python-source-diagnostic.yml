@@ -13,12 +13,12 @@ jobs:
     permissions:
       contents: read
     env:
-      MVM_SOURCE_SHA: e9b9d8c5876edb11c410728f8030f3678656adf9
+      MVM_SOURCE_SHA: 97615b4f3e19a43334160611bc3b17e40f292e1c
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           repository: tinylabscom/mvm
-          ref: e9b9d8c5876edb11c410728f8030f3678656adf9
+          ref: 97615b4f3e19a43334160611bc3b17e40f292e1c
           persist-credentials: false
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -55,6 +55,8 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$MVM_SOURCE_SHA"
+          rustc --version | grep -E '^rustc 1\.97\.1( |$)'
+          cargo --version | grep -E '^cargo 1\.97\.1( |$)'
           firecracker --version
           cargo zigbuild --profile release-min --target x86_64-unknown-linux-musl --features dev
           cargo zigbuild --profile release-min --target x86_64-unknown-linux-musl -p mvm-hostd --bin mvm-network-endpoint

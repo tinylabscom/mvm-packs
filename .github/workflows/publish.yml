@@ -106,6 +106,9 @@ jobs:
           hash -r
           cosign version
 
+      - name: Install ext4 inspection tool
+        run: sudo apt-get update && sudo apt-get install --yes e2fsprogs
+
       - name: Install Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -179,7 +182,9 @@ jobs:
       - name: Commit published packs
         run: |
           set -euo pipefail
+          python3 scripts/build-pack-pages.py
           git add index.json packs/
+          git add -A docs/registry/
           if git diff --cached --quiet; then
             exit 0
           fi
@@ -196,6 +201,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
     env:
       MVMCTL_TAG: ${{ inputs.mvmctl_tag }}
       MVMCTL_ARCHIVE_SHA256: ${{ inputs.mvmctl_archive_sha256 }}
@@ -236,6 +242,21 @@ jobs:
           python-version: '3.12'
       - name: Reproduce and sign Python image evidence
         run: bash scripts/run-python-image-publisher.sh
+      # Keyless GitHub build-provenance attestation of the exact image bytes,
+      # beside the cosign-signed SLSA statement; no key or secret is involved.
+      - name: Attest build provenance of the composed rootfs
+        id: attest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: ${{ runner.temp }}/signed-python-image/rootfs.ext4
+      - name: Verify the attestation against this workflow identity
+        env:
+          IMAGE: ${{ runner.temp }}/signed-python-image/rootfs.ext4
+        run: |
+          set -euo pipefail
+          gh attestation verify "$IMAGE" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/publish.yml" \
+            --source-ref refs/heads/main
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: signed-python-image-${{ github.run_id }}

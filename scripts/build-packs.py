@@ -24,6 +24,7 @@ bundle on every pull and on every policy load, against the publisher trust
 policy.
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -31,9 +32,14 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
+import tempfile
 import tomllib
+import urllib.request
 from pathlib import Path
 
+import ed25519
+import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import validate_application
 from publisher_identity import (
@@ -79,7 +85,7 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build", "application"}:
+    if set(data) - {"version", "description", "image", "image_build", "application", "requirements"}:
         fail(f"{path}: unknown pack metadata fields")
     application = data.get("application")
     if "application" in data:
@@ -91,6 +97,14 @@ def parse_pack_toml(path):
             fail(f"{path}: application version must be canonical semver without build metadata")
         if "image" in data or "image_build" in data:
             fail(f"{path}: application cannot declare image or image_build")
+    requirements = None
+    if "requirements" in data:
+        if "application" not in data:
+            fail(f"{path}: [requirements] is only allowed on an application source")
+        try:
+            requirements = rootfs_requirements.validate_requirements(data["requirements"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     image = data.get("image")
     if image is not None and not isinstance(image, dict):
         fail(f"{path}: [image] must be a table")
@@ -100,7 +114,8 @@ def parse_pack_toml(path):
     if image is not None and image_build is not None:
         fail(f"{path}: [image] and [image_build] cannot both be present")
     return {"version": version, "description": description, "image": image,
-            "image_build": image_build, "application": application}
+            "image_build": image_build, "application": application,
+            "requirements": requirements}
 
 
 def validate_image_build_intent(intent, reference):
@@ -272,6 +287,134 @@ def check_existing_payload(out, payload):
             fail(f"{out}: published payload differs from source at {relative}")
 
 
+def bundle_key_url(source):
+    """The bundle public key is published beside the archive: <stem>-bundle-publisher.pub."""
+    if not source.startswith("https://") or not source.endswith(".mvmpkg"):
+        fail(f"{source}: cannot locate the bundle public key beside a non-.mvmpkg source")
+    return source[: -len(".mvmpkg")] + "-bundle-publisher.pub"
+
+
+def fetch_bundle_key(bundle):
+    """Download the 32-byte Ed25519 key and bind it to the descriptor's key_id.
+
+    key_id is the first 32 hex characters of the key's SHA-256, so an author
+    cannot supply a different key. Trusting that key stays with the consumer.
+    """
+    url = bundle_key_url(bundle["source"])
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            key = response.read(65)
+    except OSError as error:
+        fail(f"{url}: cannot read the bundle public key: {error}")
+    if len(key) != 32 or hashlib.sha256(key).hexdigest()[:32] != bundle["key_id"]:
+        fail(f"{url}: not a 32-byte key matching the descriptor key_id")
+    return key
+
+
+def check_embedded_requirements(archive, member, requirements, path):
+    """Copy the (already hash-checked) rootfs out of the tar and list it read-only."""
+    with tempfile.NamedTemporaryFile(prefix="rootfs-") as image:
+        source = archive.extractfile(member)
+        while chunk := source.read(1 << 20):
+            image.write(chunk)
+        image.flush()
+        try:
+            rootfs_requirements.check_rootfs(image.name, requirements)
+        except ValueError as error:
+            fail(f"{path}: {error}")
+
+
+def inspect_bundle(path, application, public_key, requirements=None):
+    """Refuse unless the archive embeds the application: a kernel and a root
+    filesystem whose hashes match the bundle manifest, for the descriptor's
+    key ID and architecture, with a valid Ed25519 manifest.sig by that key.
+    Members are read, never extracted.
+
+    A valid signature shows the archive is internally consistent under the key
+    the descriptor names. It does not make that key trusted: the consumer decides.
+    """
+    bundle = application["bundle"]
+    try:
+        with tarfile.open(path, "r:") as archive:
+            members = {}
+            for info in archive:
+                parts = info.name.split("/")
+                if (info.type not in (tarfile.REGTYPE, tarfile.AREGTYPE) or info.name in members
+                        or info.name.startswith("/")
+                        or ".." in parts or "" in parts):
+                    fail(f"{path}: unsafe or duplicate archive member {info.name!r}")
+                members[info.name] = info
+            if "manifest.json" not in members or "manifest.sig" not in members:
+                fail(f"{path}: archive has no manifest.json and manifest.sig")
+            if members["manifest.sig"].size != 64 or members["manifest.json"].size > 1 << 20:
+                fail(f"{path}: manifest.sig must be 64 bytes and manifest.json at most 1 MiB")
+            manifest_raw = archive.extractfile("manifest.json").read()
+            if not ed25519.verify(public_key, manifest_raw, archive.extractfile("manifest.sig").read()):
+                fail(f"{path}: manifest.sig is not a valid signature by the descriptor's bundle key")
+            manifest = json.loads(manifest_raw)
+            if manifest.get("key_id") != bundle["key_id"] or manifest.get("arch") != application["guest_arch"]:
+                fail(f"{path}: bundle key ID or architecture does not match the descriptor")
+            artifacts = manifest.get("artifacts")
+            if not isinstance(artifacts, list) or not artifacts:
+                fail(f"{path}: bundle manifest lists no artifacts")
+            roles, hashed, rootfs_path = set(), set(), None
+            for artifact in artifacts:
+                if artifact["path"] in hashed:
+                    fail(f"{path}: artifact {artifact['path']!r} is listed twice")
+                hashed.add(artifact["path"])
+                info = members.get(artifact["path"])
+                if info is None or info.size != artifact["size_bytes"]:
+                    fail(f"{path}: artifact {artifact['path']!r} is missing or has the wrong size")
+                digest, handle = hashlib.sha256(), archive.extractfile(info)
+                while chunk := handle.read(1 << 20):
+                    digest.update(chunk)
+                if digest.hexdigest() != artifact["sha256"]:
+                    fail(f"{path}: artifact {artifact['path']!r} does not match its recorded SHA-256")
+                roles.add(artifact["role"])
+                if artifact["role"] == "rootfs":
+                    rootfs_path = artifact["path"]
+            if sum(members[p].size for p in hashed) > bundle["archive_size"]:
+                fail(f"{path}: artifacts are larger than the archive")
+            if not {"kernel", "rootfs"} <= roles:
+                fail(f"{path}: archive does not embed a kernel and a root filesystem")
+            if requirements:
+                check_embedded_requirements(archive, members[rootfs_path], requirements, path)
+    except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError,
+            RecursionError, MemoryError) as error:
+        fail(f"{path}: not a valid application archive: {error!r}")
+
+
+def verify_archive(application, requirements=None):
+    """Read the pinned archive back before signing a new application version.
+
+    Refuses unless size and SHA-256 match the descriptor and the archive embeds
+    the application and carries a valid bundle signature (inspect_bundle). Runs only for new versions (ADR 001).
+    """
+    bundle = application["bundle"]
+    source = bundle["source"]
+    if not source.startswith("https://"):
+        fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    public_key = fetch_bundle_key(bundle)
+    digest, size = hashlib.sha256(), 0
+    with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
+        try:
+            with urllib.request.urlopen(source, timeout=60) as response:
+                while chunk := response.read(1 << 20):
+                    size += len(chunk)
+                    if size > bundle["archive_size"]:
+                        break
+                    digest.update(chunk)
+                    spool.write(chunk)
+        except OSError as error:
+            fail(f"{source}: cannot read the archive back: {error}")
+        if size != bundle["archive_size"]:
+            fail(f"{source}: archive size does not match the descriptor")
+        if digest.hexdigest() != bundle["archive_sha256"]:
+            fail(f"{source}: archive SHA-256 does not match the descriptor")
+        spool.flush()
+        inspect_bundle(spool.name, application, public_key, requirements)
+
+
 def sign(manifest_path, bundle_path):
     cmd = ["cosign", "sign-blob", "--yes"]
     key = os.environ.get("COSIGN_KEY")
@@ -281,7 +424,7 @@ def sign(manifest_path, bundle_path):
     subprocess.run(cmd, check=True)
 
 
-def build_one(source):
+def build_one(source, check_only=False):
     namespace, name = source.parent.name, source.name
     if not COORD.match(namespace) or not COORD.match(name):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
@@ -322,6 +465,9 @@ def build_one(source):
                 fail(f"{out}: application cannot contain payload files or directories")
         else:
             check_existing_payload(out, payload)
+        if check_only:
+            print(f"{reference}: source valid")
+            return
         bundle = out / "manifest.sigstore.json"
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
@@ -334,6 +480,12 @@ def build_one(source):
             print(f"{reference}: unchanged")
             return
 
+    if check_only:
+        print(f"{reference}: source valid")
+        return
+
+    if application is not None:
+        verify_archive(application, meta["requirements"])
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -350,6 +502,33 @@ def build_one(source):
     shutil.rmtree(out, ignore_errors=True)
     tmp.rename(out)
     print(f"{reference}: published")
+
+
+def resign_unsourced_historical(sourced):
+    """Re-sign pinned historical manifests that no longer have a source.
+
+    A version stays immutable after its source moves on (runtime/python is now
+    1.1.0), but the former signing identity is no longer trusted. Only an exact
+    pinned historical manifest whose old signature still verifies is re-signed,
+    over the same bytes; payload files and the manifest are not touched.
+    """
+    for manifest in sorted(PACKS.glob("*/*/*/manifest.json")):
+        version_dir = manifest.parent
+        namespace, name, version = version_dir.parent.parent.name, version_dir.parent.name, version_dir.name
+        if (namespace, name, version) in sourced:
+            continue
+        reference = f"{namespace}/{name}@{version}"
+        raw = manifest.read_bytes()
+        bundle = version_dir / "manifest.sigstore.json"
+        if not is_historical_manifest(reference, raw) or verify_bundle(manifest, bundle, CURRENT_IDENTITY):
+            continue
+        if not verify_bundle(manifest, bundle, FORMER_IDENTITY):
+            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
+        tmp = bundle.with_name(bundle.name + ".tmp")
+        tmp.unlink(missing_ok=True)
+        sign(manifest, tmp)
+        tmp.replace(bundle)
+        print(f"{reference}: re-signed existing manifest bytes under the current identity")
 
 
 def version_key(value):
@@ -404,6 +583,10 @@ def rebuild_index():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check-sources", action="store_true",
+                        help="validate sources and version immutability without signing or writing")
+    args = parser.parse_args()
     if not SOURCES.is_dir():
         fail("pack-sources/ does not exist")
     sources = sorted(
@@ -412,8 +595,13 @@ def main():
     if not sources:
         fail("no pack sources under pack-sources/<namespace>/<name>/")
     for source in sources:
-        build_one(source)
-    rebuild_index()
+        build_one(source, check_only=args.check_sources)
+    if not args.check_sources:
+        resign_unsourced_historical({
+            (source.parent.name, source.name, parse_pack_toml(source / "pack.toml")["version"])
+            for source in sources
+        })
+        rebuild_index()
 
 
 if __name__ == "__main__":

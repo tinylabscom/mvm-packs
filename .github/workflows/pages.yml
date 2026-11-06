@@ -1,0 +1,65 @@
+name: Publish registry pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "index.json"
+      - "revocations.toml"
+      - "packs/**"
+      - "docs/registry/**"
+      - "docs/publishing-a-pack.md"
+      - "scripts/build-pack-pages.py"
+      - "astro.config.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "src/content.config.ts"
+      - "src/styles/**"
+      - "scripts/stage-starlight-pages.mjs"
+      - ".github/workflows/pages.yml"
+  # The pack publisher commits with [skip ci], so its push cannot trigger this workflow.
+  workflow_run:
+    workflows: ["Publish signed packs"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: registry-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.4"
+          cache: npm
+      - run: npm ci
+      - name: Build site from published manifests
+        run: |
+          python3 scripts/validate-packs.py
+          python3 scripts/build-pack-pages.py
+          node scripts/stage-starlight-pages.mjs
+          npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4

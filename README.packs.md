@@ -78,16 +78,18 @@ signed `runtime/python@1.0.0` policy pack remains available while the
 `runtime/python@1.1.0` image intent awaits a measured release. No image pack
 should be described as ready to run on this path.
 
-The next image release contract needs a built-image digest and size, a base
-image-set identity (`repository`, `release_tag`, and signed root-manifest
-SHA-256), and a verifiable provenance attestation bound to the same image and
-publisher identity. Pack CI must build from the base set pinned by MVM's
-`images.lock`, compare two independent output byte streams, and only then sign
-the image and descriptor. The client must reject a base identity that its own
-lock does not accept and verify the image, descriptor, and attestation before
-installation or execution. These producer and client changes are not shipped
-by the current schema; the source-only guard is a release safety check, not
-evidence that image signing or reproducibility exists.
+An image release binds a built-image digest and size, a base image-set identity
+(`repository`, `release_tag`, and signed root-manifest SHA-256), and verifiable
+provenance for the same image and publisher identity. The `runtime/python`
+producer and publisher source lanes build from MVM's `images.lock`, compare
+independent output bytes, and sign the image and descriptor. MVM's client source
+verifies image provenance against its compiled lock before installation.
+
+**Source status:** these schema-v2 producer and consumer gates exist in source,
+but the producer lane is currently specific to `runtime/python`. No compatible
+signed released client has completed the candidate lane; no signed image release
+or image-bearing registry pack has been published. Source tests do not establish
+the runtime acceptance below.
 
 The first planned runnable environment is Claude Code. Its
 [delivery plan](CLAUDE-ENVIRONMENT.md) links the SDK, terminal/authentication and
@@ -111,6 +113,10 @@ Archive distribution and genuine keyless descriptor signing remain real release
 operations; source validation alone proves neither availability nor a joke
 response from an installed application.
 
+The [native input record](docs/application-packages.md) preserves inspected
+archive and executable pins without defining a second application descriptor
+or claiming a published runnable environment.
+
 ### Advancing the base-image lock
 
 A published pack version is immutable, including its base-set tag and signed
@@ -122,8 +128,11 @@ existing version against the new base set. Build and reproduce a new pack
 version against the new lock, sign its new image, descriptor, and provenance,
 then publish it under a new versioned release tag. A client upgrade does not
 implicitly select that new version: operators must pull and pin it explicitly.
-The consumer and publisher gates described here are not yet implemented for
-image-bearing packs; this is the compatibility rule they must enforce.
+The producer rechecks MVM's lock before signing and publication; the consumer
+checks the descriptor and provenance against its compiled lock during pull and
+install. The released-verifier digest is still unset in MVM, so the current
+client fails closed on built-image packs. This compatibility rule is source-
+enforced and tested, but has not passed a released-client pull/launch witness.
 
 An offline producer check is available as `scripts/reproduce-app-layer.py`.
 Supply a complete, trusted, quiescent staged application tree, the exact `mvmctl` binary to run,
@@ -458,8 +467,13 @@ rootfs, provenance and evidence bundles under the publisher identity. If mvm
 moves its base lock between jobs, staging refuses, because the signed
 provenance names the old lock.
 
-1. `sign_python_image` (`contents: read`, `id-token: write`, KVM) is the
-   signing job described above. It uploads only the signed evidence.
+1. `sign_python_image` (`contents: read`, `id-token: write`,
+   `attestations: write`, KVM) is the signing job described above. After
+   signing it attests the composed `rootfs.ext4` with
+   `actions/attest-build-provenance` (keyless, this workflow's identity) and
+   checks it with `gh attestation verify --signer-workflow`. This is in
+   addition to the cosign-signed provenance statement; the descriptor does
+   not yet record the GitHub attestation. It uploads only the signed evidence.
 2. `boot_python_image` (`contents: read`, KVM) runs
    `scripts/run-python-image-boot-probe.sh`. It copies the re-staged
    `rootfs.ext4`, `rootfs.verity`, `rootfs.roothash` and `mvm-meta.json`

@@ -54,6 +54,7 @@ class ApplicationManifestTests(unittest.TestCase):
             bundle.write_text("synthetic test signature, not valid")
 
         with patch.object(builder, "PACKS", self.packs), \
+                patch.object(builder, "verify_archive"), \
                 patch.object(builder, "sign", side_effect=fake_sign) as sign:
             builder.build_one(self.source)
             return sign.call_count
@@ -268,6 +269,9 @@ class ApplicationManifestTests(unittest.TestCase):
         metadata = builder.parse_pack_toml(source / "pack.toml")
         self.assertEqual(metadata["version"], "2.0.0")
         self.assertEqual({path.name for path in source.iterdir()}, {"pack.toml"})
+        pin = metadata["requirements"]["binaries"][0]
+        self.assertEqual((pin["package"], pin["path"], pin["size"]),
+                         ("claude-code-native", "bin/claude", 221263520))
         descriptor = metadata["application"]
         validate_application(descriptor)
         self.assertEqual(descriptor["guest_arch"], "aarch64")
@@ -276,3 +280,135 @@ class ApplicationManifestTests(unittest.TestCase):
             "https://github.com/tinylabscom/mvm-packs/releases/download/"
             "pack-agent-claude-v2.0.0/claude.mvmpkg",
         )
+
+from tests.test_ed25519 import sign as ed25519_sign  # noqa: E402
+
+TEST_SECRET = bytes(range(32))
+TEST_PUBLIC = ed25519_sign(TEST_SECRET, b"")[0]
+TEST_KEY_ID = hashlib.sha256(TEST_PUBLIC).hexdigest()[:32]
+
+
+def make_mvmpkg(roles=("kernel", "rootfs"), key_id=TEST_KEY_ID, arch="aarch64", corrupt=None,
+                extra_members=(), repeat_artifact=0, raw_manifest=None, signing_secret=TEST_SECRET):
+    """Build a tiny synthetic .mvmpkg tar (manifest.json, manifest.sig, artifacts/)."""
+    import io
+    import tarfile
+    files, artifacts = {}, []
+    for role in roles:
+        data = f"{role}-bytes".encode()
+        files[f"artifacts/{role}"] = data
+        artifacts.append({"name": role, "role": role, "path": f"artifacts/{role}",
+                          "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)})
+    if corrupt:
+        files[f"artifacts/{corrupt}"] = b"tampered"
+    artifacts += [artifacts[0]] * repeat_artifact
+    manifest = raw_manifest or json.dumps({"key_id": key_id, "arch": arch, "artifacts": artifacts}).encode()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        signature = ed25519_sign(signing_secret, manifest)[1]
+        for name, data in {"manifest.json": manifest, "manifest.sig": signature, **files}.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            archive.addfile(info, io.BytesIO(data))
+        for info in extra_members:
+            archive.addfile(info)
+    return buffer.getvalue()
+
+
+class ArchiveReadBackTests(unittest.TestCase):
+    def descriptor(self, data, **bundle_changes):
+        value = application()
+        value["bundle"] |= {"archive_size": len(data), "key_id": TEST_KEY_ID,
+                            "archive_sha256": hashlib.sha256(data).hexdigest()} | bundle_changes
+        return value
+
+    def check(self, descriptor, data, key=TEST_PUBLIC):
+        import io
+
+        def serve(url, timeout=None):
+            if url.endswith("-bundle-publisher.pub"):
+                if key is None:
+                    raise OSError("404")
+                return io.BytesIO(key)
+            return io.BytesIO(data)
+
+        with patch.object(builder.urllib.request, "urlopen", side_effect=serve):
+            builder.verify_archive(descriptor)
+
+    def test_archive_embedding_a_kernel_and_rootfs_passes(self):
+        data = make_mvmpkg()
+        self.check(self.descriptor(data), data)
+
+    def test_wrong_digest_size_or_scheme_is_refused(self):
+        data = make_mvmpkg()
+        for descriptor in (
+            self.descriptor(data, archive_sha256="0" * 64),
+            self.descriptor(data, archive_size=len(data) - 1),
+            self.descriptor(data, archive_size=len(data) + 1),
+            self.descriptor(data, source="oci://registry.example/x@sha256:" + "a" * 64),
+        ):
+            with self.subTest(descriptor=descriptor["bundle"]), self.assertRaises(SystemExit):
+                self.check(descriptor, data)
+
+    def test_archive_without_the_application_is_refused(self):
+        import tarfile
+        symlink = tarfile.TarInfo("artifacts/link")
+        symlink.type = tarfile.SYMTYPE
+        symlink.linkname = "/etc/passwd"
+        for label, data in {
+            "no rootfs": make_mvmpkg(roles=("kernel",)),
+            "no kernel": make_mvmpkg(roles=("rootfs",)),
+            "wrong key id in manifest": make_mvmpkg(key_id="c" * 32),
+            "signed by another key": make_mvmpkg(signing_secret=bytes(range(1, 33))),
+            "wrong arch": make_mvmpkg(arch="x86_64"),
+            "tampered artifact": make_mvmpkg(corrupt="rootfs"),
+            "symlink member": make_mvmpkg(extra_members=(symlink,)),
+            "artifact listed twice": make_mvmpkg(repeat_artifact=1),
+            "deeply nested manifest": make_mvmpkg(raw_manifest=b"[" * 100000 + b"]" * 100000),
+            "not a tar": b"x" * 100,
+        }.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check(self.descriptor(data), data)
+
+    def test_bundle_key_must_exist_and_match_the_descriptor_key_id(self):
+        data = make_mvmpkg()
+        for label, key in {"missing key": None, "wrong key": bytes(range(1, 33)),
+                           "short key": TEST_PUBLIC[:16]}.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check(self.descriptor(data), data, key=key)
+        with self.assertRaises(SystemExit):
+            builder.bundle_key_url("https://bundles.example/app.tar")
+
+    def test_declared_requirements_fail_closed_on_a_root_that_cannot_be_read(self):
+        data = make_mvmpkg()   # its rootfs is not an ext4 image, so nothing can be confirmed
+        import io
+
+        def serve(url, timeout=None):
+            return io.BytesIO(TEST_PUBLIC if url.endswith("-bundle-publisher.pub") else data)
+
+        with patch.object(builder.urllib.request, "urlopen", side_effect=serve), \
+                self.assertRaises(SystemExit):
+            builder.verify_archive(self.descriptor(data), {"packages": ["bash"], "commands": []})
+
+    def test_requirements_are_only_allowed_on_application_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pack.toml"
+            path.write_text('version = "1.0.0"\ndescription = "d"\n[requirements]\npackages = ["bash"]\n')
+            with self.assertRaises(SystemExit):
+                builder.parse_pack_toml(path)
+
+    def test_unreadable_archive_is_refused_before_signing(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(builder.urllib.request, "urlopen", side_effect=OSError("404")), \
+                patch.object(builder, "PACKS", Path(tmp) / "packs"), \
+                patch.object(builder, "sign") as sign:
+            source = Path(tmp) / "pack-sources" / "test" / "hello"
+            source.mkdir(parents=True)
+            source.joinpath("pack.toml").write_text(
+                'version = "1.0.0"\ndescription = "d"\n[application]\nschema_version = 1\n'
+                'guest_arch = "aarch64"\n[application.bundle]\n'
+                'source = "https://bundles.example/a.mvmpkg"\n'
+                f'archive_sha256 = "{"a" * 64}"\narchive_size = 123\nkey_id = "{"b" * 32}"\n')
+            with self.assertRaises(SystemExit):
+                builder.build_one(source)
+            sign.assert_not_called()

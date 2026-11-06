@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from application_manifest import unique_object, validate_application
+from community_publishers import validate_directory
+from community_index import validate_index as validate_community_index
 from publisher_identity import (
     CURRENT_IDENTITY,
     FORMER_IDENTITY,
@@ -305,6 +307,14 @@ def main(argv=None):
     for manifest in manifests:
         validate_manifest(manifest, args.verify_signatures)
     validate_index()
+    problems.extend(validate_directory(ROOT / "community" / "publishers"))
+    community_index = ROOT / "community" / "index.json"
+    if community_index.is_file():
+        try:
+            validate_community_index(json.loads(community_index.read_text(encoding="utf-8"),
+                                                object_pairs_hook=unique_object))
+        except (OSError, ValueError) as error:
+            problems.append(f"community/index.json: {error}")
     if args.require_revocations or REVOCATIONS.exists() or REVOCATION_BUNDLE.exists():
         if (not REVOCATIONS.is_file() or not REVOCATION_BUNDLE.is_file()
                 or REVOCATIONS.is_symlink() or REVOCATION_BUNDLE.is_symlink()):

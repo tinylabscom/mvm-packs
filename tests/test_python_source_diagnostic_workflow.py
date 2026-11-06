@@ -23,11 +23,15 @@ class PythonSourceDiagnosticWorkflowTests(unittest.TestCase):
 
     def test_source_and_base_are_pinned_before_builder_execution(self):
         workflow = WORKFLOW.read_text()
-        source = "e9b9d8c5876edb11c410728f8030f3678656adf9"
+        source = "97615b4f3e19a43334160611bc3b17e40f292e1c"
         self.assertIn(f"MVM_SOURCE_SHA: {source}", workflow)
         self.assertIn(f"ref: {source}", workflow)
+        self.assertIn("rustc --version | grep -E '^rustc 1\\.97\\.1( |$)'", workflow)
+        self.assertIn("cargo --version | grep -E '^cargo 1\\.97\\.1( |$)'", workflow)
         ordered = (
             "Require KVM for the project builder VM",
+            "rustc --version | grep -E",
+            "cargo --version | grep -E",
             "cargo zigbuild --profile release-min --target x86_64-unknown-linux-musl",
             "cmp crates/mvm-core/images.lock",
             "cosign verify-blob \"$release_dir/image-set.json\"",

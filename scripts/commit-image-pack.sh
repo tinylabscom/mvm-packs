@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Commit one newly signed image pack version and push it to main.
 #
-# The registry change must be exactly the new immutable version directory plus
-# root index.json. The checkout is the dispatched commit, which
+# The registry change must be exactly the new immutable version directory, root
+# index.json and derived pages. The checkout is the dispatched commit, which
 # can be behind main when a long image run finishes, so the commit is replayed
 # onto the current main. A conflict, an index that no longer matches the tree,
 # or a registry that fails signature validation refuses the push. Publication
@@ -55,6 +55,13 @@ if ! git merge-base --is-ancestor origin/main HEAD; then
     exit 1
   fi
   python3 scripts/validate-packs.py --verify-signatures --require-revocations
+fi
+python3 scripts/build-pack-pages.py
+git add -A -- docs/registry
+if ! git diff --cached --quiet; then
+  GIT_EDITOR=true git -c user.name='MVM Pack Publisher' \
+    -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+    commit --amend --no-edit
 fi
 test "$(git rev-list --count origin/main..HEAD)" = 1
 git push origin HEAD:main

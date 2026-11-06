@@ -65,7 +65,8 @@ class PublicationLaneWorkflowTests(unittest.TestCase):
     def test_each_lane_has_least_privilege(self):
         self.assertIn("\npermissions: {}\n", self.workflow)
         expected = {
-            "sign_python_image": ["contents: read", "id-token: write"],
+            "sign_python_image": ["contents: read", "id-token: write",
+                                  "attestations: write"],
             "boot_python_image": ["contents: read"],
             "release_python_image": ["contents: write"],
             "publish_python_pack": ["contents: write", "id-token: write"],
@@ -128,6 +129,23 @@ class PublicationLaneWorkflowTests(unittest.TestCase):
         self.assertIn("fetch-depth: 0", self.jobs["publish_python_pack"])
         self.assertIn("validate-packs.py --verify-signatures --require-revocations",
                       self.jobs["publish_python_pack"])
+
+    def test_both_publishers_commit_current_generated_pages(self):
+        catalogue = self.jobs["publish"]
+        self.assertLess(catalogue.index("python3 scripts/build-pack-pages.py"),
+                        catalogue.index("git add index.json packs/"))
+        self.assertIn("git add -A docs/registry/", catalogue)
+        image = COMMIT.read_text()
+        self.assertLess(image.index("git add -- \"$target\" index.json"),
+                        image.index("git fetch --no-tags origin main"))
+        self.assertLess(image.index("rebase origin/main"),
+                        image.index("python3 scripts/build-pack-pages.py"))
+        self.assertLess(image.index("python3 scripts/build-pack-pages.py"),
+                        image.index("git add -A -- docs/registry"))
+        self.assertLess(image.index("git add -A -- docs/registry"),
+                        image.index("commit --amend --no-edit"))
+        self.assertLess(image.index("commit --amend --no-edit"),
+                        image.index("git push origin HEAD:main"))
 
     def test_publishers_share_one_concurrency_group(self):
         self.assertIn("concurrency:\n  group: signed-pack-publisher\n"
@@ -194,12 +212,17 @@ class CommitImagePackTests(unittest.TestCase):
         (self.work / "scripts/validate-packs.py").write_text(
             "import pathlib, sys\n"
             "pathlib.Path('validated').write_text(' '.join(sys.argv[1:]))\n")
+        (self.work / "scripts/build-pack-pages.py").write_text(
+            "from pathlib import Path\n"
+            "Path('docs/registry/README.md').write_text(Path('index.json').read_text())\n")
         source = self.work / "pack-sources/runtime/python"
         source.mkdir(parents=True)
         (source / "pack.toml").write_text('version = "1.1.0"\n')
         (self.work / "packs/runtime/python/1.0.0").mkdir(parents=True)
         (self.work / "packs/runtime/python/1.0.0/manifest.json").write_text("{}")
         (self.work / "index.json").write_text("runtime/python/1.0.0\n")
+        (self.work / "docs/registry").mkdir(parents=True)
+        (self.work / "docs/registry/README.md").write_text("runtime/python/1.0.0\n")
         (self.work / ".gitignore").write_text("validated\n")
         self.git("add", ".")
         self.git("commit", "-m", "initial")
@@ -231,6 +254,10 @@ class CommitImagePackTests(unittest.TestCase):
             self.git("show", "main:index.json", cwd=self.origin),
             "runtime/python/1.0.0\nruntime/python/1.1.0\n",
         )
+        self.assertEqual(
+            self.git("show", "main:docs/registry/README.md", cwd=self.origin),
+            "runtime/python/1.0.0\nruntime/python/1.1.0\n",
+        )
         self.assertNotIn("packs/index.json", self.origin_files())
         message = self.git("log", "-1", "--format=%s", "main", cwd=self.origin)
         self.assertIn("runtime/python@1.1.0", message)
@@ -259,7 +286,8 @@ class CommitImagePackTests(unittest.TestCase):
                            ("commit.gpgsign", "false")):
             self.git("config", key, value, cwd=other)
         (other / "README").write_text("moved\n")
-        self.git("add", "README", cwd=other)
+        (other / "docs/registry/README.md").write_text("stale\n")
+        self.git("add", "README", "docs/registry/README.md", cwd=other)
         self.git("commit", "-m", "unrelated", cwd=other)
         self.git("push", "origin", "main", cwd=other)
         self.add_version()
@@ -268,6 +296,10 @@ class CommitImagePackTests(unittest.TestCase):
         files = self.origin_files()
         self.assertIn("README", files)
         self.assertIn("packs/runtime/python/1.1.0/manifest.json", files)
+        self.assertEqual(
+            self.git("show", "main:docs/registry/README.md", cwd=self.origin),
+            "runtime/python/1.0.0\nruntime/python/1.1.0\n",
+        )
         self.assertEqual((self.work / "validated").read_text(),
                          "--verify-signatures --require-revocations")
 

@@ -5,11 +5,23 @@ on:
     paths:
       - "pack-sources/**"
       - "index.json"
+      - "revocations.toml"
+      - "docs/registry/**"
+      - "docs/publishing-a-pack.md"
       - "packs/**"
       - "scripts/**"
       - "tests/**"
       - "README.md"
       - "README.packs.md"
+      - "astro.config.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".node-version"
+      - "src/content.config.ts"
+      - "src/styles/**"
+      - "justfile"
+      - ".github/PULL_REQUEST_TEMPLATE/**"
+      - ".github/workflows/pages.yml"
       - ".github/workflows/python-candidate.yml"
       - ".github/workflows/python-source-diagnostic.yml"
       - ".github/workflows/publish.yml"
@@ -18,15 +30,28 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - name: Require a maintainer for first-party namespaces
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.23.4"
+          cache: npm
+      - run: npm ci
       - name: Install ext4 inspection tools
         run: sudo apt-get update && sudo apt-get install --yes e2fsprogs
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
@@ -45,6 +70,14 @@ jobs:
           install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
           hash -r
       - run: python3 -m unittest discover -s tests
+      - name: Check pack sources without signing
+        run: python3 scripts/build-packs.py --check-sources
+      - name: Check generated pack pages are current
+        run: python3 scripts/build-pack-pages.py --check
+      - name: Build registry site
+        run: |
+          node scripts/stage-starlight-pages.mjs
+          npm run build
       - name: Verify signed registry and public image releases
         env:
           GITHUB_TOKEN: ${{ github.token }}

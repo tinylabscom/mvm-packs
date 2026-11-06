@@ -10,3 +10,16 @@ source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-
 archive_sha256 = "cdbd8005dc356add632b3fce4ae19b7912e509df2d359e1d3b8786252de1a2b1"
 archive_size = 456523776
 key_id = "ada32b29ba81aa751cd16a3735be29e9"
+
+# Unsigned build input checked before the descriptor is signed (ADR 003). It pins the
+# musl Claude Code 2.1.273 binary exactly as embedded in the archive (loader path patched;
+# see docs/adr/003-embedded-requirements.md, Evidence).
+[requirements]
+packages = ["claude-code-native", "mvm-agent", "bash", "coreutils", "musl"]
+commands = ["bash", "sh"]
+
+[[requirements.binaries]]
+package = "claude-code-native"
+path = "bin/claude"
+sha256 = "7544d5d74f38f78b7d5457728dea4bf3f467befda7c1a892021dcfbfda1ab4e1"
+size = 221263520

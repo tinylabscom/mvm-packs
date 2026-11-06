@@ -12,6 +12,14 @@ It is the only catalog. Schema v2 lists each version together with the
 from published manifests, not unpublished source metadata, and validation
 requires every entry and digest to match. Do not edit it by hand.
 
+Browse the generated [pack registry pages](docs/registry/README.md) for a
+human-readable index and individual pack details. The generator reads
+`index.json`, the pinned published manifests, pack policy files and
+`revocations.toml`; the Markdown is rendered as a
+[static site](https://tinylabscom.github.io/mvm-packs/) and deployed from
+`main` by the Pages workflow.
+To submit a new policy pack, follow the [publishing guide](docs/publishing-a-pack.md).
+
 ### Runnable Claude application source
 
 `pack-sources/agent/claude` defines `agent/claude@2.0.0` as an application,
@@ -91,8 +99,24 @@ Run the repository checks:
 
 ```sh
 python3 -m unittest discover -s tests
+python3 scripts/build-packs.py --check-sources
+python3 scripts/build-pack-pages.py --check
 python3 scripts/validate-packs.py
 ```
+
+With [`just`](https://github.com/casey/just) installed, plain `just` lists the
+available recipes; `just check` runs these checks. Use `just pages` to regenerate
+`docs/registry/`, or `just pages-check` to check them without writing. To preview
+the Starlight site locally, use Node.js 22.23.4 or newer (`.node-version`).
+If `mise` is installed, the recipes select that version automatically:
+
+```sh
+just pages-install
+just pages-dev
+```
+
+Open <http://127.0.0.1:8000/mvm-packs/>. The preview rebuilds when the catalog,
+revocations or published pack files change; Ctrl+C stops the server.
 
 To additionally verify publisher signatures (requires `cosign`):
 
