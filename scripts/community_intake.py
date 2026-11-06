@@ -152,11 +152,15 @@ def resolve(root, list_releases, fetch, verify, read_back):
 
 def github_releases(repository):
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{repository}/releases?per_page=100",
+        f"https://api.github.com/repos/{repository}/releases?per_page=30",
         headers={"Accept": "application/vnd.github+json", **(
             {"Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}"} if os.environ.get("GITHUB_TOKEN") else {})})
+    limit = 32 << 20
     with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read(8 << 20))
+        data = response.read(limit + 1)
+    if len(data) > limit:
+        raise ValueError(f"{repository}: release list is larger than {limit} bytes")
+    return json.loads(data)
 
 
 def fetch(url):
