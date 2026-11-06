@@ -142,6 +142,15 @@ supported client floor can read them (the `mvm` index contract already says this
   owner. Format and CLI work happens in separate worktrees and branches, avoids
   PS-06 files, and is coordinated with that owner. The consent record on mvm#3716
   covers signing and publishing a specific pack only; nothing here signs or publishes.
+- **Install and start path.** Two open `mvm` issues (an installed bundle stored twice,
+  and a persistent start looking for the manifest in the wrong directory) belong to
+  another session and land after the final tag. A `policy` kind and any change to
+  acquisition or install must be coordinated with that owner first.
+- **Rust footprint ceiling.** `mvm` enforces a physical-line ceiling (1,245,000 lines;
+  main was about 1,243,900 on 2026-11-06), so there are roughly 1,100 lines of
+  headroom. Items M2 to M8 are substantial. Each must be lean, reuse the existing bundle
+  member machinery, and be paid for by deletions, or the user must decide to raise the
+  ceiling. Moving `new-pack` under `pack` should be net-neutral or negative.
 - **Compatibility.** The nine official policy packs are immutable. A client must read
   old and new formats; an old client must refuse the new one by version, not misread it.
 - **Parsers.** Every new member, the in-file signature and the attestation are
