@@ -30,12 +30,20 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
+      - name: Require a maintainer for first-party namespaces
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ASSOCIATION: ${{ github.event.pull_request.author_association }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
