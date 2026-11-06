@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Refuse pull requests from non-maintainers that touch first-party namespaces.
 
-Reads changed paths (new and previous names) on stdin. The author's association comes from GitHub's own
-`author_association` field. shortcut: a PR can edit this workflow, so real
-enforcement is a required code-owner review; this check only fails fast.
+Reads changed paths (new and previous names) on stdin. Arguments: the author's
+`author_association` and whether the PR branch lives in this repository.
+shortcut: a PR can edit this workflow, so real enforcement is a required code-owner
+review; this check only fails fast.
 """
 
 import re
@@ -14,13 +15,17 @@ RESERVED = re.compile(r"(?:(?:pack-sources|packs)/(?:mvm|agent|runtime)/|index\.
 TRUSTED = {"OWNER", "MEMBER", "COLLABORATOR"}
 
 
-def violations(paths, association):
-    if association in TRUSTED:
+def violations(paths, association, same_repo=False):
+    # A branch in this repository can only be pushed by someone with write access, which
+    # is what "maintainer" means here. author_association alone is unreliable: the Actions
+    # token cannot see private organisation membership and reports MEMBER as CONTRIBUTOR.
+    if same_repo or association in TRUSTED:
         return []
     return [path for path in paths if RESERVED.match(path)]
 
 
 if __name__ == "__main__":
-    bad = violations(sys.stdin.read().split(), sys.argv[1] if len(sys.argv) > 1 else "NONE")
+    bad = violations(sys.stdin.read().split(), sys.argv[1] if len(sys.argv) > 1 else "NONE",
+                     len(sys.argv) > 2 and sys.argv[2] == "true")
     if bad:
         sys.exit("first-party namespaces (mvm, agent, runtime) need a maintainer:\n  " + "\n  ".join(bad))
