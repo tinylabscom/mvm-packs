@@ -59,7 +59,6 @@ DETAILS = ROOT / "pack-details"
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-IMAGE_SET_TAG = re.compile(r"image-set/v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 BUILT_IMAGE_ASSETS = {
     "rootfs": "rootfs.ext4",
     "verity": "rootfs.verity",
@@ -87,11 +86,11 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build", "application", "requirements", "runtime_layer"}:
+    if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
         fail(f"{path}: unknown pack metadata fields")
     if "runtime_layer" in data:
-        if "application" in data or "image" in data or "image_build" in data or "requirements" in data:
-            fail(f"{path}: a runtime layer cannot also declare application, image, image_build or requirements")
+        if "application" in data or "requirements" in data:
+            fail(f"{path}: a runtime layer cannot also declare application or requirements")
         try:
             validate_runtime_layer(data["runtime_layer"])
         except ValueError as error:
@@ -104,8 +103,6 @@ def parse_pack_toml(path):
             fail(f"{path}: {error}")
         if not SEMVER.fullmatch(version) or "+" in version:
             fail(f"{path}: application version must be canonical semver without build metadata")
-        if "image" in data or "image_build" in data:
-            fail(f"{path}: application cannot declare image or image_build")
     requirements = None
     if "requirements" in data:
         if "application" not in data:
@@ -114,89 +111,8 @@ def parse_pack_toml(path):
             requirements = rootfs_requirements.validate_requirements(data["requirements"])
         except ValueError as error:
             fail(f"{path}: {error}")
-    image = data.get("image")
-    if image is not None and not isinstance(image, dict):
-        fail(f"{path}: [image] must be a table")
-    image_build = data.get("image_build")
-    if image_build is not None:
-        validate_image_build_intent(image_build, f"{path.parent.parent.name}/{path.parent.name}@{version}")
-    if image is not None and image_build is not None:
-        fail(f"{path}: [image] and [image_build] cannot both be present")
-    return {"version": version, "description": description, "image": image,
-            "image_build": image_build, "application": application,
+    return {"version": version, "description": description, "application": application,
             "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
-
-
-def validate_image_build_intent(intent, reference):
-    """Validate pre-build inputs without claiming digests for future outputs."""
-    if not isinstance(intent, dict) or set(intent) != {
-        "schema_version", "platform", "base_set", "release"
-    } or type(intent["schema_version"]) is not int or intent["schema_version"] != 1:
-        fail(f"{reference}: image build intent has missing, extra or unsupported fields")
-    if intent["platform"] not in ("linux/x86_64", "linux/aarch64"):
-        fail(f"{reference}: image build platform is unsupported")
-    base = intent["base_set"]
-    if not isinstance(base, dict) or set(base) != {
-        "repository", "release_tag", "manifest_sha256"
-    } or base["repository"] != "tinylabscom/mvm-images":
-        fail(f"{reference}: image build base set is invalid")
-    tag = base["release_tag"]
-    if not isinstance(tag, str) or not IMAGE_SET_TAG.fullmatch(tag):
-        fail(f"{reference}: image build base release tag is invalid")
-    if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
-        fail(f"{reference}: image build base root digest is invalid")
-    namespace_name, version = reference.split("@", 1)
-    expected_tag = f"pack-{namespace_name.replace('/', '-')}-v{version}"
-    if intent["release"] != {"repository": "tinylabscom/mvm-packs", "tag": expected_tag}:
-        fail(f"{reference}: image build release identity is invalid")
-
-
-def validate_built_image_descriptor(image, reference):
-    """Validate source metadata only; no image asset is fetched or trusted here."""
-    if not isinstance(image, dict) or image.get("schema_version") != 2:
-        fail(
-            f"{reference}: source-only image is not publishable: schema v1 has no "
-            "built image digest, base-set pin, or provenance attestation"
-        )
-    if set(image) != {"schema_version", "platform", "base_set", "release", "assets"}:
-        fail(f"{reference}: built image descriptor has missing or extra fields")
-    if image["platform"] not in ("linux/x86_64", "linux/aarch64"):
-        fail(f"{reference}: built image platform is unsupported")
-
-    base = image["base_set"]
-    if not isinstance(base, dict) or set(base) != {
-        "repository", "release_tag", "manifest_sha256"
-    }:
-        fail(f"{reference}: base_set must name repository, release_tag, and manifest_sha256")
-    if base["repository"] != "tinylabscom/mvm-images":
-        fail(f"{reference}: base_set repository is not the MVM image-set repository")
-    tag = base["release_tag"]
-    if not isinstance(tag, str) or not IMAGE_SET_TAG.fullmatch(tag):
-        fail(f"{reference}: base_set release_tag must be an immutable image-set version")
-    if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
-        fail(f"{reference}: base_set manifest_sha256 must be lowercase SHA-256")
-
-    release = image["release"]
-    if not isinstance(release, dict) or set(release) != {"repository", "tag"}:
-        fail(f"{reference}: release must name repository and tag")
-    namespace_name, version = reference.split("@", 1)
-    expected_tag = f"pack-{namespace_name.replace('/', '-')}-v{version}"
-    if release != {"repository": "tinylabscom/mvm-packs", "tag": expected_tag}:
-        fail(f"{reference}: release repository or tag does not match {expected_tag}")
-
-    assets = image["assets"]
-    if not isinstance(assets, dict) or set(assets) != set(BUILT_IMAGE_ASSETS):
-        fail(f"{reference}: assets must name every built image and attestation asset")
-    for role, expected_name in BUILT_IMAGE_ASSETS.items():
-        asset = assets[role]
-        if not isinstance(asset, dict) or set(asset) != {"name", "sha256", "size"}:
-            fail(f"{reference}: {role} asset must have exactly name, sha256, and size")
-        if asset["name"] != expected_name:
-            fail(f"{reference}: {role} asset name must be {expected_name}")
-        if not isinstance(asset["sha256"], str) or not HEX64.fullmatch(asset["sha256"]):
-            fail(f"{reference}: {role} sha256 must be lowercase SHA-256")
-        if type(asset["size"]) is not int or asset["size"] <= 0:
-            fail(f"{reference}: {role} size must be a positive integer")
 
 
 def sha256_of(path):
@@ -209,7 +125,7 @@ def sha256_of(path):
     return digest.hexdigest(), size
 
 
-def manifest_bytes(reference, description, payload, image=None):
+def manifest_bytes(reference, description, payload):
     # The payload root itself is the `pack/` directory: its contents ship
     # under `pack/` in the manifest, the path mvm reads policy documents
     # from (pack/profile.toml, pack/group.toml).
@@ -230,39 +146,6 @@ def manifest_bytes(reference, description, payload, image=None):
         "description": description,
         "files": files,
     }
-    if image is not None:
-        if isinstance(image, dict) and image.get("schema_version") == 2:
-            validate_built_image_descriptor(image, reference)
-            manifest["image"] = image
-            return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
-        manifest_path = image["manifest"]
-        parts = manifest_path.split("/")
-        if (
-            len(parts) < 3
-            or parts[0] != "pack"
-            or parts[-1] != "mvm.toml"
-            or not all(parts)
-            or ".." in parts
-            or "\\" in manifest_path
-        ):
-            fail(f"unsafe image manifest path {manifest_path!r}")
-        declared = {entry["path"] for entry in files}
-        parent = "/".join(parts[:-1])
-        for required in ("mvm.toml", "flake.nix", "flake.lock"):
-            if f"{parent}/{required}" not in declared:
-                fail(f"image source file {parent}/{required} is not signed")
-        source_manifest = payload / "/".join(parts[1:])
-        if source_manifest.stat().st_size > 64 * 1024:
-            fail(f"image manifest {manifest_path!r} exceeds 64 KiB")
-        try:
-            source = tomllib.loads(source_manifest.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
-            fail(f"image manifest {manifest_path!r} is not valid UTF-8 TOML")
-        if set(source) - {"schema_version", "flake", "profile", "name"}:
-            fail(f"image manifest {manifest_path!r} declares host authority")
-        if source.get("flake", ".") != ".":
-            fail(f"image manifest {manifest_path!r} must select the local signed flake")
-        manifest["image"] = image
     return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
 
 
@@ -542,12 +425,6 @@ def build_one(source, check_only=False):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
     meta = parse_pack_toml(source / "pack.toml")
     reference = f"{namespace}/{name}@{meta['version']}"
-    if meta["image_build"] is not None:
-        print(f"{reference}: image build intent deferred to signed image publisher")
-        return
-    if meta["image"] is not None:
-        validate_built_image_descriptor(meta["image"], reference)
-        fail(f"{reference}: built image packs are not publishable until consumer verification is available")
     if meta["runtime_layer"] is not None:
         fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
     application = meta["application"]
@@ -561,7 +438,7 @@ def build_one(source, check_only=False):
     if application is not None:
         manifest = application_manifest_bytes(reference, meta["description"], application)
     else:
-        manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
+        manifest, _ = manifest_bytes(reference, meta["description"], payload)
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
