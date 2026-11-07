@@ -44,6 +44,8 @@ class RuntimeLayerTests(unittest.TestCase):
                layer(dependencies=[dict(PIN, manifest_sha256="C" * 64)]),
                layer(dependencies=[dict(PIN, reference="runtime/python@1.2")]),
                layer(dependencies=[PIN] * 17), layer(dependencies="x"),
+               layer(dependencies=[PIN, dict(PIN, reference="runtime/python@1.2.4")]),
+               layer(dependencies=[{"reference": "runtime/node@1.0.0", "manifest_sha256": "c" * 64}]),
                layer(archive=dict(ARCHIVE, extra=1)), layer(archive=dict(ARCHIVE, key_id="b" * 32)),
                layer(archive=dict(ARCHIVE, source="http://example.com/x.tar")),
                layer(archive=dict(ARCHIVE, archive_sha256="A" * 64)),
