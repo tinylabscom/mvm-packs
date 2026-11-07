@@ -25,9 +25,7 @@ import pack_details
 from community_index import validate_index as validate_community_index
 from publisher_identity import (
     CURRENT_IDENTITY,
-    FORMER_IDENTITY,
     PUBLISHER_ISSUER,
-    accepts_former,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -72,15 +70,7 @@ def verify_signature(path, reference):
     if not bundle.is_file():
         problems.append(f"{path.relative_to(ROOT)}: missing signature bundle")
         return
-    try:
-        manifest_bytes = path.read_bytes()
-    except OSError:
-        problems.append(f"{path.relative_to(ROOT)}: manifest cannot be read for signature verification")
-        return
-    identities = [PUBLISHER_IDENTITY]
-    if accepts_former(reference, manifest_bytes):
-        identities.append(FORMER_IDENTITY)
-    for identity in identities:
+    for identity in (PUBLISHER_IDENTITY,):
         command = [
             "cosign", "verify-blob", str(path), "--bundle", str(bundle),
             "--certificate-identity", identity,
