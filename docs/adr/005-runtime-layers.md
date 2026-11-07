@@ -13,26 +13,29 @@ kernel, a rootfs, an entrypoint), so they cannot double as a layer.
 
 ## Decision
 
-- **Layer descriptor:** schema 2, `kind = "layer"`, field `layer` with the same
-  `guest_arch` and `bundle{source, archive_sha256, archive_size, key_id}` pins
-  as an application. It pins a typed layer archive: payload files and a policy
-  member, with no kernel, no rootfs and no entrypoint. A layer cannot compose
-  other layers.
-- **Application descriptor:** gains an optional, ordered
-  `application.layers = [{reference, manifest_sha256}]` of exact
-  `namespace/name@major.minor.patch` pins (at most 16, no duplicates). The
-  application still pins one final, self-contained `.mvmpkg` that carries the
-  layer bytes, so a recipient needs no layer cache.
-- **Policy:** composed by field with the existing rules: allows union, denies
-  win, ceilings take the minimum, secret destinations only narrow. The result
-  is intersected with host grants and signed application ceilings at admission
-  (`tests/policy-vectors/`). A layer never grants itself access and cannot
-  introduce an entrypoint.
-- **Gate (to be built with the layer format):** the final archive's provenance
-  must list each layer's reference and manifest digest equal to the pins, in
-  order. Refuse a revoked or duplicate layer, an architecture mismatch, a second
-  entrypoint, an overlapping path without a reviewed ownership rule, or a changed
-  digest.
+Follows the closed wire shape in the `mvm` contract (`specs/contracts/composable-pack-build.md`):
+
+- **Layer manifest:** outer `schema_version = 3`, `kind = "runtime_layer"`, an exact
+  `runtime/name@major.minor.patch` reference, a description,
+  `runtime_layer{schema_version = 1, guest_arch, dependencies}`, and a signed `files`
+  inventory of `layer.tar` (at most 2 GiB) plus at least one of `pack/group.toml` or
+  `pack/profile.toml`, each with a digest and a positive size. No kernel, no entrypoint,
+  no other file, no unknown field.
+- **Dependencies:** an ordered list of at most 16 exact, manifest-digest-pinned `runtime/*`
+  layers. A digest pin makes a cycle impossible; self and duplicate dependencies are refused.
+- **No second signer:** the Sigstore-signed registry manifest authenticates `layer.tar` by
+  digest. The layer has no key of its own.
+- **Application descriptor unchanged:** the final self-contained `.mvmpkg` records the input
+  runtime manifest pins in its signed provenance, so a later layer revocation can refuse
+  derived bundles. The registry application descriptor gains no field.
+- **Policy:** composed by field with the existing rules: allows union, denies win, ceilings
+  take the minimum, secret destinations only narrow, then intersected with host grants at
+  admission (`tests/policy-vectors/`). A layer never grants itself access.
+
+**Open constraints, raised with the `mvm` owner:** a layer tar under the registry `files/` tree
+means git-hosted bytes (GitHub rejects files over 100 MB), and one `guest_arch` per manifest
+means one architecture per version. A hosted `source` and per-architecture entries would
+avoid both; neither is in the wire shape yet.
 
 ## Signature and trust
 
@@ -77,7 +80,8 @@ owner and the shadowed entrypoints. Policy still composes across all of them.
 
 ## Status of the code
 
-`scripts/application_manifest.py` validates the layer descriptor and the pins,
-and `build-packs.py` refuses to sign a layer or an application that composes
-layers until the gate exists. The legacy rule still holds: every pack ships a
-binary.
+`scripts/application_manifest.py` validates the closed `runtime_layer` shape and its file
+inventory and can render the manifest bytes; `build-packs.py` refuses to publish a runtime
+layer until the `mvm` consumer dispatch, installer and our gate exist. `validate-packs.py`
+still accepts only schema versions 1 and 2, so a published layer fails closed. The legacy
+rule holds: every pack ships a binary.

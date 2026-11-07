@@ -12,54 +12,63 @@ spec = importlib.util.spec_from_file_location("builder", ROOT / "scripts/build-p
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
-BUNDLE = {"source": "https://example.com/x.mvmpkg", "archive_sha256": "a" * 64,
-          "archive_size": 10, "key_id": "b" * 32}
 PIN = {"reference": "runtime/python@1.2.3", "manifest_sha256": "c" * 64}
+REF = "runtime/node@2.0.0"
 
 
-def layer():
-    return {"schema_version": 1, "guest_arch": "aarch64", "bundle": dict(BUNDLE)}
+def layer(**changes):
+    return {"schema_version": 1, "guest_arch": "aarch64", "dependencies": [PIN], **changes}
 
 
-class LayerDescriptorTests(unittest.TestCase):
-    def test_valid_layer_and_application_with_layers(self):
-        am.validate_layer(layer())
-        app = layer()
-        app["layers"] = [PIN, {"reference": "runtime/node@2.0.0", "manifest_sha256": "d" * 64}]
-        am.validate_application(app)
-        self.assertIn(b'"kind": "layer"', am.layer_manifest_bytes("acme/py@1.0.0", "d", layer()))
+def files(*paths):
+    return [{"path": p, "sha256": "a" * 64, "size": 10} for p in paths]
 
-    def test_bad_pins_are_refused(self):
-        bad = [[], [PIN, PIN], [{"reference": "runtime/python", "manifest_sha256": "c" * 64}],
-               [{"reference": "runtime/python@1.2", "manifest_sha256": "c" * 64}],
-               [{"reference": "runtime/python@1.2.3", "manifest_sha256": "C" * 64}],
-               [{**PIN, "extra": 1}], [PIN] * 17, "x"]
-        for pins in bad:
-            with self.subTest(pins=pins), self.assertRaises(ValueError):
-                am.validate_layer_pins(pins)
 
-    def test_a_layer_cannot_compose_layers(self):
-        value = layer()
-        value["layers"] = [PIN]
+class RuntimeLayerTests(unittest.TestCase):
+    def test_valid_manifest_bytes(self):
+        raw = am.runtime_layer_manifest_bytes(
+            REF, "d", layer(), files("pack/group.toml", "layer.tar"))
+        self.assertIn(b'"kind": "runtime_layer"', raw)
+        self.assertIn(b'"schema_version": 3', raw)
+        am.validate_runtime_layer(layer(dependencies=[]), REF)
+
+    def test_bad_layers_are_refused(self):
+        bad = [layer(extra=1), layer(schema_version=2), layer(guest_arch="riscv"),
+               layer(dependencies=[PIN, PIN]), layer(dependencies=[dict(PIN, extra=1)]),
+               layer(dependencies=[{"reference": "agent/claude@1.0.0", "manifest_sha256": "c" * 64}]),
+               layer(dependencies=[{"reference": REF, "manifest_sha256": "c" * 64}]),
+               layer(dependencies=[dict(PIN, manifest_sha256="C" * 64)]),
+               layer(dependencies=[dict(PIN, reference="runtime/python@1.2")]),
+               layer(dependencies=[PIN] * 17), layer(dependencies="x")]
+        for value in bad:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                am.validate_runtime_layer(value, REF)
+
+    def test_file_inventory_is_closed(self):
+        am.validate_layer_files(files("layer.tar", "pack/profile.toml"))
+        big = files("layer.tar", "pack/group.toml")
+        big[0]["size"] = am.MAX_LAYER_TAR + 1
+        for value in (files("layer.tar"), files("pack/group.toml"),
+                      files("layer.tar", "pack/group.toml", "pack/group.toml"),
+                      files("layer.tar", "pack/group.toml", "extra"), big,
+                      [dict(files("layer.tar")[0], size=0)] + files("pack/group.toml")):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                am.validate_layer_files(value)
+
+    def test_application_descriptor_is_unchanged(self):
         with self.assertRaises(ValueError):
-            am.validate_layer(value)
+            am.validate_application({"schema_version": 1, "guest_arch": "aarch64", "layers": [PIN],
+                                     "bundle": {"source": "https://e.com/x", "archive_sha256": "a" * 64,
+                                                "archive_size": 1, "key_id": "b" * 32}})
 
-    def test_layers_are_not_publishable_yet(self):
-        for body in (
-            '[layer]\nschema_version = 1\nguest_arch = "aarch64"\n[layer.bundle]\n'
-            'source = "https://example.com/x.mvmpkg"\narchive_sha256 = "%s"\narchive_size = 10\n'
-            'key_id = "%s"\n' % ("a" * 64, "b" * 32),
-            '[application]\nschema_version = 1\nguest_arch = "aarch64"\n'
-            'layers = [{reference = "runtime/python@1.2.3", manifest_sha256 = "%s"}]\n'
-            '[application.bundle]\nsource = "https://example.com/x.mvmpkg"\narchive_sha256 = "%s"\n'
-            'archive_size = 10\nkey_id = "%s"\n' % ("c" * 64, "a" * 64, "b" * 32),
-        ):
-            with tempfile.TemporaryDirectory() as d:
-                source = pathlib.Path(d) / "pack-sources/acme/x"
-                source.mkdir(parents=True)
-                (source / "pack.toml").write_text('version = "1.0.0"\ndescription = "x"\n' + body)
-                with self.assertRaisesRegex(SystemExit, "not publishable"):
-                    builder.build_one(source, check_only=True)
+    def test_runtime_layers_are_not_publishable_yet(self):
+        body = ('[runtime_layer]\nschema_version = 1\nguest_arch = "aarch64"\ndependencies = []\n')
+        with tempfile.TemporaryDirectory() as d:
+            source = pathlib.Path(d) / "pack-sources/runtime/x"
+            source.mkdir(parents=True)
+            (source / "pack.toml").write_text('version = "1.0.0"\ndescription = "x"\n' + body)
+            with self.assertRaisesRegex(SystemExit, "not publishable"):
+                builder.build_one(source, check_only=True)
 
 
 if __name__ == "__main__":

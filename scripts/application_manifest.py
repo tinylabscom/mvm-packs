@@ -94,42 +94,68 @@ def validate_source(source):
     validate_authority(parsed.netloc, https=True)
 
 
-REFERENCE = re.compile(r"[a-z][a-z0-9-]*/[a-z][a-z0-9-]*@(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
-MAX_LAYERS = 16
+RUNTIME_REFERENCE = re.compile(
+    r"runtime/[a-z][a-z0-9-]*@(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+MAX_DEPENDENCIES = 16
+MAX_LAYER_TAR = 2 * 1024**3
+POLICY_FILES = ("pack/group.toml", "pack/profile.toml")
 
 
-def validate_layer_pins(layers):
-    """Ordered, exact, digest-pinned runtime layers an application composes (ADR 005)."""
-    if not isinstance(layers, list) or not 0 < len(layers) <= MAX_LAYERS:
-        raise ValueError(f"layers must be a list of 1..{MAX_LAYERS} pins")
+def validate_runtime_layer(layer, reference=None):
+    """Closed shape of `runtime_layer` (mvm specs/contracts/composable-pack-build.md; ADR 005).
+
+    No kernel, no entrypoint, no publisher key of its own: the signed registry manifest
+    authenticates layer.tar. Authored (pack.toml) and published forms share this check.
+    """
+    if not isinstance(layer, dict) or set(layer) != {"schema_version", "guest_arch", "dependencies"}:
+        raise ValueError("runtime_layer must contain exactly schema_version/guest_arch/dependencies")
+    if type(layer["schema_version"]) is not int or layer["schema_version"] != 1:
+        raise ValueError("runtime_layer schema_version must be integer 1")
+    if layer["guest_arch"] not in ("x86_64", "aarch64"):
+        raise ValueError("runtime_layer guest_arch must be x86_64 or aarch64")
+    pins = layer["dependencies"]
+    if not isinstance(pins, list) or len(pins) > MAX_DEPENDENCIES:
+        raise ValueError(f"runtime_layer dependencies must be a list of at most {MAX_DEPENDENCIES} pins")
     seen = set()
-    for pin in layers:
+    for pin in pins:
         if not isinstance(pin, dict) or set(pin) != {"reference", "manifest_sha256"}:
-            raise ValueError("each layer pin must contain exactly reference and manifest_sha256")
-        if not isinstance(pin["reference"], str) or not REFERENCE.fullmatch(pin["reference"]):
-            raise ValueError("layer reference must be an exact namespace/name@major.minor.patch")
+            raise ValueError("each dependency must contain exactly reference and manifest_sha256")
+        if not isinstance(pin["reference"], str) or not RUNTIME_REFERENCE.fullmatch(pin["reference"]):
+            raise ValueError("dependency reference must be an exact runtime/name@major.minor.patch")
         if not isinstance(pin["manifest_sha256"], str) or not HEX64.fullmatch(pin["manifest_sha256"]):
-            raise ValueError("layer manifest_sha256 must be 64 lowercase hex characters")
-        if pin["reference"] in seen:
-            raise ValueError(f"duplicate layer {pin['reference']}")
+            raise ValueError("dependency manifest_sha256 must be 64 lowercase hex characters")
+        if pin["reference"] in seen or pin["reference"] == reference:
+            raise ValueError(f"duplicate or self dependency {pin['reference']}")
         seen.add(pin["reference"])
 
 
-def validate_layer(layer):
-    """A runtime layer pins a layer archive (payload + policy, no kernel, rootfs or entrypoint)."""
-    if not isinstance(layer, dict) or "layers" in layer:
-        raise ValueError("a layer cannot itself compose layers")
-    validate_application(layer)
+def validate_layer_files(files):
+    """The signed inventory: layer.tar (<= 2 GiB) and at least one policy file, nothing else."""
+    if not isinstance(files, list):
+        raise ValueError("runtime_layer files must be a list")
+    paths = []
+    for entry in files:
+        if not isinstance(entry, dict) or set(entry) != {"path", "sha256", "size"}:
+            raise ValueError("each file must contain exactly path, sha256 and size")
+        if entry["path"] not in ("layer.tar",) + POLICY_FILES or entry["path"] in paths:
+            raise ValueError(f"unexpected or duplicate file {entry['path']!r}")
+        if not isinstance(entry["sha256"], str) or not HEX64.fullmatch(entry["sha256"]):
+            raise ValueError("file sha256 must be 64 lowercase hex characters")
+        if type(entry["size"]) is not int or entry["size"] <= 0:
+            raise ValueError("file size must be a positive integer")
+        if entry["path"] == "layer.tar" and entry["size"] > MAX_LAYER_TAR:
+            raise ValueError("layer.tar exceeds 2 GiB")
+        paths.append(entry["path"])
+    if "layer.tar" not in paths or not set(paths) & set(POLICY_FILES):
+        raise ValueError("files must name layer.tar and a signed policy file")
 
 
 def validate_application(application):
     """Raise ValueError for any unsupported application descriptor field."""
-    if not isinstance(application, dict) or not {
+    if not isinstance(application, dict) or set(application) != {
         "schema_version", "guest_arch", "bundle"
-    } <= set(application) <= {"schema_version", "guest_arch", "bundle", "layers"}:
-        raise ValueError("application must contain schema_version/guest_arch/bundle and optionally layers")
-    if "layers" in application:
-        validate_layer_pins(application["layers"])
+    }:
+        raise ValueError("application must contain exactly schema_version/guest_arch/bundle")
     if type(application["schema_version"]) is not int or application["schema_version"] != 1:
         raise ValueError("application schema_version must be integer 1")
     if application["guest_arch"] not in ("x86_64", "aarch64"):
@@ -148,14 +174,18 @@ def validate_application(application):
         raise ValueError("bundle key_id must be 32 lowercase hex characters")
 
 
-def layer_manifest_bytes(reference, description, layer):
-    validate_layer(layer)
+def runtime_layer_manifest_bytes(reference, description, layer, files):
+    if not RUNTIME_REFERENCE.fullmatch(reference):
+        raise ValueError("a runtime layer reference must be an exact runtime/name@version")
+    validate_runtime_layer(layer, reference)
+    validate_layer_files(files)
     return (json.dumps({
-        "schema_version": 2,
-        "kind": "layer",
+        "schema_version": 3,
+        "kind": "runtime_layer",
         "reference": reference,
         "description": description,
-        "layer": layer,
+        "runtime_layer": layer,
+        "files": sorted(files, key=lambda entry: entry["path"]),
     }, indent=2, sort_keys=True) + "\n").encode()
 
 
