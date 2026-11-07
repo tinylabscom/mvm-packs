@@ -42,7 +42,7 @@ import ed25519
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import validate_application, validate_layer
+from application_manifest import validate_application, validate_runtime_layer
 from publisher_identity import (
     CURRENT_IDENTITY,
     FORMER_IDENTITY,
@@ -86,13 +86,13 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "application", "requirements", "layer"}:
+    if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
         fail(f"{path}: unknown pack metadata fields")
-    if "layer" in data:
+    if "runtime_layer" in data:
         if "application" in data or "requirements" in data:
-            fail(f"{path}: a layer cannot also declare application or requirements")
+            fail(f"{path}: a runtime layer cannot also declare application or requirements")
         try:
-            validate_layer(data["layer"])
+            validate_runtime_layer(data["runtime_layer"])
         except ValueError as error:
             fail(f"{path}: {error}")
     application = data.get("application")
@@ -112,7 +112,7 @@ def parse_pack_toml(path):
         except ValueError as error:
             fail(f"{path}: {error}")
     return {"version": version, "description": description, "application": application,
-            "requirements": requirements, "layer": data.get("layer")}
+            "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
 
 
 def sha256_of(path):
@@ -425,11 +425,9 @@ def build_one(source, check_only=False):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
     meta = parse_pack_toml(source / "pack.toml")
     reference = f"{namespace}/{name}@{meta['version']}"
-    if meta["layer"] is not None:
-        fail(f"{reference}: layer packs are not publishable until the mvm layer archive format and its gate exist (ADR 005)")
+    if meta["runtime_layer"] is not None:
+        fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
     application = meta["application"]
-    if application is not None and "layers" in application:
-        fail(f"{reference}: applications that compose layers are not publishable until the layer gate exists (ADR 005)")
     payload = source / "pack"
     if application is not None:
         if any(path.name != "pack.toml" or path.is_symlink() for path in source.iterdir()):
