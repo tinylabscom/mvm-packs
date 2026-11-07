@@ -134,9 +134,10 @@ def validate_runtime_layer(layer, reference=None):
             raise ValueError("dependency reference must be an exact runtime/name@major.minor.patch")
         if not isinstance(pin["manifest_sha256"], str) or not HEX64.fullmatch(pin["manifest_sha256"]):
             raise ValueError("dependency manifest_sha256 must be 64 lowercase hex characters")
-        if pin["reference"] in seen or pin["reference"] == reference:
-            raise ValueError(f"duplicate or self dependency {pin['reference']}")
-        seen.add(pin["reference"])
+        name = pin["reference"].split("@", 1)[0]
+        if name in seen or (reference and name == reference.split("@", 1)[0]):
+            raise ValueError(f"duplicate or self dependency on {name}")
+        seen.add(name)
 
 
 def validate_layer_files(files):
