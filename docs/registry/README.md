@@ -4,7 +4,7 @@
 
 Browse published packs and inspect their declared policies before pulling. Publication alone is not an official endorsement or proof of safety.
 
-[Publish a policy pack](publish.md) through a reviewed pull request.
+[Publish a pack](publish.md) through a reviewed pull request.
 
 <ul class="registry-list">
 <li><a href="agent/claude.md"><strong>agent/claude</strong><span>Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding.</span><small>policy · latest 1.0.1</small></a></li>

@@ -25,7 +25,7 @@ class TestPackageDiscoveryTests(unittest.TestCase):
                     sys.executable,
                     "-S",
                     "-c",
-                    "import tests.test_bind_image_candidate as helper; "
+                    "import tests.test_ed25519 as helper; "
                     "print(helper.__file__)",
                 ],
                 cwd=ROOT,
@@ -37,5 +37,5 @@ class TestPackageDiscoveryTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
                 Path(result.stdout.strip()).resolve(),
-                ROOT / "tests" / "test_bind_image_candidate.py",
+                ROOT / "tests" / "test_ed25519.py",
             )
