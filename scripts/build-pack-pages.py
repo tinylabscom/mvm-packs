@@ -259,7 +259,7 @@ def render_index(packs, summaries):
     return ("README.md", HEADER + "# Pack registry\n\n"
             "Browse published packs and inspect their declared policies before pulling. "
             "Publication alone is not an official endorsement or proof of safety.\n\n"
-            "[Publish a policy pack](publish.md) through a reviewed pull request.\n\n"
+            "[Publish a pack](publish.md) through a reviewed pull request.\n\n"
             '<ul class="registry-list">\n' + "".join(rows) + '</ul>\n')
 
 
