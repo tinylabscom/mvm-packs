@@ -105,14 +105,24 @@ def validate_runtime_layer(layer, reference=None):
     """Closed shape of `runtime_layer` (mvm specs/contracts/composable-pack-build.md; ADR 005).
 
     No kernel, no entrypoint, no publisher key of its own: the signed registry manifest
-    authenticates layer.tar. Authored (pack.toml) and published forms share this check.
+    binds the external layer archive by digest and size. Authored (pack.toml) and published forms share this check.
     """
-    if not isinstance(layer, dict) or set(layer) != {"schema_version", "guest_arch", "dependencies"}:
-        raise ValueError("runtime_layer must contain exactly schema_version/guest_arch/dependencies")
+    if not isinstance(layer, dict) or set(layer) != {
+        "schema_version", "guest_arch", "dependencies", "archive"
+    }:
+        raise ValueError("runtime_layer must contain exactly schema_version/guest_arch/dependencies/archive")
     if type(layer["schema_version"]) is not int or layer["schema_version"] != 1:
         raise ValueError("runtime_layer schema_version must be integer 1")
     if layer["guest_arch"] not in ("x86_64", "aarch64"):
         raise ValueError("runtime_layer guest_arch must be x86_64 or aarch64")
+    archive = layer["archive"]
+    if not isinstance(archive, dict) or set(archive) != {"source", "archive_sha256", "archive_size"}:
+        raise ValueError("runtime_layer archive must contain exactly source/archive_sha256/archive_size")
+    validate_source(archive["source"])
+    if not isinstance(archive["archive_sha256"], str) or not HEX64.fullmatch(archive["archive_sha256"]):
+        raise ValueError("archive_sha256 must be 64 lowercase hex characters")
+    if type(archive["archive_size"]) is not int or not 0 < archive["archive_size"] <= MAX_LAYER_TAR:
+        raise ValueError("archive_size must be a positive integer of at most 2 GiB")
     pins = layer["dependencies"]
     if not isinstance(pins, list) or len(pins) > MAX_DEPENDENCIES:
         raise ValueError(f"runtime_layer dependencies must be a list of at most {MAX_DEPENDENCIES} pins")
@@ -130,24 +140,20 @@ def validate_runtime_layer(layer, reference=None):
 
 
 def validate_layer_files(files):
-    """The signed inventory: layer.tar (<= 2 GiB) and at least one policy file, nothing else."""
-    if not isinstance(files, list):
-        raise ValueError("runtime_layer files must be a list")
+    """The signed inventory is only the policy: pack/group.toml and/or pack/profile.toml."""
+    if not isinstance(files, list) or not 0 < len(files) <= len(POLICY_FILES):
+        raise ValueError("runtime_layer files must list one or two policy files")
     paths = []
     for entry in files:
         if not isinstance(entry, dict) or set(entry) != {"path", "sha256", "size"}:
             raise ValueError("each file must contain exactly path, sha256 and size")
-        if entry["path"] not in ("layer.tar",) + POLICY_FILES or entry["path"] in paths:
+        if entry["path"] not in POLICY_FILES or entry["path"] in paths:
             raise ValueError(f"unexpected or duplicate file {entry['path']!r}")
         if not isinstance(entry["sha256"], str) or not HEX64.fullmatch(entry["sha256"]):
             raise ValueError("file sha256 must be 64 lowercase hex characters")
         if type(entry["size"]) is not int or entry["size"] <= 0:
             raise ValueError("file size must be a positive integer")
-        if entry["path"] == "layer.tar" and entry["size"] > MAX_LAYER_TAR:
-            raise ValueError("layer.tar exceeds 2 GiB")
         paths.append(entry["path"])
-    if "layer.tar" not in paths or not set(paths) & set(POLICY_FILES):
-        raise ValueError("files must name layer.tar and a signed policy file")
 
 
 def validate_application(application):
