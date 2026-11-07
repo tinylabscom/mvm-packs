@@ -115,30 +115,6 @@ class PublisherVerificationTests(unittest.TestCase):
                 validator.verify_signature(manifest, "agent/example@1.0.0")
             self.assertTrue(any("verification failed" in problem for problem in validator.problems))
 
-    def test_historical_signature_uses_only_the_pinned_former_identity(self):
-        manifest = sorted((ROOT / "packs").glob("*/*/*/manifest.json"))[0]
-        reference = json.loads(manifest.read_text())["reference"]
-        # The former identity is accepted only before its cutoff; fix the clock so
-        # this stays a test of the pinned-identity order, not of today's date.
-        before_cutoff = partial(
-            validator.accepts_former, now=datetime(2026, 11, 5, tzinfo=timezone.utc)
-        )
-        with patch.object(validator, "accepts_former", before_cutoff), \
-                patch.object(validator.subprocess, "run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess([], 1),
-                subprocess.CompletedProcess([], 0),
-            ]
-            validator.verify_signature(manifest, reference)
-        self.assertEqual(
-            [
-                call.args[0][call.args[0].index("--certificate-identity") + 1]
-                for call in run.call_args_list
-            ],
-            [validator.PUBLISHER_IDENTITY, validator.FORMER_IDENTITY],
-        )
-        self.assertFalse(validator.problems)
-
     def test_unpinned_manifest_never_tries_the_former_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -189,41 +165,12 @@ class PublisherVerificationTests(unittest.TestCase):
             bundle.write_text("{}")
             with patch.object(builder.subprocess, "run") as run:
                 run.return_value.returncode = 0
-                self.assertTrue(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
+                self.assertTrue(builder.verify_bundle(manifest, bundle, builder.CURRENT_IDENTITY))
                 command = run.call_args.args[0]
-                self.assertIn(builder.FORMER_IDENTITY, command)
+                self.assertIn(builder.CURRENT_IDENTITY, command)
                 self.assertIn(builder.PUBLISHER_ISSUER, command)
                 run.return_value.returncode = 1
-                self.assertFalse(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
-
-    def test_pinned_former_identity_is_preserved_during_overlap(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, published = self.make_source_and_published_pack(root)
-            with patch.object(builder, "PACKS", root / "packs"), \
-                    patch.object(builder, "is_historical_manifest", return_value=True), \
-                    patch.object(builder, "accepts_former", return_value=True), \
-                    patch.object(builder, "verify_bundle", side_effect=[False, True]) as verify, \
-                    patch.object(builder, "sign") as sign:
-                builder.build_one(source)
-            self.assertEqual(
-                [call.args[2] for call in verify.call_args_list],
-                [builder.CURRENT_IDENTITY, builder.FORMER_IDENTITY],
-            )
-            sign.assert_not_called()
-            self.assertTrue((published / "manifest.json").is_file())
-
-    def test_pinned_former_identity_is_resigned_after_cutoff(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, _ = self.make_source_and_published_pack(root)
-            with patch.object(builder, "PACKS", root / "packs"), \
-                    patch.object(builder, "is_historical_manifest", return_value=True), \
-                    patch.object(builder, "accepts_former", return_value=False), \
-                    patch.object(builder, "verify_bundle", side_effect=[False, True]), \
-                    patch.object(builder, "sign") as sign:
-                builder.build_one(source)
-            sign.assert_called_once()
+                self.assertFalse(builder.verify_bundle(manifest, bundle, builder.CURRENT_IDENTITY))
 
     def test_untrusted_signature_is_not_resigned(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -268,43 +215,3 @@ class PublisherVerificationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class ResignUnsourcedHistoricalTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.packs = Path(temporary.name) / "packs"
-        self.dir = self.packs / "runtime" / "python" / "1.0.0"
-        self.dir.mkdir(parents=True)
-        (self.dir / "manifest.json").write_bytes(b'{"x": 1}')
-        (self.dir / "manifest.sigstore.json").write_text("old")
-        digest = hashlib.sha256(b'{"x": 1}').hexdigest()
-        patcher = patch.object(builder, "is_historical_manifest", lambda ref, raw: hashlib.sha256(raw).hexdigest() == digest)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def run_step(self, verify, sourced=frozenset()):
-        def fake_sign(_, bundle):
-            bundle.write_text("new")
-        with patch.object(builder, "PACKS", self.packs), \
-                patch.object(builder, "verify_bundle", side_effect=verify), \
-                patch.object(builder, "sign", side_effect=fake_sign) as sign:
-            builder.resign_unsourced_historical(sourced)
-            return sign.call_count
-
-    def test_resigns_when_only_the_former_signature_verifies(self):
-        calls = self.run_step(lambda m, b, identity: identity == builder.FORMER_IDENTITY)
-        self.assertEqual(calls, 1)
-        self.assertEqual((self.dir / "manifest.sigstore.json").read_text(), "new")
-        self.assertEqual((self.dir / "manifest.json").read_bytes(), b'{"x": 1}')
-
-    def test_leaves_current_signed_and_sourced_versions_alone(self):
-        self.assertEqual(self.run_step(lambda m, b, identity: True), 0)
-        self.assertEqual(self.run_step(lambda m, b, identity: False,
-                                       {("runtime", "python", "1.0.0")}), 0)
-
-    def test_refuses_when_no_known_signature_verifies(self):
-        with self.assertRaises(SystemExit):
-            self.run_step(lambda m, b, identity: False)
-        self.assertEqual((self.dir / "manifest.sigstore.json").read_text(), "old")

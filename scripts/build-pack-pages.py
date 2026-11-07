@@ -20,7 +20,7 @@ sys.path.insert(0, str(SCRIPTS))
 from application_manifest import unique_object, validate_application  # noqa: E402
 import pack_details  # noqa: E402
 from publisher_identity import (  # noqa: E402
-    CURRENT_IDENTITY, FORMER_IDENTITY, PUBLISHER_ISSUER, is_historical_manifest,
+    CURRENT_IDENTITY, PUBLISHER_ISSUER,
 )
 
 ROOT = SCRIPTS.parent
@@ -105,13 +105,8 @@ def read_policy(version_dir, manifest):
 
 
 def signer_identities(reference, raw):
-    """Every identity this version can be verified under. Uses the time-free
-    historical test (not accepts_former) so a page never changes with the date
-    and never under-reports revocation."""
-    ids = [CURRENT_IDENTITY]
-    if is_historical_manifest(reference, raw):
-        ids.append(FORMER_IDENTITY)
-    return ids
+    """Every identity this version can be verified under."""
+    return [CURRENT_IDENTITY]
 
 
 def human_size(count):

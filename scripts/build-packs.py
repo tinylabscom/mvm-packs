@@ -45,10 +45,7 @@ from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import validate_application, validate_runtime_layer
 from publisher_identity import (
     CURRENT_IDENTITY,
-    FORMER_IDENTITY,
     PUBLISHER_ISSUER,
-    accepts_former,
-    is_historical_manifest,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -463,13 +460,7 @@ def build_one(source, check_only=False):
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
             return
-        if not is_historical_manifest(reference, existing) or not verify_bundle(
-            out / "manifest.json", bundle, FORMER_IDENTITY
-        ):
-            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
-        if accepts_former(reference, existing):
-            print(f"{reference}: unchanged")
-            return
+        fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
 
     if application is None and not out.exists():
         fail(
@@ -499,33 +490,6 @@ def build_one(source, check_only=False):
     if details is not None:
         write_details(namespace, name, meta["version"], details)
     print(f"{reference}: published")
-
-
-def resign_unsourced_historical(sourced):
-    """Re-sign pinned historical manifests that no longer have a source.
-
-    A version stays immutable after its source moves on (runtime/python is now
-    1.1.0), but the former signing identity is no longer trusted. Only an exact
-    pinned historical manifest whose old signature still verifies is re-signed,
-    over the same bytes; payload files and the manifest are not touched.
-    """
-    for manifest in sorted(PACKS.glob("*/*/*/manifest.json")):
-        version_dir = manifest.parent
-        namespace, name, version = version_dir.parent.parent.name, version_dir.parent.name, version_dir.name
-        if (namespace, name, version) in sourced:
-            continue
-        reference = f"{namespace}/{name}@{version}"
-        raw = manifest.read_bytes()
-        bundle = version_dir / "manifest.sigstore.json"
-        if not is_historical_manifest(reference, raw) or verify_bundle(manifest, bundle, CURRENT_IDENTITY):
-            continue
-        if not verify_bundle(manifest, bundle, FORMER_IDENTITY):
-            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
-        tmp = bundle.with_name(bundle.name + ".tmp")
-        tmp.unlink(missing_ok=True)
-        sign(manifest, tmp)
-        tmp.replace(bundle)
-        print(f"{reference}: re-signed existing manifest bytes under the current identity")
 
 
 def version_key(value):
@@ -594,10 +558,6 @@ def main():
     for source in sources:
         build_one(source, check_only=args.check_sources)
     if not args.check_sources:
-        resign_unsourced_historical({
-            (source.parent.name, source.name, parse_pack_toml(source / "pack.toml")["version"])
-            for source in sources
-        })
         rebuild_index()
 
 

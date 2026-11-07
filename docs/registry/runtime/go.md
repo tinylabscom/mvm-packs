@@ -49,4 +49,4 @@ Binding names and allowed hosts only; a binding is not proof that a secret is re
 
 Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow identity (issuer `https://token.actions.githubusercontent.com`). Identities each version can be verified under:
 
-- `1.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`, `https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main`
+- `1.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`
