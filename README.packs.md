@@ -60,8 +60,7 @@ is granted by this schema.
 
 Every pack must embed its application binary in a signed `.mvmpkg`; a policy alone cannot
 be signed, and built-image packs are not part of this registry. A pack source is a single
-`pack-sources/<namespace>/<name>/pack.toml` with an `[application]` bundle (see above), or
-a `[runtime_layer]` draft that cannot be published yet ([ADR 005](docs/adr/005-runtime-layers.md)).
+`pack-sources/<namespace>/<name>/pack.toml` with an `[application]` bundle (see above).
 The legacy policy-only versions under `packs/` stay immutable and are not rebuilt.
 
 The [native input record](docs/application-packages.md) preserves inspected archive and

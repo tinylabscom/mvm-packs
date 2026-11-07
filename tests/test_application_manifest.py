@@ -119,11 +119,11 @@ class ApplicationManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(SystemExit, "cannot contain payload"):
             self.build()
 
-    def test_application_and_image_metadata_are_exclusive(self):
+    def test_image_metadata_is_no_longer_supported(self):
         for extra in ("[image]\n", "[image_build]\n"):
             with self.subTest(extra=extra):
                 self.write_source(extra)
-                with self.assertRaisesRegex(SystemExit, "cannot declare image"):
+                with self.assertRaisesRegex(SystemExit, "unknown pack metadata fields"):
                     builder.parse_pack_toml(self.source / "pack.toml")
 
     def test_application_version_rejects_build_metadata(self):
