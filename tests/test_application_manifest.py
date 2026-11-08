@@ -267,7 +267,7 @@ class ApplicationManifestTests(unittest.TestCase):
         root = Path(__file__).resolve().parent.parent
         source = root / "pack-sources" / "agent" / "claude"
         metadata = builder.parse_pack_toml(source / "pack.toml")
-        self.assertEqual(metadata["version"], "2.0.0")
+        self.assertEqual(metadata["version"], "2.0.1")
         self.assertEqual({path.name for path in source.iterdir()}, {"pack.toml"})
         pin = metadata["requirements"]["binaries"][0]
         self.assertEqual((pin["package"], pin["path"], pin["size"]),
@@ -278,7 +278,7 @@ class ApplicationManifestTests(unittest.TestCase):
         self.assertEqual(
             descriptor["bundle"]["source"],
             "https://github.com/tinylabscom/mvm-packs/releases/download/"
-            "pack-agent-claude-v2.0.0/claude.mvmpkg",
+            "pack-agent-claude-v2.0.1/claude.mvmpkg",
         )
 
 from tests.test_ed25519 import sign as ed25519_sign  # noqa: E402

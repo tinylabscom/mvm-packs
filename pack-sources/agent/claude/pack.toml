@@ -1,4 +1,4 @@
-version = "2.0.0"
+version = "2.0.1"
 description = "Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy."
 
 [application]
@@ -6,8 +6,8 @@ schema_version = 1
 guest_arch = "aarch64"
 
 [application.bundle]
-source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.0/claude.mvmpkg"
-archive_sha256 = "3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806"
+source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.1/claude.mvmpkg"
+archive_sha256 = "c23235a61debb050a80cfa3e2a93f58de812c409c9ad58c1638fd4d609b377d6"
 archive_size = 333637632
 key_id = "b29ae91c7cbf09b08c3e9291d0a6655b"
 
