@@ -24,9 +24,15 @@ To submit a new pack (it must embed its application binary), follow the [publish
 
 Every pack must embed its application binary in a signed `.mvmpkg`; a policy
 alone cannot be signed. The policy-only `agent/claude@1.0.1` is revoked, so
-`mvmctl pull agent/claude@1.0.1` is refused. The first runnable Claude pack,
-`agent/claude@2.0.0`, is an unpublished draft that waits on the signed mvm
-runtime and a re-approved archive. The planned environment is described in
+`mvmctl pull agent/claude@1.0.1` is refused. The runnable Claude pack is
+`agent/claude@2.0.1`: an aarch64 application archive built on the mvm v0.27.0-rc.4
+runtime, bundle-signed by a dedicated author key and signed into the registry by this
+repository's publish workflow. `agent/claude@2.0.0` is also published, but the
+image-set revocation list embedded in its archive expires 2026-11-08T14:35Z, after which
+it cannot launch, so use `2.0.1`. Pulling a GitHub release asset needs an `mvmctl` that
+follows redirects (the final v0.27.0, or a build from `main`); the rc.4 client cannot.
+Running it needs the owner's provider-bound host secret and `--allow-host
+api.anthropic.com:443`. The environment is described in
 [`CLAUDE-ENVIRONMENT.md`](CLAUDE-ENVIRONMENT.md).
 
 Other published packs remain in the catalog as legacy policy-only versions;
@@ -37,8 +43,8 @@ publication alone is not a claim that they are supported.
 Catalogs are discovery metadata, not proof of authenticity. Each published
 pack has a signed `manifest.json` and an adjacent `manifest.sigstore.json`:
 
-- [Claude manifest](packs/agent/claude/1.0.1/manifest.json)
-- [Claude signature bundle](packs/agent/claude/1.0.1/manifest.sigstore.json)
+- [Claude manifest](packs/agent/claude/2.0.1/manifest.json)
+- [Claude signature bundle](packs/agent/claude/2.0.1/manifest.sigstore.json)
 
 The manifest binds the pack reference, description, and payload SHA-256
 digests and sizes. Clients must verify its signature against the publisher

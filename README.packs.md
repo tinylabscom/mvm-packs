@@ -8,9 +8,8 @@ signed keyless by the publish workflow.
 The sole catalog is [`index.json`](index.json), schema v2. Each `versions` entry
 contains `version` and the lowercase `manifest_sha256` of the exact published
 manifest bytes. It lists all published versions, not unpublished source intents
-or support guarantees. The initial
-supported policy pack is `agent/claude@1.0.1`; the other published packs remain
-discoverable. The index is not a signed trust document: clients verify each pack's
+or support guarantees. The supported pack is the application
+`agent/claude@2.0.1`; the legacy policy-only packs remain discoverable. The index is not a signed trust document: clients verify each pack's
 `manifest.json` against its adjacent `manifest.sigstore.json`.
 
 ## Application descriptors
@@ -172,8 +171,8 @@ feed as revocation-aware.
 
 ```sh
 mvmctl search                                # what the registry offers
-mvmctl pull agent/claude@1.0.1               # verify, install, pin
-mvmctl run --policy agent/claude -- make test
+mvmctl pull agent/claude                      # verify, install, pin (latest: 2.0.1)
+mvmctl pack info agent/claude                 # signer, key, signed policy
 ```
 
 A pack composes where its reference sits in the `--policy` order; the

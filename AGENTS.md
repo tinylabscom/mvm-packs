@@ -6,7 +6,9 @@ or stored here. Every pack must embed its application binary in a signed
 `.mvmpkg`; a policy alone cannot be signed. The nine policy-only versions
 published earlier are legacy, and four of them (`agent/claude@1.0.1`,
 `agent/codex@1.0.0`, `runtime/python@1.0.0`, `runtime/node@1.0.0`) are revoked.
-The first application pack, `agent/claude@2.0.0`, is an unpublished draft.
+The first application pack is `agent/claude`: `2.0.0` is published but its embedded
+revocation list expires 2026-11-08T14:35Z, so `2.0.1` (same rootfs and author key,
+fresh list) supersedes it.
 
 ## Layout
 
