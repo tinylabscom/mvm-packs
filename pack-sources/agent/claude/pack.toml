@@ -1,4 +1,4 @@
-version = "2.0.0"
+version = "2.0.1"
 description = "Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy."
 
 [application]
@@ -6,9 +6,10 @@ schema_version = 1
 guest_arch = "aarch64"
 
 [application.bundle]
-source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.0/claude.mvmpkg"
-archive_sha256 = "3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806"
-archive_size = 333637632
+source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.1/claude.mvmpkg"
+# PLACEHOLDERS: replace with the re-exported archive (fresh image-set revocation list, same author key).
+archive_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+archive_size = 1
 key_id = "b29ae91c7cbf09b08c3e9291d0a6655b"
 
 # Unsigned build input checked before the descriptor is signed (ADR 003). It pins the
