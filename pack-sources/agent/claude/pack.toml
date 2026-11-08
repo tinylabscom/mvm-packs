@@ -7,9 +7,8 @@ guest_arch = "aarch64"
 
 [application.bundle]
 source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.1/claude.mvmpkg"
-# PLACEHOLDERS: replace with the re-exported archive (fresh image-set revocation list, same author key).
-archive_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-archive_size = 1
+archive_sha256 = "c23235a61debb050a80cfa3e2a93f58de812c409c9ad58c1638fd4d609b377d6"
+archive_size = 333637632
 key_id = "b29ae91c7cbf09b08c3e9291d0a6655b"
 
 # Unsigned build input checked before the descriptor is signed (ADR 003). It pins the
