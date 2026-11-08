@@ -7,7 +7,7 @@ Browse published packs and inspect their declared policies before pulling. Publi
 [Publish a pack](publish.md) through a reviewed pull request.
 
 <ul class="registry-list">
-<li><a href="agent/claude.md"><strong>agent/claude</strong><span>Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy.</span><small>application · aarch64 · 333.6 MB · latest 2.0.0</small></a></li>
+<li><a href="agent/claude.md"><strong>agent/claude</strong><span>Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy.</span><small>application · aarch64 · 333.6 MB · latest 2.0.1</small></a></li>
 <li><a href="agent/codex.md"><strong>agent/codex</strong><span>OpenAI Codex agent policy: LLM APIs, GitHub, and the OpenAI secret binding; composes the Node runtime pack.</span><small>policy · latest 1.0.0</small></a></li>
 <li><a href="agent/goose.md"><strong>agent/goose</strong><span>Block goose agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.</span><small>policy · latest 1.0.0</small></a></li>
 <li><a href="agent/opencode.md"><strong>agent/opencode</strong><span>opencode agent policy: LLM APIs and GitHub, with Anthropic and OpenAI secret bindings.</span><small>policy · latest 1.0.0</small></a></li>

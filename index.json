@@ -7,6 +7,10 @@
       "description": "Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy.",
       "versions": [
         {
+          "version": "2.0.1",
+          "manifest_sha256": "8dcfe26355b2ae29b5d3d425f6d5c81080e8baf7088d78060f1b14a47b75ae92"
+        },
+        {
           "version": "2.0.0",
           "manifest_sha256": "4691d0a31e1550a24c8075a91861cf6c231fe9c8501e1ab54827ccdf45ee9520"
         },

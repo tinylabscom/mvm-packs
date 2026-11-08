@@ -6,13 +6,13 @@ Runnable Claude Code application: signed native binary, baked entrypoint, and An
 
 | Reference | Kind | Latest | Architecture | Size | Publisher |
 |---|---|---|---|---|---|
-| `agent/claude` | application | `2.0.0` | aarch64 | 333.6 MB | tinylabscom/mvm-packs (official) |
+| `agent/claude` | application | `2.0.1` | aarch64 | 333.6 MB | tinylabscom/mvm-packs (official) |
 
 ## Use
 
 ```sh
 mvmctl pull agent/claude
-mvmctl pull agent/claude@2.0.0
+mvmctl pull agent/claude@2.0.1
 mvmctl run agent/claude
 ```
 
@@ -20,6 +20,7 @@ mvmctl run agent/claude
 
 | Version | Manifest SHA-256 | Revoked | Architecture | Bundle SHA-256 | Bundle size (bytes) | Bundle key ID |
 |---|---|---|---|---|---|---|
+| `2.0.1` | `8dcfe26355b2ae29b5d3d425f6d5c81080e8baf7088d78060f1b14a47b75ae92` | no | aarch64 | `c23235a61debb050a80cfa3e2a93f58de812c409c9ad58c1638fd4d609b377d6` | 333637632 | `b29ae91c7cbf09b08c3e9291d0a6655b` |
 | `2.0.0` | `4691d0a31e1550a24c8075a91861cf6c231fe9c8501e1ab54827ccdf45ee9520` | no | aarch64 | `3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806` | 333637632 | `b29ae91c7cbf09b08c3e9291d0a6655b` |
 | `1.0.1` | `c4be773ef57a0f4365730858e522207c5e609f9fda76f1499eab3d6b0c6293f5` | yes | — | — | — | — |
 
@@ -30,8 +31,8 @@ Recorded by the publisher from the archive when it signed this version. This is 
 | Field | Value |
 |---|---|
 | Architecture | `aarch64` |
-| Created | `2026-11-08T01:12:26.245557+00:00` |
-| Archive | `3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806`, 318.2 MiB |
+| Created | `2026-11-08T04:25:29.191330+00:00` |
+| Archive | `c23235a61debb050a80cfa3e2a93f58de812c409c9ad58c1638fd4d609b377d6`, 318.2 MiB |
 | Bundle key ID | `b29ae91c7cbf09b08c3e9291d0a6655b` |
 | Runtime asset | `embedded_cli_boot_assets` `0.27.0-rc.4` |
 | Entrypoint | `/etc/mvm/entrypoint` |
@@ -59,8 +60,8 @@ Recorded by the publisher from the archive when it signed this version. This is 
 | `runtime-overlay.ext4` | `other` | 17.4 MiB | `0cce3cc99da16c44f1e3da16ed5a9a11143e74f4ec9e31a9bad121569ebfd681` |
 | `runtime-overlay.verity` | `other` | 0.1 MiB | `85ef06fec8a81f4aefbef22ca3cc5791041122e0460fdecf466621a9e127e32a` |
 | `boot-image-set.json.bundle` | `other` | 0.0 MiB | `15962832c1e665f7e9cfa3fca9179f01db908201805fd773cfd8eca66d542ac8` |
-| `image-set-revocations.json` | `other` | 0.0 MiB | `0ff341ee9ea6bcc485d7034658ba22f35852f597331957ee169f8290e991341f` |
-| `image-set-revocations.json.bundle` | `other` | 0.0 MiB | `2e0e312c681911a59d45c03b67f52a39ba9ad243b93d1124e954b2f2d7797d80` |
+| `image-set-revocations.json` | `other` | 0.0 MiB | `d482bdc4107713d72219597df53f83b7962c6c7f4813175e8d8d4d933e3752c9` |
+| `image-set-revocations.json.bundle` | `other` | 0.0 MiB | `995b673c7f77eb6c1672211cb637acf7e0c4ed2a3f53ea5d9893430c1294931d` |
 
 ### Pinned executables
 
@@ -72,6 +73,7 @@ Recorded by the publisher from the archive when it signed this version. This is 
 
 Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow identity (issuer `https://token.actions.githubusercontent.com`). Identities each version can be verified under:
 
+- `2.0.1`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`
 - `2.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`
 - `1.0.1`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`
 
