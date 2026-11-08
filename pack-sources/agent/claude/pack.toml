@@ -7,9 +7,9 @@ guest_arch = "aarch64"
 
 [application.bundle]
 source = "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.0/claude.mvmpkg"
-archive_sha256 = "cdbd8005dc356add632b3fce4ae19b7912e509df2d359e1d3b8786252de1a2b1"
-archive_size = 456523776
-key_id = "ada32b29ba81aa751cd16a3735be29e9"
+archive_sha256 = "3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806"
+archive_size = 333637632
+key_id = "b29ae91c7cbf09b08c3e9291d0a6655b"
 
 # Unsigned build input checked before the descriptor is signed (ADR 003). It pins the
 # musl Claude Code 2.1.273 binary exactly as embedded in the archive (loader path patched;

@@ -39,25 +39,23 @@ import urllib.request
 from pathlib import Path
 
 import ed25519
+import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import validate_application
+from application_manifest import validate_application, validate_runtime_layer
 from publisher_identity import (
     CURRENT_IDENTITY,
-    FORMER_IDENTITY,
     PUBLISHER_ISSUER,
-    accepts_former,
-    is_historical_manifest,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "pack-sources"
 PACKS = ROOT / "packs"
+DETAILS = ROOT / "pack-details"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
 COORD = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-IMAGE_SET_TAG = re.compile(r"image-set/v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 BUILT_IMAGE_ASSETS = {
     "rootfs": "rootfs.ext4",
     "verity": "rootfs.verity",
@@ -85,8 +83,15 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "image", "image_build", "application", "requirements"}:
+    if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
         fail(f"{path}: unknown pack metadata fields")
+    if "runtime_layer" in data:
+        if "application" in data or "requirements" in data:
+            fail(f"{path}: a runtime layer cannot also declare application or requirements")
+        try:
+            validate_runtime_layer(data["runtime_layer"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     application = data.get("application")
     if "application" in data:
         try:
@@ -95,8 +100,6 @@ def parse_pack_toml(path):
             fail(f"{path}: {error}")
         if not SEMVER.fullmatch(version) or "+" in version:
             fail(f"{path}: application version must be canonical semver without build metadata")
-        if "image" in data or "image_build" in data:
-            fail(f"{path}: application cannot declare image or image_build")
     requirements = None
     if "requirements" in data:
         if "application" not in data:
@@ -105,89 +108,8 @@ def parse_pack_toml(path):
             requirements = rootfs_requirements.validate_requirements(data["requirements"])
         except ValueError as error:
             fail(f"{path}: {error}")
-    image = data.get("image")
-    if image is not None and not isinstance(image, dict):
-        fail(f"{path}: [image] must be a table")
-    image_build = data.get("image_build")
-    if image_build is not None:
-        validate_image_build_intent(image_build, f"{path.parent.parent.name}/{path.parent.name}@{version}")
-    if image is not None and image_build is not None:
-        fail(f"{path}: [image] and [image_build] cannot both be present")
-    return {"version": version, "description": description, "image": image,
-            "image_build": image_build, "application": application,
-            "requirements": requirements}
-
-
-def validate_image_build_intent(intent, reference):
-    """Validate pre-build inputs without claiming digests for future outputs."""
-    if not isinstance(intent, dict) or set(intent) != {
-        "schema_version", "platform", "base_set", "release"
-    } or type(intent["schema_version"]) is not int or intent["schema_version"] != 1:
-        fail(f"{reference}: image build intent has missing, extra or unsupported fields")
-    if intent["platform"] not in ("linux/x86_64", "linux/aarch64"):
-        fail(f"{reference}: image build platform is unsupported")
-    base = intent["base_set"]
-    if not isinstance(base, dict) or set(base) != {
-        "repository", "release_tag", "manifest_sha256"
-    } or base["repository"] != "tinylabscom/mvm-images":
-        fail(f"{reference}: image build base set is invalid")
-    tag = base["release_tag"]
-    if not isinstance(tag, str) or not IMAGE_SET_TAG.fullmatch(tag):
-        fail(f"{reference}: image build base release tag is invalid")
-    if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
-        fail(f"{reference}: image build base root digest is invalid")
-    namespace_name, version = reference.split("@", 1)
-    expected_tag = f"pack-{namespace_name.replace('/', '-')}-v{version}"
-    if intent["release"] != {"repository": "tinylabscom/mvm-packs", "tag": expected_tag}:
-        fail(f"{reference}: image build release identity is invalid")
-
-
-def validate_built_image_descriptor(image, reference):
-    """Validate source metadata only; no image asset is fetched or trusted here."""
-    if not isinstance(image, dict) or image.get("schema_version") != 2:
-        fail(
-            f"{reference}: source-only image is not publishable: schema v1 has no "
-            "built image digest, base-set pin, or provenance attestation"
-        )
-    if set(image) != {"schema_version", "platform", "base_set", "release", "assets"}:
-        fail(f"{reference}: built image descriptor has missing or extra fields")
-    if image["platform"] not in ("linux/x86_64", "linux/aarch64"):
-        fail(f"{reference}: built image platform is unsupported")
-
-    base = image["base_set"]
-    if not isinstance(base, dict) or set(base) != {
-        "repository", "release_tag", "manifest_sha256"
-    }:
-        fail(f"{reference}: base_set must name repository, release_tag, and manifest_sha256")
-    if base["repository"] != "tinylabscom/mvm-images":
-        fail(f"{reference}: base_set repository is not the MVM image-set repository")
-    tag = base["release_tag"]
-    if not isinstance(tag, str) or not IMAGE_SET_TAG.fullmatch(tag):
-        fail(f"{reference}: base_set release_tag must be an immutable image-set version")
-    if not isinstance(base["manifest_sha256"], str) or not HEX64.fullmatch(base["manifest_sha256"]):
-        fail(f"{reference}: base_set manifest_sha256 must be lowercase SHA-256")
-
-    release = image["release"]
-    if not isinstance(release, dict) or set(release) != {"repository", "tag"}:
-        fail(f"{reference}: release must name repository and tag")
-    namespace_name, version = reference.split("@", 1)
-    expected_tag = f"pack-{namespace_name.replace('/', '-')}-v{version}"
-    if release != {"repository": "tinylabscom/mvm-packs", "tag": expected_tag}:
-        fail(f"{reference}: release repository or tag does not match {expected_tag}")
-
-    assets = image["assets"]
-    if not isinstance(assets, dict) or set(assets) != set(BUILT_IMAGE_ASSETS):
-        fail(f"{reference}: assets must name every built image and attestation asset")
-    for role, expected_name in BUILT_IMAGE_ASSETS.items():
-        asset = assets[role]
-        if not isinstance(asset, dict) or set(asset) != {"name", "sha256", "size"}:
-            fail(f"{reference}: {role} asset must have exactly name, sha256, and size")
-        if asset["name"] != expected_name:
-            fail(f"{reference}: {role} asset name must be {expected_name}")
-        if not isinstance(asset["sha256"], str) or not HEX64.fullmatch(asset["sha256"]):
-            fail(f"{reference}: {role} sha256 must be lowercase SHA-256")
-        if type(asset["size"]) is not int or asset["size"] <= 0:
-            fail(f"{reference}: {role} size must be a positive integer")
+    return {"version": version, "description": description, "application": application,
+            "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
 
 
 def sha256_of(path):
@@ -200,7 +122,7 @@ def sha256_of(path):
     return digest.hexdigest(), size
 
 
-def manifest_bytes(reference, description, payload, image=None):
+def manifest_bytes(reference, description, payload):
     # The payload root itself is the `pack/` directory: its contents ship
     # under `pack/` in the manifest, the path mvm reads policy documents
     # from (pack/profile.toml, pack/group.toml).
@@ -221,39 +143,6 @@ def manifest_bytes(reference, description, payload, image=None):
         "description": description,
         "files": files,
     }
-    if image is not None:
-        if isinstance(image, dict) and image.get("schema_version") == 2:
-            validate_built_image_descriptor(image, reference)
-            manifest["image"] = image
-            return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
-        manifest_path = image["manifest"]
-        parts = manifest_path.split("/")
-        if (
-            len(parts) < 3
-            or parts[0] != "pack"
-            or parts[-1] != "mvm.toml"
-            or not all(parts)
-            or ".." in parts
-            or "\\" in manifest_path
-        ):
-            fail(f"unsafe image manifest path {manifest_path!r}")
-        declared = {entry["path"] for entry in files}
-        parent = "/".join(parts[:-1])
-        for required in ("mvm.toml", "flake.nix", "flake.lock"):
-            if f"{parent}/{required}" not in declared:
-                fail(f"image source file {parent}/{required} is not signed")
-        source_manifest = payload / "/".join(parts[1:])
-        if source_manifest.stat().st_size > 64 * 1024:
-            fail(f"image manifest {manifest_path!r} exceeds 64 KiB")
-        try:
-            source = tomllib.loads(source_manifest.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, tomllib.TOMLDecodeError):
-            fail(f"image manifest {manifest_path!r} is not valid UTF-8 TOML")
-        if set(source) - {"schema_version", "flake", "profile", "name"}:
-            fail(f"image manifest {manifest_path!r} declares host authority")
-        if source.get("flake", ".") != ".":
-            fail(f"image manifest {manifest_path!r} must select the local signed flake")
-        manifest["image"] = image
     return json.dumps(manifest, indent=2, sort_keys=True).encode() + b"\n", files
 
 
@@ -335,8 +224,45 @@ def check_embedded_requirements(archive, member, requirements, path):
             fail(f"{path}: {error}")
 
 
+def archive_details(manifest, application, requirements):
+    """What the gate saw in the archive, for pack pages (see pack_details.py). Not signed."""
+    bundle = application["bundle"]
+    members = [m for m in manifest.get("members", []) if isinstance(m, dict)]
+    environments = [m for m in members if m.get("class") == "environment"]
+    environment = ({k: environments[0][k] for k in pack_details.ENV_KEYS if k in environments[0]}
+                   if len(environments) == 1 else None)
+    return {
+        "schema_version": 1,
+        "reference": None,
+        "archive": {"sha256": bundle["archive_sha256"], "size": bundle["archive_size"],
+                    "key_id": bundle["key_id"], "arch": application["guest_arch"]},
+        "created_at": manifest.get("created_at") if isinstance(manifest.get("created_at"), str) else None,
+        "artifacts": [{"name": str(a.get("name", a["path"])), "role": str(a["role"]),
+                       "size_bytes": a["size_bytes"], "sha256": a["sha256"]} for a in manifest["artifacts"]],
+        "runtime": [{"class": m["class"], "version": str(m["version"])} for m in members
+                    if m.get("class") == "embedded_cli_boot_assets" and "version" in m],
+        "environment": environment,
+        "binaries": list((requirements or {}).get("binaries") or []),
+    }
+
+
+def write_details(namespace, name, version, details):
+    """Record the details next to the published version. Informational: never blocks signing."""
+    try:
+        details = dict(details, reference=f"{namespace}/{name}@{version}")
+        pack_details.validate(details)
+        target = DETAILS / namespace / name / f"{version}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".tmp")
+        partial.write_text(json.dumps(details, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        partial.replace(target)
+        print(f"{namespace}/{name}@{version}: recorded archive details")
+    except (ValueError, OSError, KeyError, TypeError) as error:
+        print(f"{namespace}/{name}@{version}: archive details not recorded: {error}")
+
+
 def inspect_bundle(path, application, public_key, requirements=None):
-    """Refuse unless the archive embeds the application: a kernel and a root
+    """Return the recorded archive details after refusing unless the archive embeds the application: a kernel and a root
     filesystem whose hashes match the bundle manifest, for the descriptor's
     key ID and architecture, with a valid Ed25519 manifest.sig by that key.
     Members are read, never extracted.
@@ -392,22 +318,73 @@ def inspect_bundle(path, application, public_key, requirements=None):
                 check_environment_policy(manifest, requirements["environment_policy"], path)
             if requirements and rootfs_requirements.needs_rootfs(requirements):
                 check_embedded_requirements(archive, members[rootfs_path], requirements, path)
+            details = archive_details(manifest, application, requirements)
     except (tarfile.TarError, ValueError, KeyError, TypeError, AttributeError, OSError,
             RecursionError, MemoryError) as error:
         fail(f"{path}: not a valid application archive: {error!r}")
+    return details
+
+
+def _measure_file(path):
+    digest, size = hashlib.sha256(), 0
+    with open(path, "rb") as handle:
+        while chunk := handle.read(1 << 20):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def _cached_archive(bundle):
+    """Path of a previously downloaded copy that still matches the descriptor, else None.
+
+    The cache only saves a download. A cached file is re-hashed every time and a copy that
+    does not match the pinned SHA-256 and size is deleted, so trust never rests on the cache.
+    """
+    directory = os.environ.get("MVM_ARCHIVE_CACHE")
+    if not directory:
+        return None
+    path = Path(directory) / f"{bundle['archive_sha256']}.mvmpkg"
+    if not path.is_file() or path.is_symlink():
+        return None
+    sha256, size = _measure_file(path)
+    if sha256 == bundle["archive_sha256"] and size == bundle["archive_size"]:
+        return path
+    path.unlink(missing_ok=True)
+    return None
+
+
+def _store_in_cache(bundle, spooled):
+    """Keep a verified download for later runs. Never fatal: a cache failure only costs time."""
+    directory = os.environ.get("MVM_ARCHIVE_CACHE")
+    if not directory:
+        return
+    try:
+        target = Path(directory) / f"{bundle['archive_sha256']}.mvmpkg"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        partial = target.with_name(target.name + ".partial")
+        shutil.copyfile(spooled, partial)
+        partial.replace(target)
+    except OSError as error:
+        print(f"archive cache: not stored: {error}")
 
 
 def verify_archive(application, requirements=None):
     """Read the pinned archive back before signing a new application version.
 
     Refuses unless size and SHA-256 match the descriptor and the archive embeds
-    the application and carries a valid bundle signature (inspect_bundle). Runs only for new versions (ADR 001).
+    the application and carries a valid bundle signature (inspect_bundle). Runs only for
+    new versions (ADR 001). With MVM_ARCHIVE_CACHE set, a digest-named copy of an earlier
+    verified download is reused after being re-hashed.
     """
     bundle = application["bundle"]
     source = bundle["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")
     public_key = fetch_bundle_key(bundle)
+    cached = _cached_archive(bundle)
+    if cached is not None:
+        print(f"archive cache: using {cached.name} (re-verified)")
+        return inspect_bundle(str(cached), application, public_key, requirements)
     digest, size = hashlib.sha256(), 0
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
@@ -425,7 +402,9 @@ def verify_archive(application, requirements=None):
         if digest.hexdigest() != bundle["archive_sha256"]:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        inspect_bundle(spool.name, application, public_key, requirements)
+        details = inspect_bundle(spool.name, application, public_key, requirements)
+        _store_in_cache(bundle, spool.name)
+        return details
 
 
 def sign(manifest_path, bundle_path):
@@ -443,14 +422,10 @@ def build_one(source, check_only=False):
         fail(f"{source}: namespace/name must match {COORD.pattern}")
     meta = parse_pack_toml(source / "pack.toml")
     reference = f"{namespace}/{name}@{meta['version']}"
-    if meta["image_build"] is not None:
-        print(f"{reference}: image build intent deferred to signed image publisher")
-        return
-    if meta["image"] is not None:
-        validate_built_image_descriptor(meta["image"], reference)
-        fail(f"{reference}: built image packs are not publishable until consumer verification is available")
-    payload = source / "pack"
+    if meta["runtime_layer"] is not None:
+        fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
     application = meta["application"]
+    payload = source / "pack"
     if application is not None:
         if any(path.name != "pack.toml" or path.is_symlink() for path in source.iterdir()):
             fail(f"{source}: application source cannot contain payload files or directories")
@@ -460,7 +435,7 @@ def build_one(source, check_only=False):
     if application is not None:
         manifest = application_manifest_bytes(reference, meta["description"], application)
     else:
-        manifest, _ = manifest_bytes(reference, meta["description"], payload, meta["image"])
+        manifest, _ = manifest_bytes(reference, meta["description"], payload)
 
     if out.exists():
         existing = (out / "manifest.json").read_bytes()
@@ -485,20 +460,18 @@ def build_one(source, check_only=False):
         if verify_bundle(out / "manifest.json", bundle, CURRENT_IDENTITY):
             print(f"{reference}: unchanged")
             return
-        if not is_historical_manifest(reference, existing) or not verify_bundle(
-            out / "manifest.json", bundle, FORMER_IDENTITY
-        ):
-            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
-        if accepts_former(reference, existing):
-            print(f"{reference}: unchanged")
-            return
+        fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
 
+    if application is None and not out.exists():
+        fail(
+            f"{reference}: a pack must embed its application binary in the .mvmpkg; "
+            "policy-only versions cannot be published or signed (add an [application] bundle)"
+        )
     if check_only:
         print(f"{reference}: source valid")
         return
 
-    if application is not None:
-        verify_archive(application, meta["requirements"])
+    details = verify_archive(application, meta["requirements"]) if application is not None else None
     tmp = out.with_name(out.name + ".tmp")
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir(parents=True)
@@ -514,34 +487,9 @@ def build_one(source, check_only=False):
     sign(tmp / "manifest.json", tmp / "manifest.sigstore.json")
     shutil.rmtree(out, ignore_errors=True)
     tmp.rename(out)
+    if details is not None:
+        write_details(namespace, name, meta["version"], details)
     print(f"{reference}: published")
-
-
-def resign_unsourced_historical(sourced):
-    """Re-sign pinned historical manifests that no longer have a source.
-
-    A version stays immutable after its source moves on (runtime/python is now
-    1.1.0), but the former signing identity is no longer trusted. Only an exact
-    pinned historical manifest whose old signature still verifies is re-signed,
-    over the same bytes; payload files and the manifest are not touched.
-    """
-    for manifest in sorted(PACKS.glob("*/*/*/manifest.json")):
-        version_dir = manifest.parent
-        namespace, name, version = version_dir.parent.parent.name, version_dir.parent.name, version_dir.name
-        if (namespace, name, version) in sourced:
-            continue
-        reference = f"{namespace}/{name}@{version}"
-        raw = manifest.read_bytes()
-        bundle = version_dir / "manifest.sigstore.json"
-        if not is_historical_manifest(reference, raw) or verify_bundle(manifest, bundle, CURRENT_IDENTITY):
-            continue
-        if not verify_bundle(manifest, bundle, FORMER_IDENTITY):
-            fail(f"{reference}: existing signature is not trusted; refusing to re-sign")
-        tmp = bundle.with_name(bundle.name + ".tmp")
-        tmp.unlink(missing_ok=True)
-        sign(manifest, tmp)
-        tmp.replace(bundle)
-        print(f"{reference}: re-signed existing manifest bytes under the current identity")
 
 
 def version_key(value):
@@ -610,10 +558,6 @@ def main():
     for source in sources:
         build_one(source, check_only=args.check_sources)
     if not args.check_sources:
-        resign_unsourced_historical({
-            (source.parent.name, source.name, parse_pack_toml(source / "pack.toml")["version"])
-            for source in sources
-        })
         rebuild_index()
 
 

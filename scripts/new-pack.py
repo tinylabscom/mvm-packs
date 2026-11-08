@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a safe, unpublished policy-pack draft under pack-sources/."""
+"""Create a safe, unpublished application-pack draft under pack-sources/."""
 
 import argparse
 import re
@@ -22,18 +22,14 @@ def create(root, namespace, name):
         raise ValueError("pack source paths must not be symlinks")
     if source.exists():
         raise FileExistsError(f"{source} already exists; choose a new name or bump its version")
-    (source / "pack").mkdir(parents=True)
+    source.mkdir(parents=True)
+    # A pack must embed its application binary in the .mvmpkg; a policy-only pack cannot be signed.
+    # Fill in the archive pins (docs/application-packs.md); the draft fails to build until you do.
     (source / "pack.toml").write_text(
-        'version = "0.1.0"\ndescription = "Describe what this policy permits."\n', encoding="utf-8"
-    )
-    (source / "pack" / "group.toml").write_text(
-        'description = "Describe what this policy permits."\nrequired = false\n\n'
-        '[network]\nallow = []\n', encoding="utf-8"
-    )
-    (source / "pack" / "README.md").write_text(
-        f"## Purpose\n\nDescribe when to use `{namespace}/{name}`.\n\n"
-        "## Setup\n\nDescribe any credentials an operator may choose to configure; never include values.\n\n"
-        "## Use\n\nDescribe a real use case. This policy pack is not a runnable image.\n",
+        'version = "0.1.0"\ndescription = "Describe the application this pack runs."\n\n'
+        '[application]\nschema_version = 1\nguest_arch = "aarch64"\n\n'
+        '[application.bundle]\nsource = "https://example.invalid/REPLACE.mvmpkg"\n'
+        'archive_sha256 = "REPLACE"\narchive_size = 0\nkey_id = "REPLACE"\n',
         encoding="utf-8",
     )
     return source

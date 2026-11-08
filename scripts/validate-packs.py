@@ -21,12 +21,11 @@ from pathlib import Path
 
 from application_manifest import unique_object, validate_application
 from community_publishers import validate_directory
+import pack_details
 from community_index import validate_index as validate_community_index
 from publisher_identity import (
     CURRENT_IDENTITY,
-    FORMER_IDENTITY,
     PUBLISHER_ISSUER,
-    accepts_former,
 )
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,8 +42,12 @@ HEX64 = re.compile(r"^[0-9a-f]{64}$")
 problems = []
 
 
-class ImageReleaseError(Exception):
-    """The published image release did not pass authentication."""
+# Policy-only versions published before binaries were required; immutable, never to grow.
+LEGACY_POLICY_ONLY = frozenset({
+    "agent/claude@1.0.1", "agent/codex@1.0.0", "agent/goose@1.0.0", "agent/opencode@1.0.0",
+    "agent/pi@1.0.0", "runtime/go@1.0.0", "runtime/node@1.0.0", "runtime/python@1.0.0",
+    "runtime/rust@1.0.0",
+})
 
 
 def check(condition, message):
@@ -67,15 +70,7 @@ def verify_signature(path, reference):
     if not bundle.is_file():
         problems.append(f"{path.relative_to(ROOT)}: missing signature bundle")
         return
-    try:
-        manifest_bytes = path.read_bytes()
-    except OSError:
-        problems.append(f"{path.relative_to(ROOT)}: manifest cannot be read for signature verification")
-        return
-    identities = [PUBLISHER_IDENTITY]
-    if accepts_former(reference, manifest_bytes):
-        identities.append(FORMER_IDENTITY)
-    for identity in identities:
+    for identity in (PUBLISHER_IDENTITY,):
         command = [
             "cosign", "verify-blob", str(path), "--bundle", str(bundle),
             "--certificate-identity", identity,
@@ -89,18 +84,6 @@ def verify_signature(path, reference):
         if result.returncode == 0:
             return
     problems.append(f"{path.relative_to(ROOT)}: publisher signature verification failed")
-
-
-def verify_published_image(image, reference):
-    """Require public release bytes and both image signatures before acceptance."""
-    uploader = runpy.run_path(str(SCRIPTS / "upload-image-release.py"))
-    try:
-        client = uploader["GithubReleaseClient"](os.environ.get("GITHUB_TOKEN"))
-        uploader["verify_public_image"](image, reference, client)
-    except uploader["UploadError"] as error:
-        raise ImageReleaseError(str(error)) from error
-    except Exception as error:
-        raise ImageReleaseError("public image verifier could not complete") from error
 
 
 def validate_manifest(path, verify_signatures=False):
@@ -117,8 +100,6 @@ def validate_manifest(path, verify_signatures=False):
     fields = {"schema_version", "reference", "description", "files"}
     if is_application:
         fields = {"schema_version", "kind", "reference", "description", "application"}
-    elif "image" in manifest:
-        fields.add("image")
     check(
         set(manifest) == fields,
         f"{rel}: unknown or missing fields: {sorted(manifest)}",
@@ -128,6 +109,11 @@ def validate_manifest(path, verify_signatures=False):
         and manifest["schema_version"] in (1, 2),
         f"{rel}: schema_version must be integer 1 or 2",
     )
+    if not is_application:
+        check(
+            manifest.get("reference") in LEGACY_POLICY_ONLY,
+            f"{rel}: a pack must embed its application binary; policy-only manifests are legacy",
+        )
     if is_application:
         check(manifest.get("kind") == "application", f"{rel}: kind must be application")
         try:
@@ -203,53 +189,6 @@ def validate_manifest(path, verify_signatures=False):
         verify_signature(path, reference)
         signature_trusted = len(problems) == previous_problems
 
-    image = None if is_application else manifest.get("image")
-    if image is not None:
-        if isinstance(image, dict) and image.get("schema_version") == 2:
-            builder = runpy.run_path(str(SCRIPTS / "build-packs.py"))
-            try:
-                builder["validate_built_image_descriptor"](image, reference)
-            except SystemExit as error:
-                problems.append(f"{rel}: {error}")
-            else:
-                if not verify_signatures:
-                    problems.append(
-                        f"{rel}: built image requires publisher signature and public release verification"
-                    )
-                elif signature_trusted:
-                    try:
-                        verify_published_image(image, reference)
-                    except ImageReleaseError as error:
-                        problems.append(f"{rel}: public image verification failed: {error}")
-        else:
-            problems.append(
-                f"{rel}: image-bearing pack cannot be published: schema v1 has no "
-                "built image digest, base-set pin, or provenance attestation"
-            )
-            check(
-                isinstance(image, dict) and set(image) == {"manifest"},
-                f"{rel}: image must contain exactly manifest",
-            )
-            image_path = image.get("manifest") if isinstance(image, dict) else None
-            if isinstance(image_path, str):
-                parts = image_path.split("/")
-                safe = (
-                    len(parts) >= 3
-                    and parts[0] == "pack"
-                    and parts[-1] == "mvm.toml"
-                    and all(parts)
-                    and ".." not in parts
-                    and "\\" not in image_path
-                )
-                check(safe, f"{rel}: unsafe image manifest path {image_path!r}")
-                if safe:
-                    parent = "/".join(parts[:-1])
-                    for name in ("mvm.toml", "flake.nix", "flake.lock"):
-                        required = f"{parent}/{name}"
-                        check(required in seen, f"{rel}: image file {required!r} is not signed")
-            else:
-                problems.append(f"{rel}: image manifest must be a path string")
-
     check(
         path.with_name("manifest.sigstore.json").is_file(),
         f"{rel}: missing manifest.sigstore.json",
@@ -292,6 +231,35 @@ def validate_index():
     )
 
 
+def validate_details():
+    """Recorded archive details must be well formed and match the signed descriptor they describe."""
+    directory = ROOT / "pack-details"
+    if not directory.is_dir():
+        return
+    for path in sorted(directory.rglob("*")):
+        rel = path.relative_to(ROOT).as_posix()
+        if path.is_dir():
+            continue
+        parts = path.relative_to(directory).parts
+        if path.is_symlink() or len(parts) != 3 or path.suffix != ".json":
+            problems.append(f"{rel}: not a recorded-details file (expected <ns>/<name>/<version>.json)")
+            continue
+        namespace, name, version = parts[0], parts[1], path.stem
+        try:
+            details = pack_details.validate(json.loads(path.read_text(encoding="utf-8"),
+                                                       object_pairs_hook=unique_object))
+            manifest = json.loads((PACKS / namespace / name / version / "manifest.json").read_text(),
+                                  object_pairs_hook=unique_object)
+            bundle = manifest["application"]["bundle"]
+            if (details["reference"] != f"{namespace}/{name}@{version}"
+                    or details["archive"]["sha256"] != bundle["archive_sha256"]
+                    or details["archive"]["size"] != bundle["archive_size"]
+                    or details["archive"]["key_id"] != bundle["key_id"]):
+                raise ValueError("does not match the signed descriptor")
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"{rel}: {error}")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-signatures", action="store_true", help="verify every bundle against the publisher identity")
@@ -308,6 +276,7 @@ def main(argv=None):
         validate_manifest(manifest, args.verify_signatures)
     validate_index()
     problems.extend(validate_directory(ROOT / "community" / "publishers"))
+    validate_details()
     community_index = ROOT / "community" / "index.json"
     if community_index.is_file():
         try:

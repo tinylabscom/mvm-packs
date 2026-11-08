@@ -21,7 +21,7 @@ This pack is a policy and is not runnable: it has no kernel, root filesystem or 
 
 | Version | Manifest SHA-256 | Revoked |
 |---|---|---|
-| `1.0.0` | `63f7c363966fe3bacb894e50be1e04e720ea6ac4e9a2d878fb2c811dc21bea7c` | no |
+| `1.0.0` | `63f7c363966fe3bacb894e50be1e04e720ea6ac4e9a2d878fb2c811dc21bea7c` | yes |
 
 ## Policy declarations (`1.0.0`)
 
@@ -45,4 +45,4 @@ Binding names and allowed hosts only; a binding is not proof that a secret is re
 
 Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow identity (issuer `https://token.actions.githubusercontent.com`). Identities each version can be verified under:
 
-- `1.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`, `https://github.com/tinylabscom/mvm-templates/.github/workflows/publish.yml@refs/heads/main`
+- `1.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`

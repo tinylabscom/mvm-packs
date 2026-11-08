@@ -67,80 +67,26 @@ class PublisherVerificationTests(unittest.TestCase):
                 validator.validate_manifest(manifest_path)
             self.assertTrue(any("unsigned file" in problem for problem in validator.problems))
 
-    def test_source_only_image_manifest_is_not_releasable(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            pack = root / "packs" / "runtime" / "python" / "1.0.0"
-            image_dir = pack / "files" / "pack" / "image"
-            image_dir.mkdir(parents=True)
-            (image_dir / "mvm.toml").write_text('flake = "."\n')
-            (image_dir / "flake.nix").write_text("{}\n")
-            (image_dir / "flake.lock").write_text("{}\n")
-            encoded, _ = builder.manifest_bytes(
-                "runtime/python@1.0.0", "Python", pack / "files" / "pack",
-                {"manifest": "pack/image/mvm.toml"},
-            )
-            manifest = pack / "manifest.json"
-            manifest.write_bytes(encoded)
-            (pack / "manifest.sigstore.json").write_text("{}")
-            with patch.object(validator, "ROOT", root), \
-                    patch.object(validator, "PACKS", root / "packs"):
-                validator.validate_manifest(manifest)
-            self.assertTrue(any("built image digest" in problem for problem in validator.problems))
-
-    def test_built_image_requires_signature_and_public_release_verification(self):
-        from tests.test_pack_images import PackImageTests
-
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            pack = root / "packs" / "runtime" / "python" / "1.0.0"
-            payload = pack / "files" / "pack"
-            payload.mkdir(parents=True)
-            (payload / "group.toml").write_text('description = "Python"\n')
-            image = PackImageTests().built_image()
-            encoded, _ = builder.manifest_bytes(
-                "runtime/python@1.0.0", "Python", payload, image,
-            )
-            manifest = pack / "manifest.json"
-            manifest.write_bytes(encoded)
-            (pack / "manifest.sigstore.json").write_text("bundle")
-            with patch.object(validator, "ROOT", root), \
-                    patch.object(validator, "PACKS", root / "packs"), \
-                    patch.object(validator, "verify_published_image") as public:
-                validator.validate_manifest(manifest)
-                self.assertTrue(any("requires publisher signature" in problem
-                                    for problem in validator.problems))
-                public.assert_not_called()
-                validator.problems.clear()
-                with patch.object(validator, "verify_signature") as signature:
-                    validator.validate_manifest(manifest, verify_signatures=True)
-                signature.assert_called_once()
-                public.assert_called_once_with(image, "runtime/python@1.0.0")
-                self.assertFalse(validator.problems)
-                validator.problems.clear()
-                public.side_effect = validator.ImageReleaseError("release bytes differ")
-                with patch.object(validator, "verify_signature"):
-                    validator.validate_manifest(manifest, verify_signatures=True)
-                self.assertTrue(any("release bytes differ" in problem
-                                    for problem in validator.problems))
-                validator.problems.clear()
-                public.reset_mock(side_effect=True)
-                with patch.object(validator, "verify_signature",
-                                  side_effect=lambda *_: validator.problems.append(
-                                      "publisher signature invalid")):
-                    validator.validate_manifest(manifest, verify_signatures=True)
-                public.assert_not_called()
-                self.assertIn("publisher signature invalid", validator.problems)
-
     def test_policy_only_manifest_still_validates(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, published = self.make_source_and_published_pack(root)
             self.assertTrue(source.is_dir())
             with patch.object(validator, "ROOT", root), \
-                    patch.object(validator, "PACKS", root / "packs"):
+                    patch.object(validator, "PACKS", root / "packs"), \
+                    patch.object(validator, "LEGACY_POLICY_ONLY", {"runtime/example@1.0.0"}):
                 validator.validate_manifest(published / "manifest.json")
             self.assertFalse(validator.problems)
+
+    def test_new_policy_only_manifest_is_refused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _, published = self.make_source_and_published_pack(root)
+            with patch.object(validator, "ROOT", root), \
+                    patch.object(validator, "PACKS", root / "packs"):
+                validator.validate_manifest(published / "manifest.json")
+            self.assertTrue(any("embed its application binary" in p for p in validator.problems))
+            validator.problems.clear()
 
     def test_pr_validation_checks_signatures_and_public_release_bytes(self):
         workflow = (ROOT / ".github" / "workflows" / "validate.yml").read_text()
@@ -150,15 +96,6 @@ class PublisherVerificationTests(unittest.TestCase):
             "scripts/validate-packs.py --verify-signatures --require-revocations",
             workflow,
         )
-
-    def test_public_image_verifier_requires_authenticated_release_access(self):
-        from tests.test_pack_images import PackImageTests
-
-        image = PackImageTests().built_image()
-        with patch.dict(validator.os.environ, {"GITHUB_TOKEN": ""}):
-            with self.assertRaisesRegex(validator.ImageReleaseError,
-                                        "GITHUB_TOKEN is required"):
-                validator.verify_published_image(image, "runtime/python@1.0.0")
 
     def test_signature_verifies_exact_release_identity_and_fails_closed(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -177,30 +114,6 @@ class PublisherVerificationTests(unittest.TestCase):
                 run.return_value.returncode = 1
                 validator.verify_signature(manifest, "agent/example@1.0.0")
             self.assertTrue(any("verification failed" in problem for problem in validator.problems))
-
-    def test_historical_signature_uses_only_the_pinned_former_identity(self):
-        manifest = sorted((ROOT / "packs").glob("*/*/*/manifest.json"))[0]
-        reference = json.loads(manifest.read_text())["reference"]
-        # The former identity is accepted only before its cutoff; fix the clock so
-        # this stays a test of the pinned-identity order, not of today's date.
-        before_cutoff = partial(
-            validator.accepts_former, now=datetime(2026, 11, 5, tzinfo=timezone.utc)
-        )
-        with patch.object(validator, "accepts_former", before_cutoff), \
-                patch.object(validator.subprocess, "run") as run:
-            run.side_effect = [
-                subprocess.CompletedProcess([], 1),
-                subprocess.CompletedProcess([], 0),
-            ]
-            validator.verify_signature(manifest, reference)
-        self.assertEqual(
-            [
-                call.args[0][call.args[0].index("--certificate-identity") + 1]
-                for call in run.call_args_list
-            ],
-            [validator.PUBLISHER_IDENTITY, validator.FORMER_IDENTITY],
-        )
-        self.assertFalse(validator.problems)
 
     def test_unpinned_manifest_never_tries_the_former_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -252,41 +165,12 @@ class PublisherVerificationTests(unittest.TestCase):
             bundle.write_text("{}")
             with patch.object(builder.subprocess, "run") as run:
                 run.return_value.returncode = 0
-                self.assertTrue(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
+                self.assertTrue(builder.verify_bundle(manifest, bundle, builder.CURRENT_IDENTITY))
                 command = run.call_args.args[0]
-                self.assertIn(builder.FORMER_IDENTITY, command)
+                self.assertIn(builder.CURRENT_IDENTITY, command)
                 self.assertIn(builder.PUBLISHER_ISSUER, command)
                 run.return_value.returncode = 1
-                self.assertFalse(builder.verify_bundle(manifest, bundle, builder.FORMER_IDENTITY))
-
-    def test_pinned_former_identity_is_preserved_during_overlap(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, published = self.make_source_and_published_pack(root)
-            with patch.object(builder, "PACKS", root / "packs"), \
-                    patch.object(builder, "is_historical_manifest", return_value=True), \
-                    patch.object(builder, "accepts_former", return_value=True), \
-                    patch.object(builder, "verify_bundle", side_effect=[False, True]) as verify, \
-                    patch.object(builder, "sign") as sign:
-                builder.build_one(source)
-            self.assertEqual(
-                [call.args[2] for call in verify.call_args_list],
-                [builder.CURRENT_IDENTITY, builder.FORMER_IDENTITY],
-            )
-            sign.assert_not_called()
-            self.assertTrue((published / "manifest.json").is_file())
-
-    def test_pinned_former_identity_is_resigned_after_cutoff(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, _ = self.make_source_and_published_pack(root)
-            with patch.object(builder, "PACKS", root / "packs"), \
-                    patch.object(builder, "is_historical_manifest", return_value=True), \
-                    patch.object(builder, "accepts_former", return_value=False), \
-                    patch.object(builder, "verify_bundle", side_effect=[False, True]), \
-                    patch.object(builder, "sign") as sign:
-                builder.build_one(source)
-            sign.assert_called_once()
+                self.assertFalse(builder.verify_bundle(manifest, bundle, builder.CURRENT_IDENTITY))
 
     def test_untrusted_signature_is_not_resigned(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -331,43 +215,3 @@ class PublisherVerificationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class ResignUnsourcedHistoricalTests(unittest.TestCase):
-    def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        self.packs = Path(temporary.name) / "packs"
-        self.dir = self.packs / "runtime" / "python" / "1.0.0"
-        self.dir.mkdir(parents=True)
-        (self.dir / "manifest.json").write_bytes(b'{"x": 1}')
-        (self.dir / "manifest.sigstore.json").write_text("old")
-        digest = hashlib.sha256(b'{"x": 1}').hexdigest()
-        patcher = patch.object(builder, "is_historical_manifest", lambda ref, raw: hashlib.sha256(raw).hexdigest() == digest)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def run_step(self, verify, sourced=frozenset()):
-        def fake_sign(_, bundle):
-            bundle.write_text("new")
-        with patch.object(builder, "PACKS", self.packs), \
-                patch.object(builder, "verify_bundle", side_effect=verify), \
-                patch.object(builder, "sign", side_effect=fake_sign) as sign:
-            builder.resign_unsourced_historical(sourced)
-            return sign.call_count
-
-    def test_resigns_when_only_the_former_signature_verifies(self):
-        calls = self.run_step(lambda m, b, identity: identity == builder.FORMER_IDENTITY)
-        self.assertEqual(calls, 1)
-        self.assertEqual((self.dir / "manifest.sigstore.json").read_text(), "new")
-        self.assertEqual((self.dir / "manifest.json").read_bytes(), b'{"x": 1}')
-
-    def test_leaves_current_signed_and_sourced_versions_alone(self):
-        self.assertEqual(self.run_step(lambda m, b, identity: True), 0)
-        self.assertEqual(self.run_step(lambda m, b, identity: False,
-                                       {("runtime", "python", "1.0.0")}), 0)
-
-    def test_refuses_when_no_known_signature_verifies(self):
-        with self.assertRaises(SystemExit):
-            self.run_step(lambda m, b, identity: False)
-        self.assertEqual((self.dir / "manifest.sigstore.json").read_text(), "old")
