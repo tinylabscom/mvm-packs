@@ -1,0 +1,16 @@
+{
+  "application": {
+    "bundle": {
+      "archive_sha256": "3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806",
+      "archive_size": 333637632,
+      "key_id": "b29ae91c7cbf09b08c3e9291d0a6655b",
+      "source": "https://github.com/tinylabscom/mvm-packs/releases/download/pack-agent-claude-v2.0.0/claude.mvmpkg"
+    },
+    "guest_arch": "aarch64",
+    "schema_version": 1
+  },
+  "description": "Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy.",
+  "kind": "application",
+  "reference": "agent/claude@2.0.0",
+  "schema_version": 2
+}

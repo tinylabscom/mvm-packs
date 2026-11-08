@@ -2,47 +2,77 @@
 
 # `agent/claude`
 
-Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding.
+Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy.
 
 | Reference | Kind | Latest | Architecture | Size | Publisher |
 |---|---|---|---|---|---|
-| `agent/claude` | policy | `1.0.1` | — | — | tinylabscom/mvm-packs (official) |
+| `agent/claude` | application | `2.0.0` | aarch64 | 333.6 MB | tinylabscom/mvm-packs (official) |
 
 ## Use
 
 ```sh
 mvmctl pull agent/claude
-mvmctl pull agent/claude@1.0.1
+mvmctl pull agent/claude@2.0.0
+mvmctl run agent/claude
 ```
-
-This pack is a policy and is not runnable: it has no kernel, root filesystem or entrypoint.
 
 ## Versions
 
-| Version | Manifest SHA-256 | Revoked |
-|---|---|---|
-| `1.0.1` | `c4be773ef57a0f4365730858e522207c5e609f9fda76f1499eab3d6b0c6293f5` | yes |
+| Version | Manifest SHA-256 | Revoked | Architecture | Bundle SHA-256 | Bundle size (bytes) | Bundle key ID |
+|---|---|---|---|---|---|---|
+| `2.0.0` | `4691d0a31e1550a24c8075a91861cf6c231fe9c8501e1ab54827ccdf45ee9520` | no | aarch64 | `3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806` | 333637632 | `b29ae91c7cbf09b08c3e9291d0a6655b` |
+| `1.0.1` | `c4be773ef57a0f4365730858e522207c5e609f9fda76f1499eab3d6b0c6293f5` | yes | — | — | — | — |
 
-## Policy declarations (`1.0.1`)
+## Recorded at signing
 
-Included groups name other policies; they do not describe every effective permission.
+Recorded by the publisher from the archive when it signed this version. This is **not signed registry metadata**: `mvmctl pull` re-verifies the archive itself.
 
-| Declaration | Value |
+| Field | Value |
 |---|---|
-| Included group | `llm-apis` |
-| Included group | `github` |
-| Included group | `runtime/python` |
+| Architecture | `aarch64` |
+| Created | `2026-11-08T01:12:26.245557+00:00` |
+| Archive | `3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806`, 318.2 MiB |
+| Bundle key ID | `b29ae91c7cbf09b08c3e9291d0a6655b` |
+| Runtime asset | `embedded_cli_boot_assets` `0.27.0-rc.4` |
+| Entrypoint | `/etc/mvm/entrypoint` |
+| Resources | `cpu_cores=2, memory_mb=4096` |
+| Policy `allow_hosts` | `["api.anthropic.com:443"]` |
+| Policy `request_budget` | `{"max_requests":1,"max_spend_microusd":500000,"model":"claude-haiku-4-5-20251001"}` |
+| Secret slots | `ANTHROPIC_API_KEY (required)` |
+| Capabilities | `egress` |
 
-## Secret bindings
+### Artifacts in the archive
 
-Binding names and allowed hosts only; a binding is not proof that a secret is required, and no secret values are stored here.
+| Name | Role | Size | SHA-256 |
+|---|---|---|---|
+| `vmlinux` | `kernel` | 8.1 MiB | `0f97f109154a173352c07db223ecff48d44b38514b500f39cd9897701dbac0b6` |
+| `rootfs.ext4` | `rootfs` | 267.8 MiB | `165d7ede384a9353235edc45f2eb132fc7066280539f299da1fdd705b5d7ebe0` |
+| `initrd` | `initrd` | 1.2 MiB | `81114226eddd77c665d96d69d1dec192b1d5a1c6fd067130862f9a6d7dacdf20` |
+| `rootfs.verity` | `verity_hash_sidecar` | 2.1 MiB | `14bff8ee8a882580b3ffe00b5de8557778e1ceeb63bc2715ab450e847c686831` |
+| `rootfs.roothash` | `other` | 0.0 MiB | `aba08df63ea3edfc72b26b68bbb3e5c0ca409d22e2743c45cc32e6c173b4f484` |
+| `mvm-meta.json` | `other` | 0.0 MiB | `5507417ab851a530ee33335c4a6aaa8544bae1d95b3e64156405b41e7aaa97bf` |
+| `boot-image-set.json` | `other` | 0.0 MiB | `5033520a59514f5d206d76d13db8c9b7e5841f068c83dd8585ef141879a1bb24` |
+| `guest-runtime.tar.gz` | `other` | 21.4 MiB | `05cb5dd2e97030777a3a2011579d9806a08d710fdad9ca707cc7339b77c4ae21` |
+| `guest-runtime.sha256` | `other` | 0.0 MiB | `cc7b8cb2ebfac5cc0fd3aaa40f0ce933d03ccbe906979d3a503e1b557c593a26` |
+| `guest-runtime.bundle` | `other` | 0.0 MiB | `bcdabc59d07a9f8bb21b3139b51a0523cb27937a644a296c8876d5cf6a1970a3` |
+| `guest-runtime.sha256.bundle` | `other` | 0.0 MiB | `533db09f2e6d47789c59c969532806038a64bbc487472ff3bb92179dc94273e4` |
+| `runtime-overlay.ext4` | `other` | 17.4 MiB | `0cce3cc99da16c44f1e3da16ed5a9a11143e74f4ec9e31a9bad121569ebfd681` |
+| `runtime-overlay.verity` | `other` | 0.1 MiB | `85ef06fec8a81f4aefbef22ca3cc5791041122e0460fdecf466621a9e127e32a` |
+| `boot-image-set.json.bundle` | `other` | 0.0 MiB | `15962832c1e665f7e9cfa3fca9179f01db908201805fd773cfd8eca66d542ac8` |
+| `image-set-revocations.json` | `other` | 0.0 MiB | `0ff341ee9ea6bcc485d7034658ba22f35852f597331957ee169f8290e991341f` |
+| `image-set-revocations.json.bundle` | `other` | 0.0 MiB | `2e0e312c681911a59d45c03b67f52a39ba9ad243b93d1124e954b2f2d7797d80` |
 
-| Binding | Allowed hosts |
-|---|---|
-| `anthropic` | `api.anthropic.com` |
+### Pinned executables
+
+| Package | Path | Size | SHA-256 |
+|---|---|---|---|
+| `claude-code-native` | `bin/claude` | 211.0 MiB | `7544d5d74f38f78b7d5457728dea4bf3f467befda7c1a892021dcfbfda1ab4e1` |
 
 ## Publisher
 
 Each manifest is signed keyless; `manifest.sigstore.json` binds it to a workflow identity (issuer `https://token.actions.githubusercontent.com`). Identities each version can be verified under:
 
+- `2.0.0`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`
 - `1.0.1`: `https://github.com/tinylabscom/mvm-packs/.github/workflows/publish.yml@refs/heads/main`
+
+The descriptor names a bundle key ID but does not enroll it; the consumer must already trust that key.

@@ -1,0 +1,159 @@
+{
+  "archive": {
+    "arch": "aarch64",
+    "key_id": "b29ae91c7cbf09b08c3e9291d0a6655b",
+    "sha256": "3f8e7585b58947e7d22f364059b9b2d376c191fc1109e292e3469a606614e806",
+    "size": 333637632
+  },
+  "artifacts": [
+    {
+      "name": "vmlinux",
+      "role": "kernel",
+      "sha256": "0f97f109154a173352c07db223ecff48d44b38514b500f39cd9897701dbac0b6",
+      "size_bytes": 8501256
+    },
+    {
+      "name": "rootfs.ext4",
+      "role": "rootfs",
+      "sha256": "165d7ede384a9353235edc45f2eb132fc7066280539f299da1fdd705b5d7ebe0",
+      "size_bytes": 280764416
+    },
+    {
+      "name": "initrd",
+      "role": "initrd",
+      "sha256": "81114226eddd77c665d96d69d1dec192b1d5a1c6fd067130862f9a6d7dacdf20",
+      "size_bytes": 1247063
+    },
+    {
+      "name": "rootfs.verity",
+      "role": "verity_hash_sidecar",
+      "sha256": "14bff8ee8a882580b3ffe00b5de8557778e1ceeb63bc2715ab450e847c686831",
+      "size_bytes": 2220032
+    },
+    {
+      "name": "rootfs.roothash",
+      "role": "other",
+      "sha256": "aba08df63ea3edfc72b26b68bbb3e5c0ca409d22e2743c45cc32e6c173b4f484",
+      "size_bytes": 65
+    },
+    {
+      "name": "mvm-meta.json",
+      "role": "other",
+      "sha256": "5507417ab851a530ee33335c4a6aaa8544bae1d95b3e64156405b41e7aaa97bf",
+      "size_bytes": 766
+    },
+    {
+      "name": "boot-image-set.json",
+      "role": "other",
+      "sha256": "5033520a59514f5d206d76d13db8c9b7e5841f068c83dd8585ef141879a1bb24",
+      "size_bytes": 17784
+    },
+    {
+      "name": "guest-runtime.tar.gz",
+      "role": "other",
+      "sha256": "05cb5dd2e97030777a3a2011579d9806a08d710fdad9ca707cc7339b77c4ae21",
+      "size_bytes": 22444180
+    },
+    {
+      "name": "guest-runtime.sha256",
+      "role": "other",
+      "sha256": "cc7b8cb2ebfac5cc0fd3aaa40f0ce933d03ccbe906979d3a503e1b557c593a26",
+      "size_bytes": 101
+    },
+    {
+      "name": "guest-runtime.bundle",
+      "role": "other",
+      "sha256": "bcdabc59d07a9f8bb21b3139b51a0523cb27937a644a296c8876d5cf6a1970a3",
+      "size_bytes": 9155
+    },
+    {
+      "name": "guest-runtime.sha256.bundle",
+      "role": "other",
+      "sha256": "533db09f2e6d47789c59c969532806038a64bbc487472ff3bb92179dc94273e4",
+      "size_bytes": 8963
+    },
+    {
+      "name": "runtime-overlay.ext4",
+      "role": "other",
+      "sha256": "0cce3cc99da16c44f1e3da16ed5a9a11143e74f4ec9e31a9bad121569ebfd681",
+      "size_bytes": 18235392
+    },
+    {
+      "name": "runtime-overlay.verity",
+      "role": "other",
+      "sha256": "85ef06fec8a81f4aefbef22ca3cc5791041122e0460fdecf466621a9e127e32a",
+      "size_bytes": 147456
+    },
+    {
+      "name": "boot-image-set.json.bundle",
+      "role": "other",
+      "sha256": "15962832c1e665f7e9cfa3fca9179f01db908201805fd773cfd8eca66d542ac8",
+      "size_bytes": 10455
+    },
+    {
+      "name": "image-set-revocations.json",
+      "role": "other",
+      "sha256": "0ff341ee9ea6bcc485d7034658ba22f35852f597331957ee169f8290e991341f",
+      "size_bytes": 125
+    },
+    {
+      "name": "image-set-revocations.json.bundle",
+      "role": "other",
+      "sha256": "2e0e312c681911a59d45c03b67f52a39ba9ad243b93d1124e954b2f2d7797d80",
+      "size_bytes": 10799
+    }
+  ],
+  "binaries": [
+    {
+      "package": "claude-code-native",
+      "path": "bin/claude",
+      "sha256": "7544d5d74f38f78b7d5457728dea4bf3f467befda7c1a892021dcfbfda1ab4e1",
+      "size": 221263520
+    }
+  ],
+  "created_at": "2026-11-08T01:12:26.245557+00:00",
+  "environment": {
+    "capabilities": [
+      "egress"
+    ],
+    "descriptor_version": 1,
+    "entrypoint": {
+      "argv": [
+        "/etc/mvm/entrypoint"
+      ]
+    },
+    "pack": {
+      "name": "agent/claude",
+      "version": "2.0.0"
+    },
+    "policy": {
+      "allow_hosts": [
+        "api.anthropic.com:443"
+      ],
+      "request_budget": {
+        "max_requests": 1,
+        "max_spend_microusd": 500000,
+        "model": "claude-haiku-4-5-20251001"
+      }
+    },
+    "resources": {
+      "cpu_cores": 2,
+      "memory_mb": 4096
+    },
+    "secret_slots": [
+      {
+        "name": "ANTHROPIC_API_KEY",
+        "required": true
+      }
+    ],
+    "target": "aarch64-linux"
+  },
+  "reference": "agent/claude@2.0.0",
+  "runtime": [
+    {
+      "class": "embedded_cli_boot_assets",
+      "version": "0.27.0-rc.4"
+    }
+  ],
+  "schema_version": 1
+}

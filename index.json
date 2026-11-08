@@ -4,8 +4,12 @@
     {
       "namespace": "agent",
       "name": "claude",
-      "description": "Claude Code agent policy: LLM APIs, GitHub, and the Anthropic secret binding.",
+      "description": "Runnable Claude Code application: signed native binary, baked entrypoint, and Anthropic-only policy.",
       "versions": [
+        {
+          "version": "2.0.0",
+          "manifest_sha256": "4691d0a31e1550a24c8075a91861cf6c231fe9c8501e1ab54827ccdf45ee9520"
+        },
         {
           "version": "1.0.1",
           "manifest_sha256": "c4be773ef57a0f4365730858e522207c5e609f9fda76f1499eab3d6b0c6293f5"
