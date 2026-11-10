@@ -101,7 +101,11 @@ def validate_manifest(path, verify_signatures=False):
     if not isinstance(manifest, dict):
         return
     is_application = manifest.get("schema_version") == 2
-    is_component = type(manifest.get("schema_version")) is int and manifest["schema_version"] == 3
+    is_component = (type(manifest.get("schema_version")) is int
+                    and manifest["schema_version"] == 3
+                    and manifest.get("kind") == "application_component")
+    if manifest.get("schema_version") == 3 and not is_component:
+        problems.append(f"{rel}: unsupported schema-3 pack kind; runtime layers remain unpublishable")
     fields = {"schema_version", "reference", "description", "files"}
     if is_application:
         fields = {"schema_version", "kind", "reference", "description", "application"}
