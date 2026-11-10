@@ -107,6 +107,10 @@ COMPONENT_REFERENCE = re.compile(
 COMPONENT_NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
 KERNEL_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 MAX_COMPONENT_BYTES = 2 * 1024**3
+COMPOSABLE_REFERENCE = re.compile(
+    r"(?:runtime|tool)/[a-z0-9][a-z0-9_-]*@"
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z"
+)
 
 
 def validate_runtime_layer(layer, reference=None):
@@ -199,21 +203,42 @@ def validate_application_component(component):
         raise ValueError("application_component schema_version must be integer 1")
     if type(component["guest_arch"]) is not str or component["guest_arch"] not in ("x86_64", "aarch64"):
         raise ValueError("application_component guest_arch must be x86_64 or aarch64")
-    archive = component["archive"]
+    validate_component_archive(component["archive"])
+    validate_component_requirements(component["requirements"])
+
+    entrypoints = component["entrypoints"]
+    if not isinstance(entrypoints, list) or len(entrypoints) > 16:
+        raise ValueError("entrypoints must be a list of at most 16 named commands")
+    names = set()
+    for entry in entrypoints:
+        if not isinstance(entry, dict) or set(entry) != {"name", "argv"}:
+            raise ValueError("entrypoint must contain exactly name and argv")
+        name, argv = entry["name"], entry["argv"]
+        if not isinstance(name, str) or not COMPONENT_NAME.fullmatch(name) or name in names:
+            raise ValueError("entrypoint name must be unique and canonical")
+        names.add(name)
+        if (not isinstance(argv, list) or not 0 < len(argv) <= 64
+                or any(not isinstance(arg, str) or not arg or len(arg) > 4096 or "\x00" in arg for arg in argv)
+                or not _absolute_path(argv[0])):
+            raise ValueError("entrypoint argv must start with a canonical absolute executable")
+
+
+def validate_component_archive(archive):
     if not isinstance(archive, dict) or set(archive) != {"source", "archive_sha256", "archive_size"}:
-        raise ValueError("application_component archive has missing or unknown fields")
+        raise ValueError("component archive has missing or unknown fields")
     validate_source(archive["source"])
     if not isinstance(archive["archive_sha256"], str) or not HEX64.fullmatch(archive["archive_sha256"]):
-        raise ValueError("application_component archive_sha256 must be lowercase SHA-256")
+        raise ValueError("component archive_sha256 must be lowercase SHA-256")
     if type(archive["archive_size"]) is not int or not 0 < archive["archive_size"] <= MAX_COMPONENT_BYTES:
-        raise ValueError("application_component archive_size must be positive and at most 2 GiB")
+        raise ValueError("component archive_size must be positive and at most 2 GiB")
 
-    requirements = component["requirements"]
+
+def validate_component_requirements(requirements):
     if not isinstance(requirements, dict) or set(requirements) not in (
         {"filesystem_abi", "libc", "minimum_kernel", "required_capabilities"},
         {"filesystem_abi", "libc", "loader", "minimum_kernel", "required_capabilities"},
     ):
-        raise ValueError("application_component requirements have missing or unknown fields")
+        raise ValueError("component requirements have missing or unknown fields")
     if type(requirements["filesystem_abi"]) is not int or requirements["filesystem_abi"] != 1:
         raise ValueError("filesystem_abi must be integer 1")
     libc = requirements["libc"]
@@ -233,27 +258,67 @@ def validate_application_component(component):
             or len(set(capabilities)) != len(capabilities)):
         raise ValueError("required_capabilities must be at most 16 distinct canonical names")
 
-    entrypoints = component["entrypoints"]
-    if not isinstance(entrypoints, list) or len(entrypoints) > 16:
-        raise ValueError("entrypoints must be a list of at most 16 named commands")
-    names = set()
-    for entry in entrypoints:
-        if not isinstance(entry, dict) or set(entry) != {"name", "argv"}:
-            raise ValueError("entrypoint must contain exactly name and argv")
-        name, argv = entry["name"], entry["argv"]
-        if not isinstance(name, str) or not COMPONENT_NAME.fullmatch(name) or name in names:
-            raise ValueError("entrypoint name must be unique and canonical")
-        names.add(name)
-        if (not isinstance(argv, list) or not 0 < len(argv) <= 64
-                or any(not isinstance(arg, str) or not arg or len(arg) > 4096 or "\x00" in arg for arg in argv)
-                or not _absolute_path(argv[0])):
-            raise ValueError("entrypoint argv must start with a canonical absolute executable")
-
 
 def _absolute_path(path):
     return (path.startswith("/") and path != "/" and
             all(part not in ("", ".", "..") for part in path[1:].split("/")) and
             not any(ord(char) < 32 or ord(char) == 127 or char == "\\" for char in path))
+
+
+def validate_composable_component(component, kind, reference=None):
+    """Closed schema-1 runtime/tool payload; requirements are not grants."""
+    if kind not in ("runtime_component", "tool_component"):
+        raise ValueError("unsupported composable component kind")
+    if not isinstance(component, dict) or set(component) != {
+        "schema_version", "guest_arch", "requirements", "dependencies", "archive"
+    }:
+        raise ValueError(f"{kind} has missing or unknown fields")
+    if type(component["schema_version"]) is not int or component["schema_version"] != 1:
+        raise ValueError(f"{kind} schema_version must be integer 1")
+    if type(component["guest_arch"]) is not str or component["guest_arch"] not in ("x86_64", "aarch64"):
+        raise ValueError(f"{kind} guest_arch must be x86_64 or aarch64")
+    validate_component_archive(component["archive"])
+    validate_component_requirements(component["requirements"])
+    pins = component["dependencies"]
+    if not isinstance(pins, list) or len(pins) > MAX_DEPENDENCIES:
+        raise ValueError(f"{kind} dependencies must be a list of at most {MAX_DEPENDENCIES} pins")
+    seen = set()
+    for pin in pins:
+        if not isinstance(pin, dict) or set(pin) != {"reference", "manifest_sha256"}:
+            raise ValueError("each dependency must contain exactly reference and manifest_sha256")
+        dependency = pin["reference"]
+        if not isinstance(dependency, str) or not COMPOSABLE_REFERENCE.fullmatch(dependency):
+            raise ValueError("dependency reference must be exact runtime/name@version or tool/name@version")
+        if not isinstance(pin["manifest_sha256"], str) or not HEX64.fullmatch(pin["manifest_sha256"]):
+            raise ValueError("dependency manifest_sha256 must be 64 lowercase hex characters")
+        name = dependency.split("@", 1)[0]
+        if name in seen or (isinstance(reference, str) and name == reference.split("@", 1)[0]):
+            raise ValueError(f"duplicate or self dependency on {name}")
+        seen.add(name)
+
+
+def composable_component_manifest_bytes(reference, description, kind, component, files):
+    if kind not in ("runtime_component", "tool_component"):
+        raise ValueError("unsupported composable component kind")
+    if not isinstance(reference, str) or not COMPOSABLE_REFERENCE.fullmatch(reference) or (
+        reference.split("/", 1)[0] != kind.removesuffix("_component")
+    ):
+        raise ValueError(f"{kind} reference must be exact {kind.removesuffix('_component')}/name@major.minor.patch")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"{kind} description must be nonempty")
+    validate_composable_component(component, kind, reference)
+    validate_layer_files(files)
+    encoded = (json.dumps({
+        "schema_version": 4,
+        "kind": kind,
+        "reference": reference,
+        "description": description,
+        kind: component,
+        "files": sorted(files, key=lambda entry: entry["path"]),
+    }, indent=2, sort_keys=True) + "\n").encode()
+    if len(encoded) > 1 << 20:
+        raise ValueError(f"{kind} descriptor exceeds 1 MiB")
+    return encoded
 
 
 def application_component_manifest_bytes(reference, description, component, files):

@@ -47,7 +47,8 @@ import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import (
-    unique_object, validate_application, validate_application_component, validate_runtime_layer,
+    unique_object, validate_application, validate_application_component,
+    validate_composable_component, validate_runtime_layer,
 )
 from publisher_identity import (
     CURRENT_IDENTITY,
@@ -94,8 +95,21 @@ def parse_pack_toml(path):
     if any(not character.isprintable() for character in description) or "](" in description:
         fail(f"{path}: description must be one printable line without Markdown links")
     if set(data) - {"version", "description", "application", "application_component",
-                     "requirements", "runtime_layer"}:
+                     "requirements", "runtime_layer", "runtime_component", "tool_component"}:
         fail(f"{path}: unknown pack metadata fields")
+    components = {"runtime_component", "tool_component"} & set(data)
+    if components:
+        if len(components) != 1 or set(data) - {"version", "description"} - components:
+            fail(f"{path}: runtime/tool component cannot declare another pack format or rootfs requirements")
+        kind = components.pop()
+        if "+" in version or "-" in version:
+            fail(f"{path}: {kind} version must be canonical major.minor.patch")
+        if path.parent.parent.name != kind.removesuffix("_component"):
+            fail(f"{path}: {kind} source must be in the matching namespace")
+        try:
+            validate_composable_component(data[kind], kind, f"{path.parent.parent.name}/{path.parent.name}@{version}")
+        except ValueError as error:
+            fail(f"{path}: {error}")
     if "application_component" in data:
         if "application" in data or "runtime_layer" in data or "requirements" in data:
             fail(f"{path}: application component cannot also declare legacy application, runtime layer or rootfs requirements")
@@ -130,7 +144,8 @@ def parse_pack_toml(path):
             fail(f"{path}: {error}")
     return {"version": version, "description": description, "application": application,
             "application_component": data.get("application_component"),
-            "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
+            "requirements": requirements, "runtime_layer": data.get("runtime_layer"),
+            "runtime_component": data.get("runtime_component"), "tool_component": data.get("tool_component")}
 
 
 def sha256_of(path):
@@ -488,6 +503,8 @@ def build_one(source, check_only=False):
         fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
     if meta["application_component"] is not None:
         fail(f"{reference}: application components are not publishable until mvm agrees on the wire format, consumer and archive gate (ADR 004)")
+    if meta["runtime_component"] is not None or meta["tool_component"] is not None:
+        fail(f"{reference}: runtime/tool components are not publishable until the consumer archive/ABI gate and boot witness exist")
     application = meta["application"]
     payload = source / "pack"
     if application is not None:

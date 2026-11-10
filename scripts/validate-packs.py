@@ -20,8 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from application_manifest import (
-    COMPONENT_REFERENCE, unique_object, validate_application,
-    validate_application_component, validate_layer_files,
+    COMPONENT_REFERENCE, COMPOSABLE_REFERENCE, unique_object, validate_application,
+    validate_application_component, validate_composable_component, validate_layer_files,
 )
 from community_publishers import validate_directory
 import pack_details
@@ -104,23 +104,30 @@ def validate_manifest(path, verify_signatures=False):
     is_component = (type(manifest.get("schema_version")) is int
                     and manifest["schema_version"] == 3
                     and manifest.get("kind") == "application_component")
+    is_composable = (type(manifest.get("schema_version")) is int
+                     and manifest["schema_version"] == 4
+                     and manifest.get("kind") in ("runtime_component", "tool_component"))
     if manifest.get("schema_version") == 3 and not is_component:
         problems.append(f"{rel}: unsupported schema-3 pack kind; runtime layers remain unpublishable")
+    if manifest.get("schema_version") == 4 and not is_composable:
+        problems.append(f"{rel}: unsupported schema-4 pack kind")
     fields = {"schema_version", "reference", "description", "files"}
     if is_application:
         fields = {"schema_version", "kind", "reference", "description", "application"}
     elif is_component:
         fields = {"schema_version", "kind", "reference", "description", "application_component", "files"}
+    elif is_composable:
+        fields = {"schema_version", "kind", "reference", "description", manifest["kind"], "files"}
     check(
         set(manifest) == fields,
         f"{rel}: unknown or missing fields: {sorted(manifest)}",
     )
     check(
         type(manifest.get("schema_version")) is int
-        and manifest["schema_version"] in (1, 2, 3),
-        f"{rel}: schema_version must be integer 1, 2 or 3",
+        and manifest["schema_version"] in (1, 2, 3, 4),
+        f"{rel}: schema_version must be integer 1, 2, 3 or 4",
     )
-    if not is_application and not is_component:
+    if not is_application and not is_component and not is_composable:
         check(
             manifest.get("reference") in LEGACY_POLICY_ONLY,
             f"{rel}: a pack must embed its application binary; policy-only manifests are legacy",
@@ -143,6 +150,19 @@ def validate_manifest(path, verify_signatures=False):
         check(isinstance(manifest.get("reference"), str)
               and COMPONENT_REFERENCE.fullmatch(manifest["reference"]) is not None,
               f"{rel}: application component reference must be exact ns/name@major.minor.patch")
+    if is_composable:
+        kind = manifest["kind"]
+        check(len(raw) <= 1 << 20, f"{rel}: {kind} descriptor exceeds 1 MiB")
+        try:
+            validate_composable_component(manifest.get(kind), kind, manifest.get("reference"))
+            validate_layer_files(manifest.get("files"))
+        except ValueError as error:
+            problems.append(f"{rel}: {error}")
+        component_reference = manifest.get("reference")
+        check(isinstance(component_reference, str)
+              and COMPOSABLE_REFERENCE.fullmatch(component_reference) is not None
+              and component_reference.split("/", 1)[0] == kind.removesuffix("_component"),
+              f"{rel}: {kind} reference must be exact {kind.removesuffix('_component')}/name@major.minor.patch")
 
     reference = manifest.get("reference", "")
     parts = re.fullmatch(r"([^/@]+)/([^/@]+)@([^/@]+)", reference) if isinstance(reference, str) else None
@@ -215,13 +235,13 @@ def validate_manifest(path, verify_signatures=False):
     )
     declared = {Path("files") / entry["path"] for entry in files if isinstance(entry, dict) and isinstance(entry.get("path"), str)} if isinstance(files, list) else set()
     allowed = declared | {Path("manifest.json"), Path("manifest.sigstore.json")}
-    if is_component:
+    if is_component or is_composable:
         allowed |= {parent for item in declared for parent in item.parents if parent != Path(".")}
     for included in path.parent.rglob("*"):
         relative = included.relative_to(path.parent)
         if included.is_symlink():
             problems.append(f"{rel}: symlink is not allowed: {relative}")
-        elif (is_application or is_component) and relative not in allowed:
+        elif (is_application or is_component or is_composable) and relative not in allowed:
             problems.append(f"{rel}: application payload is not allowed: {relative}")
         elif included.is_file() and relative not in allowed:
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")
