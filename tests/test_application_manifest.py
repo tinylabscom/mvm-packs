@@ -155,7 +155,7 @@ class ApplicationManifestTests(unittest.TestCase):
                        "https://example\\evil/app", "https://example/\napp",
                        "oci://registry.example/test/app:latest"],
             "archive_sha256": ["A" * 64, "a" * 63, None, "a" * 64 + "\n"],
-            "archive_size": [True, False, 0, -1, 1.2, "123", None, 2**64],
+            "archive_size": [True, False, 0, -1, 1.2, "123", None, 2**64, 2 * 1024**3 + 1],
             "key_id": ["B" * 32, "b" * 31, None],
         }.items():
             for invalid in values:
@@ -353,6 +353,14 @@ class ArchiveReadBackTests(unittest.TestCase):
         ):
             with self.subTest(descriptor=descriptor["bundle"]), self.assertRaises(SystemExit):
                 self.check(descriptor, data)
+
+    def test_a_download_that_outlasts_the_deadline_is_refused(self):
+        data = make_mvmpkg()
+        clock = iter([0])  # the deadline is set at 0; every later reading is past it
+        with patch.object(builder.time, "monotonic",
+                          side_effect=lambda: next(clock, builder.DOWNLOAD_DEADLINE_SECONDS + 1)), \
+                self.assertRaises(SystemExit):
+            self.check(self.descriptor(data), data)
 
     def test_archive_without_the_application_is_refused(self):
         import tarfile

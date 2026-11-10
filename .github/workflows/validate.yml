@@ -40,9 +40,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ASSOCIATION: ${{ github.event.pull_request.author_association }}
           SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        shell: bash  # runs with pipefail, so a failed gh call fails the step instead of passing an empty list
         run: |
           gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
-            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION" "$SAME_REPO"
+            --jq '.[] | .filename, (.previous_filename // empty)' | python3 scripts/check-reserved-namespaces.py "$ASSOCIATION" "$SAME_REPO" "$CHANGED_FILES"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
