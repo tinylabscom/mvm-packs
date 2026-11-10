@@ -19,7 +19,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from application_manifest import unique_object, validate_application
+from application_manifest import (
+    COMPONENT_REFERENCE, unique_object, validate_application,
+    validate_application_component, validate_layer_files,
+)
 from community_publishers import validate_directory
 import pack_details
 from community_index import validate_index as validate_community_index
@@ -89,27 +92,31 @@ def verify_signature(path, reference):
 def validate_manifest(path, verify_signatures=False):
     rel = path.relative_to(ROOT).as_posix()
     try:
-        manifest = json.loads(path.read_text(), object_pairs_hook=unique_object)
-    except ValueError as error:
+        raw = path.read_bytes()
+        manifest = json.loads(raw, object_pairs_hook=unique_object)
+    except (ValueError, UnicodeError) as error:
         problems.append(f"{rel}: invalid JSON: {error}")
         return
     check(isinstance(manifest, dict), f"{rel}: manifest must be an object")
     if not isinstance(manifest, dict):
         return
     is_application = manifest.get("schema_version") == 2
+    is_component = type(manifest.get("schema_version")) is int and manifest["schema_version"] == 3
     fields = {"schema_version", "reference", "description", "files"}
     if is_application:
         fields = {"schema_version", "kind", "reference", "description", "application"}
+    elif is_component:
+        fields = {"schema_version", "kind", "reference", "description", "application_component", "files"}
     check(
         set(manifest) == fields,
         f"{rel}: unknown or missing fields: {sorted(manifest)}",
     )
     check(
         type(manifest.get("schema_version")) is int
-        and manifest["schema_version"] in (1, 2),
-        f"{rel}: schema_version must be integer 1 or 2",
+        and manifest["schema_version"] in (1, 2, 3),
+        f"{rel}: schema_version must be integer 1, 2 or 3",
     )
-    if not is_application:
+    if not is_application and not is_component:
         check(
             manifest.get("reference") in LEGACY_POLICY_ONLY,
             f"{rel}: a pack must embed its application binary; policy-only manifests are legacy",
@@ -120,6 +127,18 @@ def validate_manifest(path, verify_signatures=False):
             validate_application(manifest.get("application"))
         except ValueError as error:
             problems.append(f"{rel}: {error}")
+    if is_component:
+        check(manifest.get("kind") == "application_component",
+              f"{rel}: kind must be application_component")
+        check(len(raw) <= 1 << 20, f"{rel}: application component descriptor exceeds 1 MiB")
+        try:
+            validate_application_component(manifest.get("application_component"))
+            validate_layer_files(manifest.get("files"))
+        except ValueError as error:
+            problems.append(f"{rel}: {error}")
+        check(isinstance(manifest.get("reference"), str)
+              and COMPONENT_REFERENCE.fullmatch(manifest["reference"]) is not None,
+              f"{rel}: application component reference must be exact ns/name@major.minor.patch")
 
     reference = manifest.get("reference", "")
     parts = re.fullmatch(r"([^/@]+)/([^/@]+)@([^/@]+)", reference) if isinstance(reference, str) else None
@@ -155,28 +174,25 @@ def validate_manifest(path, verify_signatures=False):
         if not isinstance(entry, dict):
             continue
         rel_path = entry.get("path", "")
+        if not isinstance(rel_path, str):
+            problems.append(f"{rel}: unsafe file path {rel_path!r}")
+            continue
         parts_p = rel_path.split("/")
-        check(
-            isinstance(rel_path, str)
-            and rel_path
-            and not rel_path.startswith("/")
-            and ".." not in parts_p
-            and all(parts_p)
-            and "\\" not in rel_path,
-            f"{rel}: unsafe file path {rel_path!r}",
-        )
+        if (not rel_path or rel_path.startswith("/") or ".." in parts_p
+                or not all(parts_p) or "\\" in rel_path):
+            problems.append(f"{rel}: unsafe file path {rel_path!r}")
+            continue
         check(rel_path not in seen, f"{rel}: duplicate file path {rel_path!r}")
         seen.add(rel_path)
-        check(
-            HEX64.match(entry.get("sha256", "")),
-            f"{rel}: sha256 for {rel_path!r} must be 64 lowercase hex",
-        )
+        digest_valid = isinstance(entry.get("sha256"), str) and HEX64.fullmatch(entry["sha256"])
+        check(digest_valid, f"{rel}: sha256 for {rel_path!r} must be 64 lowercase hex")
         size = entry.get("size")
-        check(isinstance(size, int) and size >= 0, f"{rel}: bad size for {rel_path!r}")
+        size_valid = type(size) is int and size >= 0
+        check(size_valid, f"{rel}: bad size for {rel_path!r}")
 
         on_disk = path.parent / "files" / rel_path
         check(on_disk.is_file(), f"{rel}: declared file {rel_path!r} is missing")
-        if on_disk.is_file():
+        if on_disk.is_file() and digest_valid and size_valid:
             digest, actual_size = sha256_and_size(on_disk)
             check(
                 digest == entry["sha256"] and actual_size == size,
@@ -195,11 +211,13 @@ def validate_manifest(path, verify_signatures=False):
     )
     declared = {Path("files") / entry["path"] for entry in files if isinstance(entry, dict) and isinstance(entry.get("path"), str)} if isinstance(files, list) else set()
     allowed = declared | {Path("manifest.json"), Path("manifest.sigstore.json")}
+    if is_component:
+        allowed |= {parent for item in declared for parent in item.parents if parent != Path(".")}
     for included in path.parent.rglob("*"):
         relative = included.relative_to(path.parent)
         if included.is_symlink():
             problems.append(f"{rel}: symlink is not allowed: {relative}")
-        elif is_application and relative not in allowed:
+        elif (is_application or is_component) and relative not in allowed:
             problems.append(f"{rel}: application payload is not allowed: {relative}")
         elif included.is_file() and relative not in allowed:
             problems.append(f"{rel}: unsigned file is not allowed: {relative}")

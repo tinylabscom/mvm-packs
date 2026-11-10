@@ -27,6 +27,11 @@ does not publish such a component yet. Do not interpret the existing
 `agent/claude@2.0.1` descriptor or any legacy policy-only version as that
 new format.
 
+A [draft schema-3 application-only descriptor/source contract](docs/portable-application-component.md)
+has strict parser and structural validation, but is blocked from signing and
+publication pending agreement with the `mvm` format owner and a compatible
+archive/consumer gate.
+
 An application source consists only of `pack.toml`, with no `pack/` payload.
 For example, this is a **synthetic, non-publishable test definition**, not a
 real software release:

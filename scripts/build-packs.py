@@ -42,7 +42,9 @@ import ed25519
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import validate_application, validate_runtime_layer
+from application_manifest import (
+    validate_application, validate_application_component, validate_runtime_layer,
+)
 from publisher_identity import (
     CURRENT_IDENTITY,
     PUBLISHER_ISSUER,
@@ -83,8 +85,18 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
+    if set(data) - {"version", "description", "application", "application_component",
+                     "requirements", "runtime_layer"}:
         fail(f"{path}: unknown pack metadata fields")
+    if "application_component" in data:
+        if "application" in data or "runtime_layer" in data or "requirements" in data:
+            fail(f"{path}: application component cannot also declare legacy application, runtime layer or rootfs requirements")
+        if "+" in version:
+            fail(f"{path}: application component version must be canonical semver without build metadata")
+        try:
+            validate_application_component(data["application_component"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     if "runtime_layer" in data:
         if "application" in data or "requirements" in data:
             fail(f"{path}: a runtime layer cannot also declare application or requirements")
@@ -109,6 +121,7 @@ def parse_pack_toml(path):
         except ValueError as error:
             fail(f"{path}: {error}")
     return {"version": version, "description": description, "application": application,
+            "application_component": data.get("application_component"),
             "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
 
 
@@ -424,6 +437,8 @@ def build_one(source, check_only=False):
     reference = f"{namespace}/{name}@{meta['version']}"
     if meta["runtime_layer"] is not None:
         fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
+    if meta["application_component"] is not None:
+        fail(f"{reference}: application components are not publishable until mvm agrees on the wire format, consumer and archive gate (ADR 004)")
     application = meta["application"]
     payload = source / "pack"
     if application is not None:
