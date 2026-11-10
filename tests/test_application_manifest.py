@@ -434,6 +434,14 @@ class ArchiveReadBackTests(unittest.TestCase):
                 self.assertRaises(SystemExit):
             builder.verify_archive(self.descriptor(data), {"packages": ["bash"], "commands": []})
 
+    def test_descriptions_cannot_carry_newlines_or_markdown_links(self):
+        for description in ("line one\\nline two", "see [here](https://evil.example)", "tab\\there"):
+            with self.subTest(description=description), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "pack.toml"
+                path.write_text(f'version = "1.0.0"\ndescription = "{description}"\n')
+                with self.assertRaises(SystemExit):
+                    builder.parse_pack_toml(path)
+
     def test_requirements_are_only_allowed_on_application_sources(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "pack.toml"

@@ -26,6 +26,7 @@ policy.
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -36,7 +37,9 @@ import tarfile
 import tempfile
 import time
 import tomllib
+import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import ed25519
@@ -84,6 +87,10 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
+    # Generated pages put the description into Markdown, where html.escape does not
+    # neutralise newlines or links.
+    if any(not character.isprintable() for character in description) or "](" in description:
+        fail(f"{path}: description must be one printable line without Markdown links")
     if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
         fail(f"{path}: unknown pack metadata fields")
     if "runtime_layer" in data:
@@ -184,6 +191,36 @@ def bundle_key_url(source):
     return source[: -len(".mvmpkg")] + "-bundle-publisher.pub"
 
 
+def require_public_host(url):
+    """Refuse a fetch aimed at localhost or a non-public IP literal.
+
+    shortcut: DNS names are not resolved here, so a name that points at a private
+    address passes; upgrade by resolving and checking addresses at connect time.
+    """
+    host = (urlsplit(url).hostname or "").rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        fail(f"{url}: refusing to fetch from localhost")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if not address.is_global:
+        fail(f"{url}: refusing to fetch from a non-public address")
+
+
+class PublicHttpsRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only to public https hosts; urlopen would also follow http and ftp."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith("https://"):
+            raise urllib.error.HTTPError(newurl, code, "redirect to a non-HTTPS URL refused", headers, fp)
+        require_public_host(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+urllib.request.install_opener(urllib.request.build_opener(PublicHttpsRedirects))
+
+
 def fetch_bundle_key(bundle):
     """Download the 32-byte Ed25519 key and bind it to the descriptor's key_id.
 
@@ -191,6 +228,7 @@ def fetch_bundle_key(bundle):
     cannot supply a different key. Trusting that key stays with the consumer.
     """
     url = bundle_key_url(bundle["source"])
+    require_public_host(url)
     try:
         with urllib.request.urlopen(url, timeout=60) as response:
             key = response.read(65)
@@ -385,6 +423,7 @@ def verify_archive(application, requirements=None):
     source = bundle["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    require_public_host(source)
     public_key = fetch_bundle_key(bundle)
     cached = _cached_archive(bundle)
     if cached is not None:
