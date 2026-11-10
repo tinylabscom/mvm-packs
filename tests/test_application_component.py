@@ -135,6 +135,11 @@ class ApplicationComponentTests(unittest.TestCase):
         (self.output / "artifacts" / "kernel").write_bytes(b"not allowed")
         self.assertTrue(any("payload" in problem for problem in self.validate()))
 
+    def test_runtime_layer_is_not_misread_as_application_component(self):
+        self.write_manifest(lambda m: m.update(kind="runtime_layer"))
+        self.assertTrue(any("runtime layers remain unpublishable" in problem
+                            for problem in self.validate()))
+
     def test_renderer_requires_exact_identity_and_policy(self):
         for reference, files in (
             ("agent/demo@3.0.0+build", self.files),
