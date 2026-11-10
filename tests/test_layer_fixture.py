@@ -3,6 +3,7 @@ import importlib.util
 import json
 import pathlib
 import sys
+import tomllib
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -31,6 +32,12 @@ class RuntimePythonLayerFixture(unittest.TestCase):
                          (3, "runtime_layer", "runtime/python@1.1.0"))
         self.assertEqual(manifest["runtime_layer"]["guest_arch"], "x86_64")
         self.assertEqual(manifest["files"], files)
+
+    def test_fixture_policy_is_required_and_offline(self):
+        group = tomllib.loads((FIXTURE / "pack/group.toml").read_text())
+        self.assertEqual(set(group), {"description", "required", "network"})
+        self.assertIs(group["required"], True)
+        self.assertEqual(group["network"], {"block": True})
 
 
 if __name__ == "__main__":

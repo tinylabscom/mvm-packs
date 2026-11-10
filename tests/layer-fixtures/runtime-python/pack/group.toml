@@ -1,11 +1,5 @@
-description = "Package registries and common hosts for Python workloads."
-required = false
+description = "Offline Python runtime; no host capabilities or network grants."
+required = true
 
 [network]
-allow = [
-  "pypi.org:443",
-  "files.pythonhosted.org:443",
-  "github.com:443",
-  "api.github.com:443",
-  "objects.githubusercontent.com:443",
-]
+block = true
