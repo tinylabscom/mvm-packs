@@ -20,6 +20,13 @@ not a policy group. This source-only support does not
 claim a published application, a released compatible client, or a successful
 pull/install/run witness.
 
+Schema v2 describes the **existing complete boot bundle**, not a portable
+application-only component. [ADRs 004–006](docs/adr/006-runnable-composable-packs.md)
+propose a new, versioned component format and selectable base; the registry
+does not publish such a component yet. Do not interpret the existing
+`agent/claude@2.0.1` descriptor or any legacy policy-only version as that
+new format.
+
 An application source consists only of `pack.toml`, with no `pack/` payload.
 For example, this is a **synthetic, non-publishable test definition**, not a
 real software release:
@@ -57,8 +64,9 @@ is granted by this schema.
 
 ## Layout
 
-Every pack must embed its application binary in a signed `.mvmpkg`; a policy alone cannot
-be signed, and built-image packs are not part of this registry. A pack source is a single
+Every currently supported new application pack must embed its application
+binary in a signed complete `.mvmpkg`; a policy alone cannot be signed, and
+built-image packs are not part of this registry. A pack source is a single
 `pack-sources/<namespace>/<name>/pack.toml` with an `[application]` bundle (see above).
 The legacy policy-only versions under `packs/` stay immutable and are not rebuilt.
 

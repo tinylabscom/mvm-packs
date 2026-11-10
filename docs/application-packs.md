@@ -1,4 +1,12 @@
-# Publishing an application pack
+# Publishing a legacy complete-bundle application pack
+
+This guide describes the existing schema-2 application descriptor and
+complete bootable `.mvmpkg`, **not** the proposed portable application-only
+component ([ADR 004](adr/004-mvmpkg-universal-pack.md)). Its current
+derive-pins and publisher checks require a kernel and rootfs and must not be
+weakened to accommodate a new format. The portable authoring and protected
+export path are not released; `mvmctl pack publish ./my-pack` remains a
+proposal.
 
 An application pack ships software, not just policy. It is two things bound together:
 a small **descriptor** in this registry, and a **`.mvmpkg` archive** that holds the
