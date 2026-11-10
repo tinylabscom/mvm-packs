@@ -110,9 +110,13 @@ exact manifest-digest pins, not `latest`. The final, published default image
 retains its own bundle signature and verification. For a locally assembled
 combination, the client verifies every input, measures the assembled output,
 and binds the input identities, output hash, entrypoint, effective policy, and
-assembly version in a device-scoped authenticated receipt/plan. That local
-result is **not** an official publisher-signed pack; deployment policy may
-require a separately published, production-signed composition instead.
+assembly version in a device-scoped authenticated receipt/plan. The first
+development implementation should reuse `mvm`'s host-signed local-build bundle
+and signed-plan path, not add a second launch trust path. Admission must verify
+those bindings and recheck each input's publisher trust and revocation even on
+a cache hit; a missing binding refuses launch. That local result is **not** an
+official publisher-signed pack; deployment policy may require a separately
+published, production-signed composition instead.
 Neither a signed descriptor nor a local receipt silently enrolls an archive
 key or grants a network, secret, or host-share capability.
 
@@ -146,9 +150,9 @@ original publisher's signature.
   signature verification, policy admission, and the run UX. This repository
   owns signed descriptors, catalog/publisher checks, revocation publishing,
   and displayed provenance. Neither repository alone can deliver this design.
-- ADR 005 currently says both that a runtime archive has **no key or second
-  signer** and that it has an **Ed25519 signature pinned by `key_id`**. Settle one
-  component trust contract in `mvm` before making schema v3 publishable.
+- ADR 005 specifies one signed layer descriptor binding the archive digest and
+  size, with no second archive signer. Schema v3 remains unpublishable until
+  `mvm` implements the matching consumer, assembly and admission contract.
 - ADR 004 proposes a policy-only `.mvmpkg`, whereas the current registry rule
   requires a binary in every published pack. Preserve runnable defaults for
   user-facing packs; decide separately whether non-runnable extensions get
