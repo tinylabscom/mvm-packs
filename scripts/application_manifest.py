@@ -6,7 +6,9 @@ that key. Consumers must independently enforce bundle trust and revocation.
 
 import json
 import ipaddress
+import posixpath
 import re
+import tarfile
 from urllib.parse import unquote, urlsplit
 
 
@@ -365,3 +367,36 @@ def manifest_bytes(reference, description, application):
         "description": description,
         "application": application,
     }, indent=2, sort_keys=True) + "\n").encode()
+
+
+def inspect_component_payload(path, kind, max_bytes=2 * 1024**3):
+    """Read a component tar without extracting; return {"files", "bytes"} or raise ValueError."""
+    if kind not in ("application_component", "runtime_component", "tool_component"):
+        raise ValueError("unsupported component kind")
+    files = total = 0
+    try:
+        with tarfile.open(path, "r:") as archive:
+            for member in archive:
+                name = member.name
+                if name.startswith("/") or ".." in name.split("/"):
+                    raise ValueError(f"{name}: absolute or parent-relative path")
+                if kind == "application_component" and not (name.startswith("srv/app/") or name.rstrip("/") == "srv/app"):
+                    raise ValueError(f"{name}: application payload must live under srv/app/")
+                if member.mode & 0o6000:
+                    raise ValueError(f"{name}: setuid/setgid bit")
+                if member.issym():
+                    target = posixpath.normpath(posixpath.join(posixpath.dirname(name), member.linkname))
+                    if member.linkname.startswith("/") or target == ".." or target.startswith("../"):
+                        raise ValueError(f"{name}: symlink escapes the payload root")
+                elif member.isfile():
+                    files += 1
+                    total += member.size
+                    if total > max_bytes:
+                        raise ValueError("payload exceeds the size cap")
+                elif not member.isdir():
+                    raise ValueError(f"{name}: only files, directories and symlinks are allowed")
+    except tarfile.TarError as error:
+        raise ValueError(f"unreadable tar: {error}") from error
+    if files == 0 or total == 0:
+        raise ValueError("payload has no file content")
+    return {"files": files, "bytes": total}

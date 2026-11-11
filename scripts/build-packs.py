@@ -25,6 +25,7 @@ policy.
 """
 
 import argparse
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -47,7 +48,7 @@ import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import (
-    unique_object, validate_application, validate_application_component,
+    inspect_component_payload, unique_object, validate_application, validate_application_component,
     validate_composable_component, validate_runtime_layer,
 )
 from publisher_identity import (
@@ -459,7 +460,16 @@ def verify_archive(application, requirements=None):
     if cached is not None:
         print(f"archive cache: using {cached.name} (re-verified)")
         return inspect_bundle(str(cached), application, public_key, requirements)
-    digest, size = hashlib.sha256(), 0
+    with _download_pinned(source, bundle["archive_sha256"], bundle["archive_size"]) as spool:
+        details = inspect_bundle(spool.name, application, public_key, requirements)
+        _store_in_cache(bundle, spool.name)
+        return details
+
+
+@contextlib.contextmanager
+def _download_pinned(source, sha256, size):
+    """Yield a flushed temp file holding the bounded download once size and SHA-256 match."""
+    digest, received = hashlib.sha256(), 0
     deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
@@ -467,21 +477,33 @@ def verify_archive(application, requirements=None):
                 while chunk := response.read(1 << 20):
                     if time.monotonic() > deadline:
                         fail(f"{source}: archive download exceeded {DOWNLOAD_DEADLINE_SECONDS} seconds")
-                    size += len(chunk)
-                    if size > bundle["archive_size"]:
+                    received += len(chunk)
+                    if received > size:
                         break
                     digest.update(chunk)
                     spool.write(chunk)
         except OSError as error:
             fail(f"{source}: cannot read the archive back: {error}")
-        if size != bundle["archive_size"]:
+        if received != size:
             fail(f"{source}: archive size does not match the descriptor")
-        if digest.hexdigest() != bundle["archive_sha256"]:
+        if digest.hexdigest() != sha256:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        details = inspect_bundle(spool.name, application, public_key, requirements)
-        _store_in_cache(bundle, spool.name)
-        return details
+        yield spool
+
+
+def verify_component_archive(component, kind):
+    """Read a component archive back and refuse unless its payload passes inspect_component_payload."""
+    archive = component["archive"]
+    source = archive["source"]
+    if not source.startswith("https://"):
+        fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    require_public_host(source)
+    with _download_pinned(source, archive["archive_sha256"], archive["archive_size"]) as spool:
+        try:
+            return inspect_component_payload(spool.name, kind)
+        except ValueError as error:
+            fail(f"{source}: {error}")
 
 
 def sign(manifest_path, bundle_path):
