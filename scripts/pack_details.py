@@ -68,7 +68,8 @@ def validate(details):
 def code(value, limit=200):
     """A markdown code span from untrusted text: printable characters only, no backticks, bounded."""
     text = "".join(ch if ch.isprintable() else " " for ch in str(value)).replace("`", "'")
-    return "`" + text[:limit] + "`"
+    cut = f"...(+{len(text) - limit} chars)" if len(text) > limit else ""
+    return "`" + text[:limit] + cut + "`"
 
 
 def _mib(count):
@@ -134,7 +135,7 @@ def render_component(manifest):
                "- Required capabilities: " + (", ".join(code(c) for c in req["required_capabilities"]) or "none") + "\n")
     if kind == "application_component":
         out.append("\n### Entrypoints\n\n")
-        out += [f"- {code(e['name'])}: {code(' '.join(map(str, e['argv'])))}\n" for e in body["entrypoints"]] or ["none\n"]
+        out += [f"- {code(e['name'])}: {' '.join(code(x) for x in e['argv'])}\n" for e in body["entrypoints"]] or ["none\n"]
     else:
         out.append("\n### Dependencies (in order)\n\n")
         out += [f"{i}. {code(d['reference'])} {code(d['manifest_sha256'])}\n"

