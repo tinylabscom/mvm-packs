@@ -2,7 +2,8 @@ import runpy
 import unittest
 from pathlib import Path
 
-violations = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/check-reserved-namespaces.py"))["violations"]
+_gate = runpy.run_path(str(Path(__file__).resolve().parents[1] / "scripts/check-reserved-namespaces.py"))
+violations, unverifiable = _gate["violations"], _gate["unverifiable"]
 
 
 class ReservedNamespaceTests(unittest.TestCase):
@@ -23,3 +24,8 @@ class ReservedNamespaceTests(unittest.TestCase):
         self.assertEqual(violations(["pack-sources/agent/x/pack.toml"], "CONTRIBUTOR", same_repo=True), [])
         self.assertEqual(violations(["pack-sources/agent/x/pack.toml"], "CONTRIBUTOR", same_repo=False),
                          ["pack-sources/agent/x/pack.toml"])
+
+    def test_an_empty_or_truncated_listing_cannot_be_verified(self):
+        self.assertIsNotNone(unverifiable([], 1))
+        self.assertIsNotNone(unverifiable(["README.md"], 3000))
+        self.assertIsNone(unverifiable(["README.md"], 2999))

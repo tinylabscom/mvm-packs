@@ -169,5 +169,6 @@ class PackIndexTests(unittest.TestCase):
         self.assertIn("git add index.json packs/", workflow)
         self.assertNotIn("packs/index.json", workflow)
         validation = (root / ".github/workflows/validate.yml").read_text()
-        self.assertIn('- "index.json"', validation)
-        self.assertIn('- "packs/**"', validation)
+        # No path filter: the main ruleset requires this check on every pull request.
+        self.assertIn("pull_request:", validation)
+        self.assertNotIn("paths:", validation)

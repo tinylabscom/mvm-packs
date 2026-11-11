@@ -155,7 +155,7 @@ class ApplicationManifestTests(unittest.TestCase):
                        "https://example\\evil/app", "https://example/\napp",
                        "oci://registry.example/test/app:latest"],
             "archive_sha256": ["A" * 64, "a" * 63, None, "a" * 64 + "\n"],
-            "archive_size": [True, False, 0, -1, 1.2, "123", None, 2**64],
+            "archive_size": [True, False, 0, -1, 1.2, "123", None, 2**64, 2 * 1024**3 + 1],
             "key_id": ["B" * 32, "b" * 31, None],
         }.items():
             for invalid in values:
@@ -354,6 +354,14 @@ class ArchiveReadBackTests(unittest.TestCase):
             with self.subTest(descriptor=descriptor["bundle"]), self.assertRaises(SystemExit):
                 self.check(descriptor, data)
 
+    def test_a_download_that_outlasts_the_deadline_is_refused(self):
+        data = make_mvmpkg()
+        clock = iter([0])  # the deadline is set at 0; every later reading is past it
+        with patch.object(builder.time, "monotonic",
+                          side_effect=lambda: next(clock, builder.DOWNLOAD_DEADLINE_SECONDS + 1)), \
+                self.assertRaises(SystemExit):
+            self.check(self.descriptor(data), data)
+
     def test_archive_without_the_application_is_refused(self):
         import tarfile
         symlink = tarfile.TarInfo("artifacts/link")
@@ -373,6 +381,23 @@ class ArchiveReadBackTests(unittest.TestCase):
         }.items():
             with self.subTest(label), self.assertRaises(SystemExit):
                 self.check(self.descriptor(data), data)
+
+    def test_ambiguous_bundle_manifests_are_refused(self):
+        def entry(name, role):
+            data = f"{name}-bytes".encode()
+            return {"name": name, "role": role, "path": f"artifacts/{name}",
+                    "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+        body = {"key_id": TEST_KEY_ID, "arch": "aarch64", "artifacts": [entry("kernel", "kernel"), entry("rootfs", "rootfs")]}
+        two_rootfs = body | {"artifacts": body["artifacts"] + [entry("rootfs2", "rootfs")]}
+        for label, data in {
+            "duplicate JSON key": make_mvmpkg(raw_manifest=json.dumps(body)[:-1].encode() + b', "arch": "aarch64"}'),
+            "two root filesystems": make_mvmpkg(roles=("kernel", "rootfs", "rootfs2"),
+                                                raw_manifest=json.dumps(two_rootfs).encode()),
+        }.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check(self.descriptor(data), data)
+        valid = make_mvmpkg(raw_manifest=json.dumps(body).encode())
+        self.check(self.descriptor(valid), valid)
 
     def test_bundle_key_must_exist_and_match_the_descriptor_key_id(self):
         data = make_mvmpkg()
@@ -425,6 +450,14 @@ class ArchiveReadBackTests(unittest.TestCase):
         with patch.object(builder.urllib.request, "urlopen", side_effect=serve), \
                 self.assertRaises(SystemExit):
             builder.verify_archive(self.descriptor(data), {"packages": ["bash"], "commands": []})
+
+    def test_descriptions_cannot_carry_newlines_or_markdown_links(self):
+        for description in ("line one\\nline two", "see [here](https://evil.example)", "tab\\there"):
+            with self.subTest(description=description), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp) / "pack.toml"
+                path.write_text(f'version = "1.0.0"\ndescription = "{description}"\n')
+                with self.assertRaises(SystemExit):
+                    builder.parse_pack_toml(path)
 
     def test_requirements_are_only_allowed_on_application_sources(self):
         with tempfile.TemporaryDirectory() as tmp:

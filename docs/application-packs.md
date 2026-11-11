@@ -1,4 +1,12 @@
-# Publishing an application pack
+# Publishing a legacy complete-bundle application pack
+
+This guide describes the existing schema-2 application descriptor and
+complete bootable `.mvmpkg`, **not** the proposed portable application-only
+component ([ADR 004](adr/004-mvmpkg-universal-pack.md)). Its current
+derive-pins and publisher checks require a kernel and rootfs and must not be
+weakened to accommodate a new format. The portable authoring and protected
+export path are not released; `mvmctl pack publish ./my-pack` remains a
+proposal.
 
 An application pack ships software, not just policy. It is two things bound together:
 a small **descriptor** in this registry, and a **`.mvmpkg` archive** that holds the
@@ -102,6 +110,20 @@ slots, capabilities) and the pinned executables it saw in the archive. The pack 
 this under "Recorded at signing", labelled as **not signed registry metadata**. `validate-packs`
 refuses a record that does not match the signed descriptor. A failure to write the record never
 blocks signing, and a pull re-verifies the archive itself.
+
+## Per-architecture versions
+
+**Decided by the owner on 2026-11-11 (recommendation accepted).** One descriptor targets one
+`guest_arch`, a published version is immutable so two descriptors cannot share a version,
+and the `mvm` client filters versions by host architecture and then takes the highest
+semver (`resolve_matching` in `discovery.rs` in the `mvm` repo; the strict architecture
+resolver is `mvm#5298`). The scheme: within one release line the x86_64 build takes `X.Y.0`
+and the aarch64 build takes `X.Y.1`; a new release line bumps the minor. This is the
+numbering the unpublished two-architecture Python layer fixtures already use (x86_64 `1.1.0`,
+aarch64 `1.1.1`, draft PR #154), so every pack follows one convention. Which architecture is
+built first does not change the numbers. The scheme starts at a NEW release line, not at the
+published `agent/claude` 2.0.x (2.0.1 is already an aarch64 build). Only the version numbers
+in the pack sources and these docs depend on it.
 
 ## Traps we have already hit
 

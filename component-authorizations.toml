@@ -1,0 +1,13 @@
+# Owner approvals for signing components (application, runtime and tool).
+# Only the owner edits this file (see .github/CODEOWNERS): the registry signs a
+# component only when its exact reference and archive_sha256 are listed here, so
+# no automation or contributor can cause a signature by changing a pack source.
+# Prerequisite before signing is wired: each approval must also pin the descriptor
+# (manifest_sha256 of the exact bytes to be signed), not only archive_sha256.
+#
+# [[approved]]
+# reference = "agent/demo@1.0.0"
+# archive_sha256 = "<64 lowercase hex>"
+# approved_by = "<owner>"
+# date = "YYYY-MM-DD"
+approved = []

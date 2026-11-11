@@ -25,7 +25,9 @@ policy.
 """
 
 import argparse
+import contextlib
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -34,15 +36,22 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import tomllib
+import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from pathlib import Path
 
 import ed25519
+from component_authorizations import component_authorized
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import validate_application, validate_runtime_layer
+from application_manifest import (
+    inspect_component_payload, unique_object, validate_application, validate_component_archive, validate_application_component,
+    validate_composable_component, validate_runtime_layer,
+)
 from publisher_identity import (
     CURRENT_IDENTITY,
     PUBLISHER_ISSUER,
@@ -51,6 +60,7 @@ from publisher_identity import (
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "pack-sources"
 PACKS = ROOT / "packs"
+COMPONENT_AUTHORIZATIONS = ROOT / "component-authorizations.toml"
 DETAILS = ROOT / "pack-details"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
@@ -83,8 +93,35 @@ def parse_pack_toml(path):
         fail(f"{path}: version must be a strict semver string, got {version!r}")
     if not isinstance(description, str) or not description.strip():
         fail(f"{path}: description must be a non-empty string")
-    if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
+    # Generated pages put the description into Markdown, where html.escape does not
+    # neutralise newlines or links.
+    if any(not character.isprintable() for character in description) or "](" in description:
+        fail(f"{path}: description must be one printable line without Markdown links")
+    if set(data) - {"version", "description", "application", "application_component",
+                     "requirements", "runtime_layer", "runtime_component", "tool_component"}:
         fail(f"{path}: unknown pack metadata fields")
+    components = {"runtime_component", "tool_component"} & set(data)
+    if components:
+        if len(components) != 1 or set(data) - {"version", "description"} - components:
+            fail(f"{path}: runtime/tool component cannot declare another pack format or rootfs requirements")
+        kind = components.pop()
+        if "+" in version or "-" in version:
+            fail(f"{path}: {kind} version must be canonical major.minor.patch")
+        if path.parent.parent.name != kind.removesuffix("_component"):
+            fail(f"{path}: {kind} source must be in the matching namespace")
+        try:
+            validate_composable_component(data[kind], kind, f"{path.parent.parent.name}/{path.parent.name}@{version}")
+        except ValueError as error:
+            fail(f"{path}: {error}")
+    if "application_component" in data:
+        if "application" in data or "runtime_layer" in data or "requirements" in data:
+            fail(f"{path}: application component cannot also declare legacy application, runtime layer or rootfs requirements")
+        if "+" in version:
+            fail(f"{path}: application component version must be canonical semver without build metadata")
+        try:
+            validate_application_component(data["application_component"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     if "runtime_layer" in data:
         if "application" in data or "requirements" in data:
             fail(f"{path}: a runtime layer cannot also declare application or requirements")
@@ -109,7 +146,9 @@ def parse_pack_toml(path):
         except ValueError as error:
             fail(f"{path}: {error}")
     return {"version": version, "description": description, "application": application,
-            "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
+            "application_component": data.get("application_component"),
+            "requirements": requirements, "runtime_layer": data.get("runtime_layer"),
+            "runtime_component": data.get("runtime_component"), "tool_component": data.get("tool_component")}
 
 
 def sha256_of(path):
@@ -183,6 +222,36 @@ def bundle_key_url(source):
     return source[: -len(".mvmpkg")] + "-bundle-publisher.pub"
 
 
+def require_public_host(url):
+    """Refuse a fetch aimed at localhost or a non-public IP literal.
+
+    shortcut: DNS names are not resolved here, so a name that points at a private
+    address passes; upgrade by resolving and checking addresses at connect time.
+    """
+    host = (urlsplit(url).hostname or "").rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        fail(f"{url}: refusing to fetch from localhost")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if not address.is_global:
+        fail(f"{url}: refusing to fetch from a non-public address")
+
+
+class PublicHttpsRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow redirects only to public https hosts; urlopen would also follow http and ftp."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not newurl.startswith("https://"):
+            raise urllib.error.HTTPError(newurl, code, "redirect to a non-HTTPS URL refused", headers, fp)
+        require_public_host(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+urllib.request.install_opener(urllib.request.build_opener(PublicHttpsRedirects))
+
+
 def fetch_bundle_key(bundle):
     """Download the 32-byte Ed25519 key and bind it to the descriptor's key_id.
 
@@ -190,6 +259,7 @@ def fetch_bundle_key(bundle):
     cannot supply a different key. Trusting that key stays with the consumer.
     """
     url = bundle_key_url(bundle["source"])
+    require_public_host(url)
     try:
         with urllib.request.urlopen(url, timeout=60) as response:
             key = response.read(65)
@@ -288,7 +358,7 @@ def inspect_bundle(path, application, public_key, requirements=None):
             manifest_raw = archive.extractfile("manifest.json").read()
             if not ed25519.verify(public_key, manifest_raw, archive.extractfile("manifest.sig").read()):
                 fail(f"{path}: manifest.sig is not a valid signature by the descriptor's bundle key")
-            manifest = json.loads(manifest_raw)
+            manifest = json.loads(manifest_raw, object_pairs_hook=unique_object)
             if manifest.get("key_id") != bundle["key_id"] or manifest.get("arch") != application["guest_arch"]:
                 fail(f"{path}: bundle key ID or architecture does not match the descriptor")
             artifacts = manifest.get("artifacts")
@@ -309,6 +379,8 @@ def inspect_bundle(path, application, public_key, requirements=None):
                     fail(f"{path}: artifact {artifact['path']!r} does not match its recorded SHA-256")
                 roles.add(artifact["role"])
                 if artifact["role"] == "rootfs":
+                    if rootfs_path is not None:
+                        fail(f"{path}: archive lists more than one root filesystem")
                     rootfs_path = artifact["path"]
             if sum(members[p].size for p in hashed) > bundle["archive_size"]:
                 fail(f"{path}: artifacts are larger than the archive")
@@ -368,6 +440,10 @@ def _store_in_cache(bundle, spooled):
         print(f"archive cache: not stored: {error}")
 
 
+# urlopen's timeout is per socket read, so a drip-feeding source needs this overall bound.
+DOWNLOAD_DEADLINE_SECONDS = 15 * 60
+
+
 def verify_archive(application, requirements=None):
     """Read the pinned archive back before signing a new application version.
 
@@ -380,31 +456,60 @@ def verify_archive(application, requirements=None):
     source = bundle["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    require_public_host(source)
     public_key = fetch_bundle_key(bundle)
     cached = _cached_archive(bundle)
     if cached is not None:
         print(f"archive cache: using {cached.name} (re-verified)")
         return inspect_bundle(str(cached), application, public_key, requirements)
-    digest, size = hashlib.sha256(), 0
+    with _download_pinned(source, bundle["archive_sha256"], bundle["archive_size"]) as spool:
+        details = inspect_bundle(spool.name, application, public_key, requirements)
+        _store_in_cache(bundle, spool.name)
+        return details
+
+
+@contextlib.contextmanager
+def _download_pinned(source, sha256, size):
+    """Yield a flushed temp file holding the bounded download once size and SHA-256 match."""
+    digest, received = hashlib.sha256(), 0
+    deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
             with urllib.request.urlopen(source, timeout=60) as response:
                 while chunk := response.read(1 << 20):
-                    size += len(chunk)
-                    if size > bundle["archive_size"]:
+                    if time.monotonic() > deadline:
+                        fail(f"{source}: archive download exceeded {DOWNLOAD_DEADLINE_SECONDS} seconds")
+                    received += len(chunk)
+                    if received > size:
                         break
                     digest.update(chunk)
                     spool.write(chunk)
         except OSError as error:
             fail(f"{source}: cannot read the archive back: {error}")
-        if size != bundle["archive_size"]:
+        if received != size:
             fail(f"{source}: archive size does not match the descriptor")
-        if digest.hexdigest() != bundle["archive_sha256"]:
+        if digest.hexdigest() != sha256:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        details = inspect_bundle(spool.name, application, public_key, requirements)
-        _store_in_cache(bundle, spool.name)
-        return details
+        yield spool
+
+
+def verify_component_archive(component, kind):
+    """Read a component archive back and refuse unless its payload passes inspect_component_payload."""
+    archive = component["archive"]
+    try:
+        validate_component_archive(archive)
+    except ValueError as error:
+        fail(f"component archive: {error}")
+    source = archive["source"]
+    if not source.startswith("https://"):
+        fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    require_public_host(source)
+    with _download_pinned(source, archive["archive_sha256"], archive["archive_size"]) as spool:
+        try:
+            return inspect_component_payload(spool.name, kind)
+        except ValueError as error:
+            fail(f"{source}: {error}")
 
 
 def sign(manifest_path, bundle_path):
@@ -424,6 +529,22 @@ def build_one(source, check_only=False):
     reference = f"{namespace}/{name}@{meta['version']}"
     if meta["runtime_layer"] is not None:
         fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
+    kind = next((k for k in ("application_component", "runtime_component", "tool_component") if meta[k] is not None), None)
+    if kind is not None:
+        component = meta[kind]
+        if (PACKS / namespace / name / meta["version"]).exists():
+            fail(f"{reference}: version already published; bump the version in pack.toml")
+        try:
+            authorized = component_authorized(reference, component["archive"]["archive_sha256"], COMPONENT_AUTHORIZATIONS)
+        except ValueError as error:
+            fail(f"{reference}: {error}")
+        if check_only:
+            print(f"{reference}: component source valid" + ("" if authorized else "; not authorized for signing"))
+            return
+        if not authorized:
+            fail(f"{reference}: component not authorized by the owner")
+        verify_component_archive(component, kind)
+        fail(f"{reference}: component signing is not wired up yet; nothing is written to packs/ until the publication gate lifts")
     application = meta["application"]
     payload = source / "pack"
     if application is not None:

@@ -67,3 +67,42 @@ def compose(layers):
             res[k] = v if cur is None or key(v) < key(cur) else cur
     out["resources"] = res
     return out
+
+
+def _argv(argv, what):
+    if (not isinstance(argv, list) or not argv
+            or not all(isinstance(a, str) for a in argv)):
+        raise ValueError(f"{what}: argv must be a non-empty list of strings")
+    if not argv[0].startswith("/"):
+        raise ValueError(f"{what}: argv[0] must be an absolute path, got {argv[0]!r}")
+    return argv
+
+
+def select_entrypoint(applications, runtime_override=None, workload=None):
+    """Runtime override, else workload, else the last application's `default` entrypoint.
+
+    Only entries named `default` are implicit; any other name is explicit-only.
+    """
+    chosen = None
+    for i, app in enumerate(applications):
+        names = set()
+        entries = app.get("entrypoints", [])
+        if not isinstance(entries, list):
+            raise ValueError(f"application {i}: entrypoints must be a list")
+        for e in entries:
+            name = e.get("name")
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"application {i}: entrypoint name must be a non-empty string")
+            if name in names:
+                raise ValueError(f"application {i}: duplicate entrypoint name {name!r}")
+            names.add(name)
+            _argv(e.get("argv"), f"application {i} entrypoint {name!r}")
+            if name == "default":
+                chosen = e["argv"]
+    if runtime_override is not None:
+        return _argv(runtime_override, "runtime_override")
+    if workload is not None:
+        return _argv(workload, "workload")
+    if chosen is None:
+        raise ValueError("no entrypoint: no application declares a default")
+    return chosen

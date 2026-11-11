@@ -1,0 +1,39 @@
+[
+ {"name": "override_wins",
+  "applications": [{"entrypoints": [{"name": "default", "argv": ["/bin/claude"]}]}],
+  "runtime_override": ["/bin/sh", "-c", "id"], "workload": ["/bin/ls"],
+  "expect": ["/bin/sh", "-c", "id"]},
+ {"name": "workload_beats_last_application",
+  "applications": [{"entrypoints": [{"name": "default", "argv": ["/bin/claude"]}]}],
+  "workload": ["/usr/bin/python3", "job.py"],
+  "expect": ["/usr/bin/python3", "job.py"]},
+ {"name": "last_application_with_default_wins",
+  "applications": [
+   {"entrypoints": [{"name": "default", "argv": ["/bin/first"]}]},
+   {"entrypoints": [{"name": "default", "argv": ["/bin/second", "--serve"]}]}],
+  "expect": ["/bin/second", "--serve"]},
+ {"name": "runtime_layer_without_default_is_skipped",
+  "applications": [
+   {"entrypoints": [{"name": "default", "argv": ["/bin/claude"]}]},
+   {"entrypoints": []}],
+  "expect": ["/bin/claude"]},
+ {"name": "two_defaults_last_wins",
+  "applications": [
+   {"entrypoints": [{"name": "default", "argv": ["/bin/a"]}]},
+   {"entrypoints": [{"name": "default", "argv": ["/bin/b"]}]}],
+  "expect": ["/bin/b"]},
+ {"name": "non_default_named_entry_is_explicit_only",
+  "applications": [
+   {"entrypoints": [{"name": "default", "argv": ["/bin/claude"]}]},
+   {"entrypoints": [{"name": "debug", "argv": ["/bin/gdb"]}]}],
+  "expect": ["/bin/claude"]},
+ {"name": "none_declares_default_is_an_error",
+  "applications": [{"entrypoints": [{"name": "debug", "argv": ["/bin/gdb"]}]}, {"entrypoints": []}],
+  "error": "no entrypoint"},
+ {"name": "relative_argv_is_refused",
+  "applications": [{"entrypoints": [{"name": "default", "argv": ["claude"]}]}],
+  "error": "absolute"},
+ {"name": "duplicate_names_in_one_application_are_refused",
+  "applications": [{"entrypoints": [{"name": "default", "argv": ["/bin/a"]}, {"name": "default", "argv": ["/bin/b"]}]}],
+  "error": "duplicate"}
+]
