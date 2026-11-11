@@ -29,12 +29,12 @@
   "error": "shares.mount.guest"},
  {"name": "claude_plus_user_both_apply",
   "layers": [
-   {"secrets": {"bind": [{"name": "ANTHROPIC_API_KEY", "hosts": ["api.anthropic.com:443"]}]}, "tools": {"allow": ["bash"]}},
+   {"secrets": {"bind": ["ANTHROPIC_API_KEY"]}, "tools": {"allow": ["bash"]}},
    {"secrets": {"bind": ["GH_TOKEN"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["git"]}}],
   "expect": {"secrets": {"bind": ["ANTHROPIC_API_KEY", "GH_TOKEN"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["bash", "git"], "ask": []}, "shares": {"mount": []}, "resources": {}}},
  {"name": "user_cannot_loosen_a_claude_deny",
   "layers": [
-   {"secrets": {"bind": [{"name": "ANTHROPIC_API_KEY", "hosts": ["api.anthropic.com:443"]}]}, "tools": {"deny": ["curl"]}, "env": {"deny": ["AWS_SECRET_ACCESS_KEY"]}},
+   {"secrets": {"bind": ["ANTHROPIC_API_KEY"]}, "tools": {"deny": ["curl"]}, "env": {"deny": ["AWS_SECRET_ACCESS_KEY"]}},
    {"tools": {"allow": ["curl", "git"]}, "env": {"allow": ["AWS_SECRET_ACCESS_KEY", "MODE"]}}],
   "expect": {"secrets": {"bind": ["ANTHROPIC_API_KEY"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["git"], "ask": []}, "shares": {"mount": []}, "resources": {}}},
  {"name": "user_cannot_raise_a_claude_resource_ceiling",
