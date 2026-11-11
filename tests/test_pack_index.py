@@ -128,6 +128,39 @@ class PackIndexTests(unittest.TestCase):
         self.write_indexes(changed)
         self.assertFalse(self.validate())
 
+    def test_runtime_versions_advertise_only_their_published_architecture(self):
+        for version, arch in (("1.1.0", "x86_64"), ("1.1.1", "aarch64")):
+            directory = self.packs / "runtime" / "python" / version
+            directory.mkdir(parents=True)
+            (directory / "manifest.json").write_text(json.dumps({
+                "schema_version": 3,
+                "kind": "runtime_layer",
+                "reference": f"runtime/python@{version}",
+                "description": "Python layer",
+                "runtime_layer": {"guest_arch": arch},
+            }))
+        index = builder.registry_index(self.packs)
+        versions = next(entry["versions"] for entry in index["packs"]
+                        if (entry["namespace"], entry["name"]) == ("runtime", "python"))
+        self.assertEqual(
+            [(entry["version"], entry["guest_arch"]) for entry in versions],
+            [("1.1.1", "aarch64"), ("1.1.0", "x86_64")],
+        )
+        self.write_indexes(index)
+        self.assertFalse(self.validate())
+        index["packs"][1]["versions"][0]["guest_arch"] = "x86_64"
+        self.write_indexes(index)
+        self.assertIn("must exactly match", self.validate()[0])
+        (self.packs / "runtime/python/1.1.1/manifest.json").write_text(json.dumps({
+            "schema_version": 3,
+            "kind": "runtime_layer",
+            "reference": "runtime/python@1.1.1",
+            "description": "Python layer",
+            "runtime_layer": {"guest_arch": "riscv64"},
+        }))
+        with self.assertRaises(SystemExit):
+            builder.registry_index(self.packs)
+
     def test_publisher_transfers_and_commits_root_index(self):
         root = Path(__file__).resolve().parents[1]
         workflow = (root / ".github/workflows/publish.yml").read_text()

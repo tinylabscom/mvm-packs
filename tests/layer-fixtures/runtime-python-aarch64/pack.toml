@@ -1,0 +1,15 @@
+# UNPUBLISHED FIXTURE. A distinct version is necessary because the schema-2
+# catalog and runtime-layer manifest bind one guest_arch per immutable version.
+# The release URL is reserved, not live; neither asset nor descriptor is signed.
+version = "1.1.1"
+description = "Offline Python runtime layer: interpreter and standard library."
+
+[runtime_layer]
+schema_version = 1
+guest_arch = "aarch64"
+dependencies = []
+
+[runtime_layer.archive]
+source = "https://github.com/tinylabscom/mvm-packs/releases/download/python-layer-v1.1.0/runtime-python-aarch64.layer.tar"
+archive_sha256 = "2c65e1c400098a3a8141a58f2f2f66a3df667d5f947d86d982f3d115b023b0f2"
+archive_size = 64798720
