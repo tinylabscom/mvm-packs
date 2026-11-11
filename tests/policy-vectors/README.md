@@ -7,6 +7,9 @@ merge (`policy_profiles/merge.rs`) must produce the same results. Ported from
 its unit tests; add a vector with every rule you add to either side.
 Not yet covered: network canonicalisation/block, secret-host narrowing,
 env.readmit, pack-added shares.
+Egress host allowlists (including the Claude pack's single allowed host) are not asserted
+here: the reference composer has no network section yet, the same gap as secret-host
+narrowing above.
 
 ## Entrypoint vectors
 
