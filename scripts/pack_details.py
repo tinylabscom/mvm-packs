@@ -116,3 +116,30 @@ def render(details):
 def _flat(value):
     import json
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def render_component(manifest):
+    """Markdown lines for a component manifest dict the caller already validated; every string goes through code()."""
+    kind = manifest["kind"]
+    body = manifest[kind]
+    req = body["requirements"]
+    out = [f"## Component\n\n- Kind: {code(kind)}\n- Architecture: {code(body['guest_arch'])}\n\n",
+           "### Requirements\n\n",
+           "These are descriptor-declared requirements to compare against a selected signed base, "
+           "not evidence that it provides them.\n\n",
+           f"- Filesystem ABI: {code(req['filesystem_abi'])}\n- libc: {code(req['libc'])}\n"]
+    if "loader" in req:
+        out.append(f"- Loader: {code(req['loader'])}\n")
+    out.append(f"- Minimum kernel: {code(req['minimum_kernel'])}\n"
+               "- Required capabilities: " + (", ".join(code(c) for c in req["required_capabilities"]) or "none") + "\n")
+    if kind == "application_component":
+        out.append("\n### Entrypoints\n\n")
+        out += [f"- {code(e['name'])}: {code(' '.join(map(str, e['argv'])))}\n" for e in body["entrypoints"]] or ["none\n"]
+    else:
+        out.append("\n### Dependencies (in order)\n\n")
+        out += [f"{i}. {code(d['reference'])} {code(d['manifest_sha256'])}\n"
+                for i, d in enumerate(body["dependencies"], 1)] or ["none\n"]
+    out.append("\n### Policy documents\n\n")
+    out += [f"- {code(f['path'])}, {code(f['size'])} bytes\n" for f in manifest["files"]] or ["none\n"]
+    out.append("\n")
+    return out
