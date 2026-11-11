@@ -11,6 +11,7 @@ from unittest.mock import patch
 from tests.test_publisher_verification import builder, validator
 from application_manifest import (
     application_component_manifest_bytes, validate_application_component,
+    validate_composable_component,
 )
 
 
@@ -109,6 +110,33 @@ class ApplicationComponentTests(unittest.TestCase):
         del static["requirements"]["loader"]
         static["entrypoints"] = []
         validate_application_component(static)
+
+    def test_musl_loader_must_match_architecture(self):
+        cases = (
+            ("aarch64", "musl", "/lib/ld-musl-x86_64.so.1", False),
+            ("x86_64", "musl", "/lib/ld-musl-aarch64.so.1", False),
+            ("aarch64", "musl", "/lib/ld-musl-aarch64.so.1", True),
+            ("x86_64", "musl", "/lib/ld-musl-x86_64.so.1", True),
+            ("aarch64", "glibc", "/lib/ld-linux-aarch64.so.1", True),
+        )
+        for arch, libc, loader, accepted in cases:
+            application = component()
+            application["guest_arch"] = arch
+            application["requirements"].update(libc=libc, loader=loader)
+            runtime = copy.deepcopy(application)
+            runtime["dependencies"] = []
+            del runtime["entrypoints"]
+            for kind, value in (("application_component", application), ("runtime_component", runtime)):
+                with self.subTest(kind=kind, arch=arch, libc=libc, loader=loader):
+                    if kind == "application_component":
+                        check = lambda: validate_application_component(value)
+                    else:
+                        check = lambda: validate_composable_component(value, kind)
+                    if accepted:
+                        check()
+                    else:
+                        with self.assertRaisesRegex(ValueError, "musl loader must be"):
+                            check()
 
     def test_closed_manifest_and_policy_inventory(self):
         for mutate in (

@@ -206,7 +206,7 @@ def validate_application_component(component):
     if type(component["guest_arch"]) is not str or component["guest_arch"] not in ("x86_64", "aarch64"):
         raise ValueError("application_component guest_arch must be x86_64 or aarch64")
     validate_component_archive(component["archive"])
-    validate_component_requirements(component["requirements"])
+    validate_component_requirements(component["requirements"], component["guest_arch"])
 
     entrypoints = component["entrypoints"]
     if not isinstance(entrypoints, list) or len(entrypoints) > 16:
@@ -235,7 +235,7 @@ def validate_component_archive(archive):
         raise ValueError("component archive_size must be positive and at most 2 GiB")
 
 
-def validate_component_requirements(requirements):
+def validate_component_requirements(requirements, guest_arch):
     if not isinstance(requirements, dict) or set(requirements) not in (
         {"filesystem_abi", "libc", "minimum_kernel", "required_capabilities"},
         {"filesystem_abi", "libc", "loader", "minimum_kernel", "required_capabilities"},
@@ -251,6 +251,8 @@ def validate_component_requirements(requirements):
         libc != "static" and (not isinstance(loader, str) or not _absolute_path(loader))
     ):
         raise ValueError("loader must be absent for static or a canonical absolute path for dynamic libc")
+    if libc == "musl" and loader != f"/lib/ld-musl-{guest_arch}.so.1":
+        raise ValueError(f"musl loader must be /lib/ld-musl-{guest_arch}.so.1 for guest_arch {guest_arch}")
     kernel = requirements["minimum_kernel"]
     if not isinstance(kernel, str) or not KERNEL_VERSION.fullmatch(kernel):
         raise ValueError("minimum_kernel must be major.minor.patch")
@@ -280,7 +282,7 @@ def validate_composable_component(component, kind, reference=None):
     if type(component["guest_arch"]) is not str or component["guest_arch"] not in ("x86_64", "aarch64"):
         raise ValueError(f"{kind} guest_arch must be x86_64 or aarch64")
     validate_component_archive(component["archive"])
-    validate_component_requirements(component["requirements"])
+    validate_component_requirements(component["requirements"], component["guest_arch"])
     pins = component["dependencies"]
     if not isinstance(pins, list) or len(pins) > MAX_DEPENDENCIES:
         raise ValueError(f"{kind} dependencies must be a list of at most {MAX_DEPENDENCIES} pins")
