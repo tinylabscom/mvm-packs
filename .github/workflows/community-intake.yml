@@ -29,10 +29,20 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     steps:
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        id: review-token
+        with:
+          app-id: ${{ vars.PACK_REVIEW_APP_ID }}
+          private-key: ${{ secrets.PACK_REVIEW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: mvm-packs
+          permission-contents: write
+          permission-pull-requests: write
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          token: ${{ steps.review-token.outputs.token }}
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
       - name: Install cosign v3
         env:
@@ -59,7 +69,7 @@ jobs:
         run: python3 scripts/validate-packs.py
       - name: Propose the community index for review
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.review-token.outputs.token }}
         run: |
           set -euo pipefail
           git add -A community/

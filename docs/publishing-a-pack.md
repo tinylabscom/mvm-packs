@@ -25,9 +25,9 @@ policy-only version can be built or validated.
    because it is submitted.
 5. After the source PR merges, the main-branch publisher builds and signs the
    descriptor, reads it back, and proposes the versioned files and `index.json`
-   in a separate review PR. Approve the PR's workflows to run, verify its
-   signatures and current revocations, then review and queue it. The site
-   rebuilds the catalog and package pages only after that PR lands.
+   in a separate review PR through the repository-scoped publishing App.
+   Verify its signatures and current revocations, then review and queue it.
+   The site rebuilds the catalog and package pages only after that PR lands.
 
 An application source contains only `pack.toml`; payload files cannot sit
 beside it. To update a pack, edit `pack.toml` and bump the version.

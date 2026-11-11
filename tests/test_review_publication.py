@@ -91,6 +91,11 @@ class ReviewPublicationTests(unittest.TestCase):
             source = (WORKFLOWS / name).read_text()
             self.assertIn("scripts/open-review-pr.sh", source)
             self.assertNotIn("git push origin HEAD:main", source)
+            self.assertIn("actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349",
+                          source)
+            self.assertIn("GH_TOKEN: ${{ steps.review-token.outputs.token }}", source)
+            self.assertIn("permission-contents: write", source)
+            self.assertIn("permission-pull-requests: write", source)
         validation = (WORKFLOWS / "validate.yml").read_text()
         self.assertIn("  merge_group:", validation)
         self.assertIn("github.event_name == 'pull_request'", validation)
