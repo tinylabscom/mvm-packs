@@ -381,7 +381,7 @@ def inspect_component_payload(path, kind, max_bytes=2 * 1024**3):
             for member in archive:
                 name = member.name[2:] if member.name.startswith("./") else member.name
                 name = name.rstrip("/")
-                if name == "" and member.isdir():
+                if name in ("", ".") and member.isdir():
                     continue  # the root directory entry
                 parts = name.split("/")
                 if name.startswith("/") or any(part in ("", ".", "..") for part in parts):

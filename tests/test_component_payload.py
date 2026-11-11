@@ -111,6 +111,17 @@ class ComponentPayloadTests(unittest.TestCase):
             with self.subTest(members=[m[0] for m in members]), self.assertRaises(ValueError):
                 self.check(reg("a/keep"), *members, kind=kind)
 
+    def test_root_directory_entry_is_accepted(self):
+        dirs = lambda n: (n, tarfile.DIRTYPE, "", 0o755)
+        for root in (".", "./"):
+            self.assertEqual(self.check(dirs(root), reg("a")), {"files": 1, "bytes": 1})
+        # conventional `tar -C dir .` layout
+        self.assertEqual(self.check(dirs("."), dirs("./a"), reg("./a/f", b"ab")), {"files": 1, "bytes": 2})
+
+    def test_file_named_dot_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.check(reg("."), reg("a"))
+
     def test_stale_link_targets_are_refused(self):
         # p11 and p12: a later link turns an ancestor of an earlier target into a symlink
         with self.assertRaisesRegex(ValueError, "escapes"):
