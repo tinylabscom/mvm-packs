@@ -26,5 +26,26 @@
    "shares": {"mount": [{"host": "/w", "guest": "/w", "writable": false}]}, "resources": {}}},
  {"name": "two_sources_for_one_guest_path_are_refused",
   "layers": [{"shares": {"mount": [{"host": "/work", "guest": "/work"}]}}, {"shares": {"mount": [{"host": "/elsewhere", "guest": "/work"}]}}],
-  "error": "shares.mount.guest"}
+  "error": "shares.mount.guest"},
+ {"name": "claude_plus_user_both_apply",
+  "layers": [
+   {"secrets": {"bind": ["ANTHROPIC_API_KEY"]}, "tools": {"allow": ["bash"]}},
+   {"secrets": {"bind": ["GH_TOKEN"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["git"]}}],
+  "expect": {"secrets": {"bind": ["ANTHROPIC_API_KEY", "GH_TOKEN"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["bash", "git"], "ask": []}, "shares": {"mount": []}, "resources": {}}},
+ {"name": "user_cannot_loosen_a_claude_deny",
+  "layers": [
+   {"secrets": {"bind": ["ANTHROPIC_API_KEY"]}, "tools": {"deny": ["curl"]}, "env": {"deny": ["AWS_SECRET_ACCESS_KEY"]}},
+   {"tools": {"allow": ["curl", "git"]}, "env": {"allow": ["AWS_SECRET_ACCESS_KEY", "MODE"]}}],
+  "expect": {"secrets": {"bind": ["ANTHROPIC_API_KEY"]}, "env": {"allow": ["MODE"]}, "tools": {"allow": ["git"], "ask": []}, "shares": {"mount": []}, "resources": {}}},
+ {"name": "user_cannot_raise_a_claude_resource_ceiling",
+  "layers": [
+   {"resources": {"max_memory": "1G", "wall_clock_secs": 300, "max_cpus": 2}},
+   {"resources": {"max_memory": "8G", "wall_clock_secs": 3600, "max_cpus": 16}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": [], "ask": []}, "shares": {"mount": []}, "resources": {"max_memory": "1G", "wall_clock_secs": 300, "max_cpus": 2}}},
+ {"name": "share_writable_only_if_all_layers_allow",
+  "layers": [
+   {"shares": {"mount": [{"host": "/work", "guest": "/work", "writable": true}, {"host": "/notes", "guest": "/notes", "writable": true}]}},
+   {"shares": {"mount": [{"host": "/work", "guest": "/work", "writable": true}, {"host": "/notes", "guest": "/notes"}]}}],
+  "expect": {"secrets": {"bind": []}, "env": {"allow": []}, "tools": {"allow": [], "ask": []},
+   "shares": {"mount": [{"host": "/work", "guest": "/work", "writable": true}, {"host": "/notes", "guest": "/notes", "writable": false}]}, "resources": {}}}
 ]

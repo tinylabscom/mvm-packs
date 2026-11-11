@@ -1,15 +1,17 @@
 # ADR 005: Runtime layers
 
-Status: proposed. Registry-side descriptor shape only; the layer archive format
-and its gate belong to the `mvm` bundle work and are not implemented, so
-nothing described here can be published yet.
+Status: proposed. Registry-side descriptor parser exists; compatible
+selectable-base consumer, admission and protected publication are not released,
+so nothing described here can be published yet.
 
 ## Context
 
 `runtime/*` packs (Python, Node, ...) are reusable, version-pinned software and
-policy that compose with an application into one VM with one entrypoint. The
-application descriptor and `.mvmpkg` describe a complete bootable workload (a
-kernel, a rootfs, an entrypoint), so they cannot double as a layer.
+policy that compose with a portable application and a separately selected
+bootable base into one VM. The existing schema-2 application descriptor and
+`.mvmpkg` describe a complete bootable workload (kernel and rootfs); they
+retain that meaning. A new versioned application component (ADR 004)
+contributes application bytes without either boot asset.
 
 ## Decision
 
@@ -28,9 +30,11 @@ Follows the closed wire shape in the `mvm` contract (`specs/contracts/composable
   layers. A digest pin makes a cycle impossible; self and duplicate dependencies are refused.
 - **No second signer:** the Sigstore-signed registry manifest binds the layer archive by digest
   and size. The layer has no key of its own.
-- **Application descriptor unchanged:** the final self-contained `.mvmpkg` records the input
-  runtime manifest pins in its signed provenance, so a later layer revocation can refuse
-  derived bundles. The registry application descriptor gains no field.
+- **Application descriptor versioned:** existing schema-2 boot-bundle descriptors
+  remain unchanged. A new component kind/schema binds application bytes and
+  compatibility requirements without boot assets. A separately protected,
+  self-contained production `.mvmpkg` records the ordered component pins and
+  selected base in signed provenance so later revocations can refuse derived bundles.
 - **Policy:** composed by field with the existing rules: allows union, denies win, ceilings
   take the minimum, secret destinations only narrow, then intersected with host grants at
   admission (`tests/policy-vectors/`). A layer never grants itself access.
@@ -49,11 +53,12 @@ layers' signatures do not stand in for it.
    The external archive has no Ed25519 signature or `key_id`. Authenticate the
    publisher and descriptor, then verify the exact archive bytes before unpacking.
    A layer can be revoked by its manifest identity.
-2. A separately published, complete application `.mvmpkg` retains its own
-   independently trusted bundle signature and registry pin. Its signed
-   provenance must bind the ordered layer manifest digests, effective policy
-   digest and entrypoint. The proposed in-file keyless signature in ADR 004 is
-   not yet implemented.
+2. Existing published complete application `.mvmpkg` files retain their own
+   independently trusted bundle signatures and registry pins. A future
+   portable application component uses its versioned authenticated descriptor
+   and digest-bound payload, not the signature of a different boot bundle.
+   Protected production export signs the complete selected boot closure and
+   binds ordered layer manifests, base evidence, policy and actual entrypoint.
 3. A locally assembled ext4/verity result is not a publisher-signed pack. Its
    measured output and pinned inputs belong in a device-scoped authenticated
    receipt/plan (ADR 006), not in an invented publisher signature or registry
@@ -68,15 +73,18 @@ release.
 
 ## Entrypoint
 
-Only an application owns the entrypoint; layers cannot set one. When several
-applications are stacked, the last in the locked order owns the entrypoint, earlier
-applications keep theirs as named non-default commands, and provenance records the
-owner and the shadowed entrypoints. Policy still composes across all of them.
+Layers cannot set an entrypoint. An explicit runtime command override takes
+precedence over a user-defined workload/config command, which takes precedence
+over the last application in explicit order that declares an entrypoint.
+Earlier applications keep theirs as named non-default commands; no service
+starts unless explicitly requested. The actual selected command is admitted
+against the security profile and host grants (even in production) and bound
+to the signed plan/audit. Policy still composes across every component.
 
 ## Status of the code
 
 `scripts/application_manifest.py` validates the closed `runtime_layer` shape, its archive pin and its
 policy-file inventory and can render the manifest bytes; `build-packs.py` refuses to publish a runtime
 layer until the `mvm` consumer dispatch, installer and our gate exist. `validate-packs.py`
-still accepts only schema versions 1 and 2, so a published layer fails closed. The legacy
+accepts schema versions 1 to 4 but has no schema for a runtime layer, and signing refuses one, so a published layer fails closed. The legacy
 rule holds: every pack ships a binary.

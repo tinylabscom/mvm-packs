@@ -6,7 +6,9 @@ that key. Consumers must independently enforce bundle trust and revocation.
 
 import json
 import ipaddress
+import posixpath
 import re
+import tarfile
 from urllib.parse import unquote, urlsplit
 
 
@@ -100,6 +102,17 @@ MAX_DEPENDENCIES = 16
 MAX_LAYER_TAR = 2 * 1024**3
 MAX_APPLICATION_ARCHIVE = 2 * 1024**3
 POLICY_FILES = ("pack/group.toml", "pack/profile.toml")
+COMPONENT_REFERENCE = re.compile(
+    r"[a-z0-9][a-z0-9_-]*/[a-z0-9][a-z0-9_-]*@"
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z"
+)
+COMPONENT_NAME = re.compile(r"[a-z][a-z0-9_-]*\Z")
+KERNEL_VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+MAX_COMPONENT_BYTES = 2 * 1024**3
+COMPOSABLE_REFERENCE = re.compile(
+    r"(?:runtime|tool)/[a-z0-9][a-z0-9_-]*@"
+    r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z"
+)
 
 
 def validate_runtime_layer(layer, reference=None):
@@ -182,6 +195,156 @@ def validate_application(application):
         raise ValueError("bundle key_id must be 32 lowercase hex characters")
 
 
+def validate_application_component(component):
+    """Closed, non-bootable schema-1 application input; declarations do not grant capabilities."""
+    if not isinstance(component, dict) or set(component) != {
+        "schema_version", "guest_arch", "requirements", "archive", "entrypoints"
+    }:
+        raise ValueError("application_component has missing or unknown fields")
+    if type(component["schema_version"]) is not int or component["schema_version"] != 1:
+        raise ValueError("application_component schema_version must be integer 1")
+    if type(component["guest_arch"]) is not str or component["guest_arch"] not in ("x86_64", "aarch64"):
+        raise ValueError("application_component guest_arch must be x86_64 or aarch64")
+    validate_component_archive(component["archive"])
+    validate_component_requirements(component["requirements"], component["guest_arch"])
+
+    entrypoints = component["entrypoints"]
+    if not isinstance(entrypoints, list) or len(entrypoints) > 16:
+        raise ValueError("entrypoints must be a list of at most 16 named commands")
+    names = set()
+    for entry in entrypoints:
+        if not isinstance(entry, dict) or set(entry) != {"name", "argv"}:
+            raise ValueError("entrypoint must contain exactly name and argv")
+        name, argv = entry["name"], entry["argv"]
+        if not isinstance(name, str) or not COMPONENT_NAME.fullmatch(name) or name in names:
+            raise ValueError("entrypoint name must be unique and canonical")
+        names.add(name)
+        if (not isinstance(argv, list) or not 0 < len(argv) <= 64
+                or any(not isinstance(arg, str) or not arg or len(arg) > 4096 or "\x00" in arg for arg in argv)
+                or not _absolute_path(argv[0])):
+            raise ValueError("entrypoint argv must start with a canonical absolute executable")
+
+
+def validate_component_archive(archive):
+    if not isinstance(archive, dict) or set(archive) != {"source", "archive_sha256", "archive_size"}:
+        raise ValueError("component archive has missing or unknown fields")
+    validate_source(archive["source"])
+    if not isinstance(archive["archive_sha256"], str) or not HEX64.fullmatch(archive["archive_sha256"]):
+        raise ValueError("component archive_sha256 must be lowercase SHA-256")
+    if type(archive["archive_size"]) is not int or not 0 < archive["archive_size"] <= MAX_COMPONENT_BYTES:
+        raise ValueError("component archive_size must be positive and at most 2 GiB")
+
+
+def validate_component_requirements(requirements, guest_arch):
+    if not isinstance(requirements, dict) or set(requirements) not in (
+        {"filesystem_abi", "libc", "minimum_kernel", "required_capabilities"},
+        {"filesystem_abi", "libc", "loader", "minimum_kernel", "required_capabilities"},
+    ):
+        raise ValueError("component requirements have missing or unknown fields")
+    if type(requirements["filesystem_abi"]) is not int or requirements["filesystem_abi"] != 1:
+        raise ValueError("filesystem_abi must be integer 1")
+    libc = requirements["libc"]
+    loader = requirements.get("loader")
+    if type(libc) is not str or libc not in ("static", "musl", "glibc"):
+        raise ValueError("libc must be static, musl or glibc")
+    if (libc == "static" and "loader" in requirements) or (
+        libc != "static" and (not isinstance(loader, str) or not _absolute_path(loader))
+    ):
+        raise ValueError("loader must be absent for static or a canonical absolute path for dynamic libc")
+    if libc == "musl" and loader != f"/lib/ld-musl-{guest_arch}.so.1":
+        raise ValueError(f"musl loader must be /lib/ld-musl-{guest_arch}.so.1 for guest_arch {guest_arch}")
+    kernel = requirements["minimum_kernel"]
+    if not isinstance(kernel, str) or not KERNEL_VERSION.fullmatch(kernel):
+        raise ValueError("minimum_kernel must be major.minor.patch")
+    capabilities = requirements["required_capabilities"]
+    if (not isinstance(capabilities, list) or len(capabilities) > 16
+            or any(not isinstance(name, str) or not COMPONENT_NAME.fullmatch(name) for name in capabilities)
+            or len(set(capabilities)) != len(capabilities)):
+        raise ValueError("required_capabilities must be at most 16 distinct canonical names")
+
+
+def _absolute_path(path):
+    return (path.startswith("/") and path != "/" and
+            all(part not in ("", ".", "..") for part in path[1:].split("/")) and
+            not any(ord(char) < 32 or ord(char) == 127 or char == "\\" for char in path))
+
+
+def validate_composable_component(component, kind, reference=None):
+    """Closed schema-1 runtime/tool payload; requirements are not grants."""
+    if kind not in ("runtime_component", "tool_component"):
+        raise ValueError("unsupported composable component kind")
+    if not isinstance(component, dict) or set(component) != {
+        "schema_version", "guest_arch", "requirements", "dependencies", "archive"
+    }:
+        raise ValueError(f"{kind} has missing or unknown fields")
+    if type(component["schema_version"]) is not int or component["schema_version"] != 1:
+        raise ValueError(f"{kind} schema_version must be integer 1")
+    if type(component["guest_arch"]) is not str or component["guest_arch"] not in ("x86_64", "aarch64"):
+        raise ValueError(f"{kind} guest_arch must be x86_64 or aarch64")
+    validate_component_archive(component["archive"])
+    validate_component_requirements(component["requirements"], component["guest_arch"])
+    pins = component["dependencies"]
+    if not isinstance(pins, list) or len(pins) > MAX_DEPENDENCIES:
+        raise ValueError(f"{kind} dependencies must be a list of at most {MAX_DEPENDENCIES} pins")
+    seen = set()
+    for pin in pins:
+        if not isinstance(pin, dict) or set(pin) != {"reference", "manifest_sha256"}:
+            raise ValueError("each dependency must contain exactly reference and manifest_sha256")
+        dependency = pin["reference"]
+        if not isinstance(dependency, str) or not COMPOSABLE_REFERENCE.fullmatch(dependency):
+            raise ValueError("dependency reference must be exact runtime/name@version or tool/name@version")
+        if not isinstance(pin["manifest_sha256"], str) or not HEX64.fullmatch(pin["manifest_sha256"]):
+            raise ValueError("dependency manifest_sha256 must be 64 lowercase hex characters")
+        name = dependency.split("@", 1)[0]
+        if name in seen or (isinstance(reference, str) and name == reference.split("@", 1)[0]):
+            raise ValueError(f"duplicate or self dependency on {name}")
+        seen.add(name)
+
+
+def composable_component_manifest_bytes(reference, description, kind, component, files):
+    if kind not in ("runtime_component", "tool_component"):
+        raise ValueError("unsupported composable component kind")
+    if not isinstance(reference, str) or not COMPOSABLE_REFERENCE.fullmatch(reference) or (
+        reference.split("/", 1)[0] != kind.removesuffix("_component")
+    ):
+        raise ValueError(f"{kind} reference must be exact {kind.removesuffix('_component')}/name@major.minor.patch")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"{kind} description must be nonempty")
+    validate_composable_component(component, kind, reference)
+    validate_layer_files(files)
+    encoded = (json.dumps({
+        "schema_version": 4,
+        "kind": kind,
+        "reference": reference,
+        "description": description,
+        kind: component,
+        "files": sorted(files, key=lambda entry: entry["path"]),
+    }, indent=2, sort_keys=True) + "\n").encode()
+    if len(encoded) > 1 << 20:
+        raise ValueError(f"{kind} descriptor exceeds 1 MiB")
+    return encoded
+
+
+def application_component_manifest_bytes(reference, description, component, files):
+    if not isinstance(reference, str) or not COMPONENT_REFERENCE.fullmatch(reference):
+        raise ValueError("application component reference must be exact ns/name@major.minor.patch")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError("application component description must be nonempty")
+    validate_application_component(component)
+    validate_layer_files(files)
+    encoded = (json.dumps({
+        "schema_version": 3,
+        "kind": "application_component",
+        "reference": reference,
+        "description": description,
+        "application_component": component,
+        "files": sorted(files, key=lambda entry: entry["path"]),
+    }, indent=2, sort_keys=True) + "\n").encode()
+    if len(encoded) > 1 << 20:
+        raise ValueError("application component descriptor exceeds 1 MiB")
+    return encoded
+
+
 def runtime_layer_manifest_bytes(reference, description, layer, files):
     if not RUNTIME_REFERENCE.fullmatch(reference):
         raise ValueError("a runtime layer reference must be an exact runtime/name@version")
@@ -206,3 +369,69 @@ def manifest_bytes(reference, description, application):
         "description": description,
         "application": application,
     }, indent=2, sort_keys=True) + "\n").encode()
+
+
+def inspect_component_payload(path, kind, max_bytes=2 * 1024**3):
+    """Read a component tar without extracting; return {"files", "bytes"} or raise ValueError."""
+    if kind not in ("application_component", "runtime_component", "tool_component"):
+        raise ValueError("unsupported component kind")
+    files = total = 0
+    links = {}  # normalised symlink name -> link text, resolved only after every member is known
+    names = set()
+    try:
+        with tarfile.open(path, "r:") as archive:
+            for member in archive:
+                name = member.name[2:] if member.name.startswith("./") else member.name
+                name = name.rstrip("/")
+                if name in ("", ".") and member.isdir():
+                    continue  # the root directory entry
+                parts = name.split("/")
+                if name.startswith("/") or any(part in ("", ".", "..") for part in parts):
+                    raise ValueError(f"{member.name}: absolute, parent-relative or non-canonical path")
+                if kind == "application_component" and not (name.startswith("srv/app/") or (member.isdir() and name == "srv/app")):
+                    raise ValueError(f"{name}: application payload must live under srv/app/")
+                if member.mode & 0o6000:
+                    raise ValueError(f"{name}: setuid/setgid bit")
+                if name in names:
+                    raise ValueError(f"{name}: duplicate member name")
+                names.add(name)
+                if member.issym():
+                    if member.linkname.startswith("/"):
+                        raise ValueError(f"{name}: symlink escapes the payload root")
+                    links[name] = member.linkname
+                elif member.isfile():
+                    files += 1
+                    total += member.size
+                    if total > max_bytes:
+                        raise ValueError("payload exceeds the size cap")
+                elif not member.isdir():
+                    raise ValueError(f"{name}: only files, directories and symlinks are allowed")
+        for name in names:
+            parts = name.split("/")
+            if any("/".join(parts[:i]) in links for i in range(1, len(parts))):
+                raise ValueError(f"{name}: written through a symlink")
+        for name, text in links.items():  # realpath-style walk against the final member set
+            stack, pending, hops = [], (name.split("/")[:-1] + text.split("/"))[::-1], 0
+            while pending:
+                part = pending.pop()
+                if part in ("", "."):
+                    continue
+                if part == "..":
+                    if not stack:
+                        raise ValueError(f"{name}: symlink escapes the payload root")
+                    stack.pop()
+                    continue
+                stack.append(part)
+                if "/".join(stack) in links:
+                    hops += 1
+                    if hops > 40:
+                        raise ValueError(f"{name}: symlink loop")
+                    pending.extend(links["/".join(stack)].split("/")[::-1])
+                    stack.pop()
+            if kind == "application_component" and stack[:2] != ["srv", "app"]:
+                raise ValueError(f"{name}: symlink leaves srv/app/")
+    except tarfile.TarError as error:
+        raise ValueError(f"unreadable tar: {error}") from error
+    if files == 0 or total == 0:
+        raise ValueError("payload has no file content")
+    return {"files": files, "bytes": total}

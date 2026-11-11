@@ -25,6 +25,7 @@ policy.
 """
 
 import argparse
+import contextlib
 import hashlib
 import ipaddress
 import json
@@ -43,10 +44,14 @@ from urllib.parse import urlsplit
 from pathlib import Path
 
 import ed25519
+from component_authorizations import component_authorized
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import unique_object, validate_application, validate_runtime_layer
+from application_manifest import (
+    inspect_component_payload, unique_object, validate_application, validate_component_archive, validate_application_component,
+    validate_composable_component, validate_runtime_layer,
+)
 from publisher_identity import (
     CURRENT_IDENTITY,
     PUBLISHER_ISSUER,
@@ -55,6 +60,7 @@ from publisher_identity import (
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "pack-sources"
 PACKS = ROOT / "packs"
+COMPONENT_AUTHORIZATIONS = ROOT / "component-authorizations.toml"
 DETAILS = ROOT / "pack-details"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
@@ -91,8 +97,31 @@ def parse_pack_toml(path):
     # neutralise newlines or links.
     if any(not character.isprintable() for character in description) or "](" in description:
         fail(f"{path}: description must be one printable line without Markdown links")
-    if set(data) - {"version", "description", "application", "requirements", "runtime_layer"}:
+    if set(data) - {"version", "description", "application", "application_component",
+                     "requirements", "runtime_layer", "runtime_component", "tool_component"}:
         fail(f"{path}: unknown pack metadata fields")
+    components = {"runtime_component", "tool_component"} & set(data)
+    if components:
+        if len(components) != 1 or set(data) - {"version", "description"} - components:
+            fail(f"{path}: runtime/tool component cannot declare another pack format or rootfs requirements")
+        kind = components.pop()
+        if "+" in version or "-" in version:
+            fail(f"{path}: {kind} version must be canonical major.minor.patch")
+        if path.parent.parent.name != kind.removesuffix("_component"):
+            fail(f"{path}: {kind} source must be in the matching namespace")
+        try:
+            validate_composable_component(data[kind], kind, f"{path.parent.parent.name}/{path.parent.name}@{version}")
+        except ValueError as error:
+            fail(f"{path}: {error}")
+    if "application_component" in data:
+        if "application" in data or "runtime_layer" in data or "requirements" in data:
+            fail(f"{path}: application component cannot also declare legacy application, runtime layer or rootfs requirements")
+        if "+" in version:
+            fail(f"{path}: application component version must be canonical semver without build metadata")
+        try:
+            validate_application_component(data["application_component"])
+        except ValueError as error:
+            fail(f"{path}: {error}")
     if "runtime_layer" in data:
         if "application" in data or "requirements" in data:
             fail(f"{path}: a runtime layer cannot also declare application or requirements")
@@ -117,7 +146,9 @@ def parse_pack_toml(path):
         except ValueError as error:
             fail(f"{path}: {error}")
     return {"version": version, "description": description, "application": application,
-            "requirements": requirements, "runtime_layer": data.get("runtime_layer")}
+            "application_component": data.get("application_component"),
+            "requirements": requirements, "runtime_layer": data.get("runtime_layer"),
+            "runtime_component": data.get("runtime_component"), "tool_component": data.get("tool_component")}
 
 
 def sha256_of(path):
@@ -431,7 +462,16 @@ def verify_archive(application, requirements=None):
     if cached is not None:
         print(f"archive cache: using {cached.name} (re-verified)")
         return inspect_bundle(str(cached), application, public_key, requirements)
-    digest, size = hashlib.sha256(), 0
+    with _download_pinned(source, bundle["archive_sha256"], bundle["archive_size"]) as spool:
+        details = inspect_bundle(spool.name, application, public_key, requirements)
+        _store_in_cache(bundle, spool.name)
+        return details
+
+
+@contextlib.contextmanager
+def _download_pinned(source, sha256, size):
+    """Yield a flushed temp file holding the bounded download once size and SHA-256 match."""
+    digest, received = hashlib.sha256(), 0
     deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
@@ -439,21 +479,37 @@ def verify_archive(application, requirements=None):
                 while chunk := response.read(1 << 20):
                     if time.monotonic() > deadline:
                         fail(f"{source}: archive download exceeded {DOWNLOAD_DEADLINE_SECONDS} seconds")
-                    size += len(chunk)
-                    if size > bundle["archive_size"]:
+                    received += len(chunk)
+                    if received > size:
                         break
                     digest.update(chunk)
                     spool.write(chunk)
         except OSError as error:
             fail(f"{source}: cannot read the archive back: {error}")
-        if size != bundle["archive_size"]:
+        if received != size:
             fail(f"{source}: archive size does not match the descriptor")
-        if digest.hexdigest() != bundle["archive_sha256"]:
+        if digest.hexdigest() != sha256:
             fail(f"{source}: archive SHA-256 does not match the descriptor")
         spool.flush()
-        details = inspect_bundle(spool.name, application, public_key, requirements)
-        _store_in_cache(bundle, spool.name)
-        return details
+        yield spool
+
+
+def verify_component_archive(component, kind):
+    """Read a component archive back and refuse unless its payload passes inspect_component_payload."""
+    archive = component["archive"]
+    try:
+        validate_component_archive(archive)
+    except ValueError as error:
+        fail(f"component archive: {error}")
+    source = archive["source"]
+    if not source.startswith("https://"):
+        fail(f"{source}: only HTTPS archive sources can be read back before signing")
+    require_public_host(source)
+    with _download_pinned(source, archive["archive_sha256"], archive["archive_size"]) as spool:
+        try:
+            return inspect_component_payload(spool.name, kind)
+        except ValueError as error:
+            fail(f"{source}: {error}")
 
 
 def sign(manifest_path, bundle_path):
@@ -473,6 +529,22 @@ def build_one(source, check_only=False):
     reference = f"{namespace}/{name}@{meta['version']}"
     if meta["runtime_layer"] is not None:
         fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
+    kind = next((k for k in ("application_component", "runtime_component", "tool_component") if meta[k] is not None), None)
+    if kind is not None:
+        component = meta[kind]
+        if (PACKS / namespace / name / meta["version"]).exists():
+            fail(f"{reference}: version already published; bump the version in pack.toml")
+        try:
+            authorized = component_authorized(reference, component["archive"]["archive_sha256"], COMPONENT_AUTHORIZATIONS)
+        except ValueError as error:
+            fail(f"{reference}: {error}")
+        if check_only:
+            print(f"{reference}: component source valid" + ("" if authorized else "; not authorized for signing"))
+            return
+        if not authorized:
+            fail(f"{reference}: component not authorized by the owner")
+        verify_component_archive(component, kind)
+        fail(f"{reference}: component signing is not wired up yet; nothing is written to packs/ until the publication gate lifts")
     application = meta["application"]
     payload = source / "pack"
     if application is not None:

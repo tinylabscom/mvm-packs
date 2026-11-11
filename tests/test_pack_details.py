@@ -59,7 +59,7 @@ class ValidateTests(unittest.TestCase):
         text = "".join(pack_details.render(evil))
         self.assertNotIn("`</td>", text)
         self.assertNotIn("a`b", text)
-        self.assertEqual(pack_details.code("x" * 500)[1:-1], "x" * 200)
+        self.assertEqual(pack_details.code("x" * 500)[1:-1], "x" * 200 + "...(+300 chars)")
         self.assertNotIn("\n", pack_details.code("a\nb\x00c"))
 
 
