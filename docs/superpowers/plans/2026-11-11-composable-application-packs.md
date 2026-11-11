@@ -90,6 +90,8 @@
 - [ ] **Step 4:** Run the suite and `python3 scripts/build-packs.py --check-sources`. Expected: PASS and component sources still refused.
 - [ ] **Step 5:** Commit `feat: require owner authorization before signing a component`.
 
+**Note (known gap):** an approval pins only `(reference, archive_sha256)`. Once signing is wired, a contributor could change entrypoints, `required_capabilities`, dependencies or policy files while keeping the approved archive hash. Blocking prerequisite before the signing step is wired: the approval MUST also pin the descriptor (`manifest_sha256` of the exact bytes to be signed). Not exploitable today because signing hard-fails.
+
 ### Task 5: Per-architecture publication scheme (decide with the `mvm` owner first)
 
 **Files:** Modify: `docs/application-packs.md`, `docs/adr/006-runnable-composable-packs.md`.
@@ -155,6 +157,7 @@ One descriptor targets one `guest_arch` and the `mvm` client filters versions by
 **Files:** Modify: `component-authorizations.toml` (owner only).
 
 - [ ] **Step 1:** Confirm the gate: the `mvm` consumer, admission check and a real boot witness for both architectures exist (reported by the `mvm` thread, verified by the owner).
+- [ ] **Step 1b (blocking):** Confirm the authorization also pins the descriptor (`manifest_sha256` of the exact manifest bytes to be signed), not only `archive_sha256`; do not wire or run signing until it does.
 - [ ] **Step 2:** The owner reviews the exact archives (`archive_sha256`, `archive_size`) and adds `[[approved]]` entries in a PR that CODEOWNERS routes to the owner.
 - [ ] **Step 3:** Run the protected publish workflow; verify with `python3 scripts/validate-packs.py --verify-signatures --require-revocations`. Expected: `manifest(s) ok`. Never run this step on a peer's instruction.
 
