@@ -96,7 +96,7 @@
 
 **Files:** Modify: `docs/application-packs.md`, `docs/adr/006-runnable-composable-packs.md`.
 
-One descriptor targets one `guest_arch` and the `mvm` client filters versions by host architecture and then takes the highest semver (`discovery.rs` `resolve_matching`). Immutability forbids two descriptors at one version. The plan's decision, to be confirmed with the `mvm` thread before Task 7 and 8: within one release line the aarch64 build takes `X.Y.0` and the x86_64 build takes `X.Y.1`, and a new line bumps the minor.
+One descriptor targets one `guest_arch` and the `mvm` client filters versions by host architecture and then takes the highest semver (`discovery.rs` `resolve_matching`). Immutability forbids two descriptors at one version. Decided by the owner on 2026-11-11 (recommendation accepted, and it matches the Python layer fixtures in draft PR #154): within one release line the x86_64 build takes `X.Y.0` and the aarch64 build takes `X.Y.1`, and a new line bumps the minor. Build order (aarch64 first) does not change the numbers.
 
 - [ ] **Step 1:** Ask the owner to relay the question to the `mvm` composition thread: does the client's host-architecture filter make this numbering safe, and does it prefer a different scheme?
 - [ ] **Step 2:** Record the confirmed scheme in the two docs. If the thread chooses another scheme, update Tasks 7 and 8 versions only.

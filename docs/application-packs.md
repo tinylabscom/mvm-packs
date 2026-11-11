@@ -111,15 +111,19 @@ this under "Recorded at signing", labelled as **not signed registry metadata**. 
 refuses a record that does not match the signed descriptor. A failure to write the record never
 blocks signing, and a pull re-verifies the archive itself.
 
-## Per-architecture versions (provisional)
+## Per-architecture versions
 
-**Provisional; not yet confirmed with the `mvm` owner.** One descriptor targets one
+**Decided by the owner on 2026-11-11 (recommendation accepted).** One descriptor targets one
 `guest_arch`, a published version is immutable so two descriptors cannot share a version,
 and the `mvm` client filters versions by host architecture and then takes the highest
-semver (`resolve_matching` in `discovery.rs` in the `mvm` repo). The proposed scheme: within
-one release line the aarch64 build takes `X.Y.0` and the x86_64 build takes `X.Y.1`; a new
-release line bumps the minor. The scheme starts at a NEW release line, not at the published `agent/claude` 2.0.x (2.0.1 is already an aarch64 build). This needs confirmation by the `mvm` owner. If they choose a
-different scheme, only the version numbers in the pack sources and these docs change.
+semver (`resolve_matching` in `discovery.rs` in the `mvm` repo; the strict architecture
+resolver is `mvm#5298`). The scheme: within one release line the x86_64 build takes `X.Y.0`
+and the aarch64 build takes `X.Y.1`; a new release line bumps the minor. This is the
+numbering the unpublished two-architecture Python layer fixtures already use (x86_64 `1.1.0`,
+aarch64 `1.1.1`, draft PR #154), so every pack follows one convention. Which architecture is
+built first does not change the numbers. The scheme starts at a NEW release line, not at the
+published `agent/claude` 2.0.x (2.0.1 is already an aarch64 build). Only the version numbers
+in the pack sources and these docs depend on it.
 
 ## Traps we have already hit
 
