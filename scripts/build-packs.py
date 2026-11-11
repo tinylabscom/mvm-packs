@@ -48,7 +48,7 @@ import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
 from application_manifest import (
-    inspect_component_payload, unique_object, validate_application, validate_application_component,
+    inspect_component_payload, unique_object, validate_application, validate_component_archive, validate_application_component,
     validate_composable_component, validate_runtime_layer,
 )
 from publisher_identity import (
@@ -495,6 +495,10 @@ def _download_pinned(source, sha256, size):
 def verify_component_archive(component, kind):
     """Read a component archive back and refuse unless its payload passes inspect_component_payload."""
     archive = component["archive"]
+    try:
+        validate_component_archive(archive)
+    except ValueError as error:
+        fail(f"component archive: {error}")
     source = archive["source"]
     if not source.startswith("https://"):
         fail(f"{source}: only HTTPS archive sources can be read back before signing")

@@ -374,26 +374,61 @@ def inspect_component_payload(path, kind, max_bytes=2 * 1024**3):
     if kind not in ("application_component", "runtime_component", "tool_component"):
         raise ValueError("unsupported component kind")
     files = total = 0
+    links, names, dirs = {}, set(), set()  # links: symlink name -> resolved target parts
+
+    def resolve(base, target):
+        stack, pending = list(base), [p for p in target.split("/")][::-1]
+        for _ in range(1000):
+            if not pending:
+                return stack
+            part = pending.pop()
+            if part in ("", "."):
+                continue
+            if part == "..":
+                if not stack:
+                    return None
+                stack.pop()
+                continue
+            stack.append(part)
+            if "/".join(stack) in links:
+                stack = list(links["/".join(stack)])
+        return None
+
     try:
         with tarfile.open(path, "r:") as archive:
             for member in archive:
-                name = member.name
-                if name.startswith("/") or ".." in name.split("/"):
+                name = member.name.rstrip("/")
+                parts = name.split("/")
+                if name.startswith("/") or ".." in parts:
                     raise ValueError(f"{name}: absolute or parent-relative path")
-                if kind == "application_component" and not (name.startswith("srv/app/") or name.rstrip("/") == "srv/app"):
+                if kind == "application_component" and not (name.startswith("srv/app/") or (member.isdir() and name == "srv/app")):
                     raise ValueError(f"{name}: application payload must live under srv/app/")
                 if member.mode & 0o6000:
                     raise ValueError(f"{name}: setuid/setgid bit")
+                if name in names:
+                    raise ValueError(f"{name}: duplicate member name")
+                if any("/".join(parts[:i]) in links for i in range(1, len(parts))):
+                    raise ValueError(f"{name}: written through an earlier symlink")
+                names.add(name)
                 if member.issym():
-                    target = posixpath.normpath(posixpath.join(posixpath.dirname(name), member.linkname))
-                    if member.linkname.startswith("/") or target == ".." or target.startswith("../"):
+                    if name in dirs:
+                        raise ValueError(f"{name}: symlink replaces a directory")
+                    target = resolve(parts[:-1], member.linkname) if not member.linkname.startswith("/") else None
+                    if target is None:
                         raise ValueError(f"{name}: symlink escapes the payload root")
+                    if kind == "application_component" and target[:2] != ["srv", "app"]:
+                        raise ValueError(f"{name}: symlink leaves srv/app/")
+                    links[name] = target
+                    continue
+                dirs.update("/".join(parts[:i]) for i in range(1, len(parts)))
+                if member.isdir():
+                    dirs.add(name)
                 elif member.isfile():
                     files += 1
                     total += member.size
                     if total > max_bytes:
                         raise ValueError("payload exceeds the size cap")
-                elif not member.isdir():
+                else:
                     raise ValueError(f"{name}: only files, directories and symlinks are allowed")
     except tarfile.TarError as error:
         raise ValueError(f"unreadable tar: {error}") from error
