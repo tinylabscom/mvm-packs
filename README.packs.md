@@ -88,7 +88,13 @@ identity to `revoked_identities` or a lowercase manifest SHA-256 to
 `registry-pack-revocations` GitHub release as `revocations.json` and
 `revocations.sigstore.json`; immutable numbered pairs
 `revocations-<sequence>.json` and `revocations-<sequence>.sigstore.json` form
-the verifiable sequence history. The official signer is exactly
+the verifiable sequence history. Clients read only the two alias assets. To keep
+the live release under GitHub's 1000-asset cap, the manually dispatched
+`registry-pack-revocations-archive.yml` workflow copies the oldest signed pairs to an
+archive release (`registry-pack-revocations-archive-<first>-<last>`), checks every byte
+reads back, then removes them from the live release; the live history stays
+contiguous from its first retained sequence and is re-verified end to end. The
+official signer is exactly
 
 ```
 https://github.com/tinylabscom/mvm-packs/.github/workflows/registry-pack-revocations.yml@refs/heads/main

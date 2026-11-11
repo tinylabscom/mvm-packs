@@ -1,0 +1,98 @@
+name: Archive old official pack revocations
+
+# Manual only. Moves the oldest signed numbered pairs out of the live
+# `registry-pack-revocations` release into an archive release, so the live release
+# stays under GitHub's per-release asset cap and every run keeps verifying a bounded
+# history. Clients read only the two alias assets, which are never touched here.
+# Land the pruned-history support in scripts/build-dedicated-revocations.py first.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Move the oldest signed pairs out of the live release
+        required: true
+        type: boolean
+        default: false
+
+permissions: {}
+concurrency:
+  group: official-pack-revocations
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    if: github.repository == 'tinylabscom/mvm-packs' && github.ref == 'refs/heads/main' && inputs.confirm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: registry-pack-revocations
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Install verified cosign v3
+        env:
+          COSIGN_V3_VERSION: v3.1.1
+        run: |
+          set -euo pipefail
+          base="https://github.com/sigstore/cosign/releases/download/${COSIGN_V3_VERSION}"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64 "${base}/cosign-linux-amd64"
+          curl --proto '=https' --tlsv1.2 -sSfL -o cosign-linux-amd64.sigstore.json "${base}/cosign-linux-amd64.sigstore.json"
+          cosign verify-blob cosign-linux-amd64 \
+            --bundle cosign-linux-amd64.sigstore.json \
+            --certificate-identity keyless@projectsigstore.iam.gserviceaccount.com \
+            --certificate-oidc-issuer https://accounts.google.com
+          install -m 0755 cosign-linux-amd64 "$HOME/.cosign/cosign"
+          hash -r
+      - name: Verify the live history, copy the oldest pairs to an archive release, then prune
+        run: |
+          set -euo pipefail
+          live="$RUNNER_TEMP/live"
+          mkdir -p "$live"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]' > "$RUNNER_TEMP/assets.json"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'revocations*' --dir "$live"
+          python3 scripts/build-dedicated-revocations.py --history "$live" --asset-names "$RUNNER_TEMP/assets.json" --verify-history >/dev/null
+          plan="$(python3 scripts/build-dedicated-revocations.py --history "$live" --asset-names "$RUNNER_TEMP/assets.json" --plan-archive)"
+          if [ -z "$plan" ]; then
+            echo 'Nothing to archive yet.'
+            exit 0
+          fi
+          first="${plan%% *}"
+          last="${plan##* }"
+          tag="registry-pack-revocations-archive-${first}-${last}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Archive release $tag already exists; refusing to append to it." >&2
+            exit 1
+          fi
+          files=()
+          for sequence in $plan; do
+            files+=("$live/revocations-${sequence}.json" "$live/revocations-${sequence}.sigstore.json")
+          done
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target main --latest=false --prerelease \
+            --title "Archived official pack revocations ${first}-${last}" \
+            --notes "Signed numbered revocation pairs ${first} to ${last}, moved out of the live release. Verified copies; not read by clients." \
+            "${files[@]}"
+          # Never prune until every archived byte reads back identically.
+          back="$RUNNER_TEMP/back"
+          mkdir -p "$back"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern 'revocations-*' --dir "$back"
+          test "$(find "$back" -type f | wc -l | tr -d ' ')" = "${#files[@]}"
+          for file in "${files[@]}"; do
+            cmp "$file" "$back/$(basename "$file")"
+          done
+          for file in "${files[@]}"; do
+            gh release delete-asset "$RELEASE_TAG" "$(basename "$file")" --repo "$GITHUB_REPOSITORY" --yes
+          done
+          # The remaining live history must still verify end to end, aliases included.
+          after="$RUNNER_TEMP/after"
+          mkdir -p "$after"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '[.assets[].name]' > "$RUNNER_TEMP/after-assets.json"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern 'revocations*' --dir "$after"
+          python3 scripts/build-dedicated-revocations.py --history "$after" --asset-names "$RUNNER_TEMP/after-assets.json" --verify-history

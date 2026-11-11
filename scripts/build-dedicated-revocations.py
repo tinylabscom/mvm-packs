@@ -29,6 +29,11 @@ BUNDLE_NAME = "revocations.sigstore.json"
 HISTORICAL_VALIDITY = timedelta(days=30)
 VALIDITY = timedelta(hours=36)
 MAX_BYTES = 1024 * 1024
+# The live release keeps at least KEEP_PAIRS recent numbered pairs; once it holds
+# KEEP_PAIRS + ARCHIVE_BATCH, the oldest ARCHIVE_BATCH move to an archive release.
+# GitHub caps a release at 1000 assets, and every run verifies every live pair.
+KEEP_PAIRS = 150
+ARCHIVE_BATCH = 100
 NUMBERED_ASSET = re.compile(r"^revocations-([1-9][0-9]*)\.(json|sigstore\.json)$")
 
 
@@ -86,7 +91,7 @@ def verify_bundle(document, bundle):
         raise RevocationError("revocation signature or release identity is invalid")
 
 
-def inventory(names, *, allow_orphan=False):
+def inventory(names, *, allow_orphan=False, allow_pruned=False):
     if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
         raise RevocationError("release asset inventory must be a string array")
     if len(names) != len(set(names)):
@@ -107,7 +112,8 @@ def inventory(names, *, allow_orphan=False):
     # The keys are already unique and sorted. Comparing the endpoints with the
     # count proves contiguity without constructing a range-sized list from
     # publisher-controlled sequence numbers.
-    if sequences[0] != 1 or sequences[-1] != len(sequences):
+    # A pruned release starts after its archived prefix, but must still be contiguous.
+    if (sequences[0] != 1 and not allow_pruned) or sequences[-1] - sequences[0] + 1 != len(sequences):
         raise RevocationError("release sequence history has a gap")
     orphan = None
     for sequence, parts in pairs.items():
@@ -121,12 +127,19 @@ def inventory(names, *, allow_orphan=False):
     return sequences, orphan
 
 
+def plan_archive(names, keep=KEEP_PAIRS, batch=ARCHIVE_BATCH):
+    """Sequences to move out of the live release: the oldest `batch`, once there are keep + batch."""
+    sequences, orphan = inventory(names, allow_orphan=True, allow_pruned=True)
+    complete = [sequence for sequence in sequences if sequence != orphan]
+    return complete[:batch] if len(complete) >= keep + batch else []
+
+
 def _numbered_paths(directory, sequence):
     return directory / f"revocations-{sequence}.json", directory / f"revocations-{sequence}.sigstore.json"
 
 
-def verify_history(directory, names, now, *, require_aliases=True):
-    sequences, orphan = inventory(names)
+def verify_history(directory, names, now, *, require_aliases=True, allow_pruned=True):
+    sequences, orphan = inventory(names, allow_pruned=allow_pruned)
     if orphan is not None:
         raise RevocationError("release history ends in an incomplete pair")
     previous = None
@@ -139,7 +152,7 @@ def verify_history(directory, names, now, *, require_aliases=True):
             raise RevocationError("numbered asset does not match its document sequence")
         if previous is not None:
             check_advance(parsed, previous)
-        elif sequence != 1:
+        elif sequence != 1 and not allow_pruned:
             raise RevocationError("revocation history does not start at sequence 1")
         previous = newest = parsed
     if require_aliases:
@@ -208,6 +221,7 @@ def main(argv=None):
     parser.add_argument("--build-initial", type=Path, help="write sequence 1 for an explicitly authorized first release")
     parser.add_argument("--verify-history", action="store_true")
     parser.add_argument("--restore-aliases", action="store_true")
+    parser.add_argument("--plan-archive", action="store_true", help="print the sequences to archive, if any")
     parser.add_argument("--document", type=Path, default=Path(DOCUMENT_NAME))
     parser.add_argument("--bundle", type=Path, default=Path(BUNDLE_NAME))
     parser.add_argument("--previous-document", type=Path)
@@ -222,14 +236,19 @@ def main(argv=None):
                 raise RevocationError("initial feed cannot be built with existing history")
             args.build_initial.write_bytes(build_document(read_source(args.source), None, now))
             return
+        if args.plan_archive and args.asset_names is not None:
+            args.history = args.history or Path(".")
         if args.history is None or args.asset_names is None:
             if args.check_candidate:
                 raise RevocationError("candidate verification requires its authenticated history")
             parser.error("--history and --asset-names are required")
         names = _load_names(args.asset_names)
+        if args.plan_archive:
+            print(" ".join(str(sequence) for sequence in plan_archive(names)))
+            return
         if args.verify_history or args.restore_aliases:
             if args.restore_aliases:
-                sequences, orphan_sequence = inventory(names, allow_orphan=True)
+                sequences, orphan_sequence = inventory(names, allow_orphan=True, allow_pruned=True)
                 complete_names = [name for name in names if not (orphan_sequence and name == f"revocations-{orphan_sequence}.json")]
                 if not any(NUMBERED_ASSET.fullmatch(name) and NUMBERED_ASSET.fullmatch(name).group(2) == "sigstore.json" for name in complete_names):
                     raise RevocationError("release has no complete verified sequence to restore aliases from")
@@ -243,7 +262,7 @@ def main(argv=None):
             print(head["sequence"])
             return
         if args.prepare:
-            sequences, orphan_sequence = inventory(names, allow_orphan=True)
+            sequences, orphan_sequence = inventory(names, allow_orphan=True, allow_pruned=True)
             if orphan_sequence is not None and (args.history / f"revocations-{orphan_sequence}.sigstore.json").exists():
                 raise RevocationError("orphan sequence unexpectedly has a signature asset")
             complete_names = [name for name in names if not (orphan_sequence and name == f"revocations-{orphan_sequence}.json")]
@@ -281,7 +300,7 @@ def main(argv=None):
                 raise RevocationError("bootstrap candidate must be sequence 1")
             print(current["sequence"])
             return
-        parser.error("select --verify-history, --restore-aliases, --prepare, --build-initial, or --check-candidate")
+        parser.error("select --verify-history, --plan-archive, --restore-aliases, --prepare, --build-initial, or --check-candidate")
     except (OSError, ValueError, RevocationError, subprocess.CalledProcessError) as error:
         sys.exit(f"build-dedicated-revocations: {error}")
 
