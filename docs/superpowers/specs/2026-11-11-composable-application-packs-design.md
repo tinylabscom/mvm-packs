@@ -234,6 +234,10 @@ PR #5326) and its `specs/contracts/composable-pack-build.md`.
   nothing may be designed so that x86_64 is an afterthought. Each descriptor targets
   one `guest_arch`, so every pack is built, pinned and tested once per architecture.
   The demo date is not stated yet.
+- Default base: an `mvm`-supplied fallback base is acceptable when the user names no
+  base ("yes it is, I think": the owner's tentative answer). It must come from `mvm`,
+  never from a pack, and a user-chosen base always wins. To be confirmed with the
+  `mvm` thread.
 - Redistribution: the Claude executable may be redistributed in a registry payload.
   The owner assumes the licensing risk and authorizes it. This covers redistribution
   only. Signing and publishing still need the owner's approval of the exact archive
