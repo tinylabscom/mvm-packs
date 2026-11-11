@@ -1,0 +1,15 @@
+# Code owners for the paths that decide what the registry signs and publishes.
+# This file only takes effect when a branch ruleset requires code-owner review.
+/.github/                       @auser @aneyzberg
+/scripts/                       @auser @aneyzberg
+/tests/                         @auser @aneyzberg
+/pack-sources/mvm/              @auser @aneyzberg
+/pack-sources/agent/            @auser @aneyzberg
+/pack-sources/runtime/          @auser @aneyzberg
+/packs/                         @auser @aneyzberg
+/index.json                     @auser @aneyzberg
+/revocations.toml               @auser @aneyzberg
+/community/                     @auser @aneyzberg
+/package.json                   @auser @aneyzberg
+/package-lock.json              @auser @aneyzberg
+/AGENTS.md                      @auser @aneyzberg
