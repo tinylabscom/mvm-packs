@@ -15,7 +15,13 @@ guest. An explicit ordered composition with a selected custom base is also
 one command. The same portable application bytes work with any base that
 meets the declared compatibility contract. Existing published
 `agent/claude@2.0.1` is a **complete boot bundle**, not that portable
-component, and keeps its existing reader and meaning.
+component, and keeps its existing reader and meaning; the legacy `.mvmpkg` wording stays true
+for the published 2.0.x packs, which are immutable and unchanged.
+
+Packs carry the application, its policy and its requirements, and **no
+base** (no kernel, rootfs or backend). A fallback base supplied by `mvm`
+is acceptable only when the user names none; it must come from `mvm`,
+never from a pack, and a user-chosen base always wins.
 
 The signed base evidence must identify the architecture, kernel and
 initramfs, composition filesystem input and verified guest runtime,
@@ -40,8 +46,8 @@ network fallback is allowed.
 
 Entrypoint precedence is: runtime command override, then the
 user-defined workload/config command, then the **last application in
-the explicit order that declares an entrypoint**. Only this command
-selection is last-wins. Other applications' commands remain
+the explicit order that declares a `default` entrypoint**. "Last wins" applies to command selection only, and the chosen command
+is separately admitted. Other applications' commands remain
 non-default and services do not auto-start; a service requires an
 explicit request. A runtime override, including in production, is
 checked against the selected security profile, signed component

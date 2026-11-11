@@ -2,8 +2,10 @@
 
 This repository is the signed pack registry for
 [`mvmctl`](https://github.com/tinylabscom/mvm). Templates are no longer supported
-or stored here. Every pack must embed its application binary in a signed
-`.mvmpkg`; a policy alone cannot be signed. The nine policy-only versions
+or stored here. Every legacy published pack embeds its application binary in a
+complete signed `.mvmpkg`, and a policy alone cannot be signed; new application
+components instead carry an application payload archive pinned by a signed
+descriptor, with no kernel, rootfs or base. The nine policy-only versions
 published earlier are legacy, and four of them (`agent/claude@1.0.1`,
 `agent/codex@1.0.0`, `runtime/python@1.0.0`, `runtime/node@1.0.0`) are revoked.
 The first application pack is `agent/claude`: `2.0.0` is published but its embedded
