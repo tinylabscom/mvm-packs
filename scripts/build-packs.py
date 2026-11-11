@@ -46,7 +46,7 @@ import ed25519
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
-from application_manifest import validate_application, validate_runtime_layer
+from application_manifest import unique_object, validate_application, validate_runtime_layer
 from publisher_identity import (
     CURRENT_IDENTITY,
     PUBLISHER_ISSUER,
@@ -327,7 +327,7 @@ def inspect_bundle(path, application, public_key, requirements=None):
             manifest_raw = archive.extractfile("manifest.json").read()
             if not ed25519.verify(public_key, manifest_raw, archive.extractfile("manifest.sig").read()):
                 fail(f"{path}: manifest.sig is not a valid signature by the descriptor's bundle key")
-            manifest = json.loads(manifest_raw)
+            manifest = json.loads(manifest_raw, object_pairs_hook=unique_object)
             if manifest.get("key_id") != bundle["key_id"] or manifest.get("arch") != application["guest_arch"]:
                 fail(f"{path}: bundle key ID or architecture does not match the descriptor")
             artifacts = manifest.get("artifacts")
@@ -348,6 +348,8 @@ def inspect_bundle(path, application, public_key, requirements=None):
                     fail(f"{path}: artifact {artifact['path']!r} does not match its recorded SHA-256")
                 roles.add(artifact["role"])
                 if artifact["role"] == "rootfs":
+                    if rootfs_path is not None:
+                        fail(f"{path}: archive lists more than one root filesystem")
                     rootfs_path = artifact["path"]
             if sum(members[p].size for p in hashed) > bundle["archive_size"]:
                 fail(f"{path}: artifacts are larger than the archive")
