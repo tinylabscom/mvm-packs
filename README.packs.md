@@ -70,8 +70,9 @@ is granted by this schema.
 ## Layout
 
 Every currently supported new application pack must embed its application
-binary in a signed complete `.mvmpkg`; a policy alone cannot be signed, and
-built-image packs are not part of this registry. A pack source is a single
+binary in a signed complete `.mvmpkg`; a policy alone cannot be signed. Application components (a payload
+archive pinned by a signed descriptor, no base) are proposed and not yet
+publishable; see [ADR 006](docs/adr/006-runnable-composable-packs.md). Built-image packs are not part of this registry. A pack source is a single
 `pack-sources/<namespace>/<name>/pack.toml` with an `[application]` bundle (see above).
 The legacy policy-only versions under `packs/` stay immutable and are not rebuilt.
 

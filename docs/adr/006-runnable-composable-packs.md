@@ -19,9 +19,10 @@ component, and keeps its existing reader and meaning; the legacy `.mvmpkg` wordi
 for the published 2.0.x packs, which are immutable and unchanged.
 
 Packs carry the application, its policy and its requirements, and **no
-base** (no kernel, rootfs or backend). A fallback base supplied by `mvm`
-is acceptable only when the user names none; it must come from `mvm`,
-never from a pack, and a user-chosen base always wins.
+base** (no kernel, rootfs or backend). **Provisional; to be confirmed with
+the `mvm` thread:** a fallback base supplied by `mvm` is acceptable only when
+the user names none; it must come from `mvm`, never from a pack, and a
+user-chosen base always wins.
 
 The signed base evidence must identify the architecture, kernel and
 initramfs, composition filesystem input and verified guest runtime,
