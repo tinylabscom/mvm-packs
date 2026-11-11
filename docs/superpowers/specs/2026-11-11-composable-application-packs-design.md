@@ -203,6 +203,31 @@ exact syntax belongs to the `mvm` owner. The requirement is that it is one comma
 File layout, test structure, exact validator wording, catalog and pages rendering,
 and how to stage the work across PRs.
 
+## Alignment with the `mvm` composition thread (read 2026-11-11, read-only)
+
+Source: the Delta thread "Implement composable application pack release candidate"
+(worktree `mvm/.delta/worktrees/x5xcrgbp79bd`, branch `feat/portable-composition-rc-main`,
+PR #5326) and its `specs/contracts/composable-pack-build.md`.
+
+- Wire format: its `application_component` reader (schema 3, component schema 1) and
+  its runtime/tool reader (schema 4, component schema 1) match PR #147 on every point
+  checked: kinds, filesystem ABI 1, libc `static`/`musl`/`glibc` with loader rules,
+  minimum kernel, at most 16 capabilities, at most 16 entrypoints or dependencies,
+  2 GiB payload cap, exact manifest pins, no second archive signer.
+- Entrypoint: its contract says runtime override, then user-defined workload entrypoint,
+  then the last application in explicit order declaring an entrypoint. "Last wins"
+  applies only to command selection, and the chosen command is separately admitted.
+  This is the owner's rule.
+- One command: its contract says an explicitly ordered composition with `--base` is a
+  single command, and `mvmctl run agent/claude` stays one command. A development-only
+  `mvmctl run --compose PACK.TOML` exists and does not yet consume signed descriptors.
+- Policy: signed component policy cannot grant itself network, secrets or shares;
+  denies win and ceilings narrow, matching `scripts/policy_compose.py`.
+- Tension to settle: the contract keeps "a fast compatible default" for
+  `mvmctl run agent/claude` when no base is chosen. The owner's decision is that a pack
+  never carries or forces a base. A client-side fallback is compatible only if it comes
+  from `mvm`, never from the pack, and only when the user gave no base.
+
 ## Answers from the owner (2026-11-11)
 
 - Architectures: aarch64 first, but x86_64 is paramount: both ship for the demo, and
