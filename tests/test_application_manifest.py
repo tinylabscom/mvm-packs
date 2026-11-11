@@ -382,6 +382,23 @@ class ArchiveReadBackTests(unittest.TestCase):
             with self.subTest(label), self.assertRaises(SystemExit):
                 self.check(self.descriptor(data), data)
 
+    def test_ambiguous_bundle_manifests_are_refused(self):
+        def entry(name, role):
+            data = f"{name}-bytes".encode()
+            return {"name": name, "role": role, "path": f"artifacts/{name}",
+                    "sha256": hashlib.sha256(data).hexdigest(), "size_bytes": len(data)}
+        body = {"key_id": TEST_KEY_ID, "arch": "aarch64", "artifacts": [entry("kernel", "kernel"), entry("rootfs", "rootfs")]}
+        two_rootfs = body | {"artifacts": body["artifacts"] + [entry("rootfs2", "rootfs")]}
+        for label, data in {
+            "duplicate JSON key": make_mvmpkg(raw_manifest=json.dumps(body)[:-1].encode() + b', "arch": "aarch64"}'),
+            "two root filesystems": make_mvmpkg(roles=("kernel", "rootfs", "rootfs2"),
+                                                raw_manifest=json.dumps(two_rootfs).encode()),
+        }.items():
+            with self.subTest(label), self.assertRaises(SystemExit):
+                self.check(self.descriptor(data), data)
+        valid = make_mvmpkg(raw_manifest=json.dumps(body).encode())
+        self.check(self.descriptor(valid), valid)
+
     def test_bundle_key_must_exist_and_match_the_descriptor_key_id(self):
         data = make_mvmpkg()
         for label, key in {"missing key": None, "wrong key": bytes(range(1, 33)),
