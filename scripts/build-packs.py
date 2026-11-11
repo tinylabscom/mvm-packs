@@ -532,6 +532,8 @@ def build_one(source, check_only=False):
     kind = next((k for k in ("application_component", "runtime_component", "tool_component") if meta[k] is not None), None)
     if kind is not None:
         component = meta[kind]
+        if (PACKS / namespace / name / meta["version"]).exists():
+            fail(f"{reference}: version already published; bump the version in pack.toml")
         try:
             authorized = component_authorized(reference, component["archive"]["archive_sha256"], COMPONENT_AUTHORIZATIONS)
         except ValueError as error:

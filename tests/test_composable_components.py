@@ -182,6 +182,23 @@ class ComposableComponentTests(unittest.TestCase):
                     builder.parse_pack_toml(path)
             path.write_text(lines)
 
+    def test_component_version_already_published_is_refused_in_both_modes(self):
+        source = self.root / "pack-sources" / "runtime" / "demo"
+        source.mkdir(parents=True)
+        (source / "pack.toml").write_text(
+            'version = "1.0.0"\ndescription = "demo"\n[runtime_component]\nschema_version = 1\n'
+            f'guest_arch = "aarch64"\ndependencies = [{{reference = "tool/helper@1.2.3", manifest_sha256 = "{"b" * 64}"}}]\n'
+            '[runtime_component.archive]\nsource = "https://example.com/c.tar"\n'
+            f'archive_sha256 = "{"a" * 64}"\narchive_size = 123\n'
+            '[runtime_component.requirements]\nfilesystem_abi = 1\nlibc = "musl"\n'
+            'loader = "/lib/ld-musl-aarch64.so.1"\nminimum_kernel = "6.1.0"\nrequired_capabilities = []\n')
+        (self.root / "packs" / "runtime" / "demo" / "1.0.0").mkdir(parents=True)
+        with patch.object(builder, "PACKS", self.root / "packs"), patch.object(builder, "sign") as sign:
+            for check_only in (True, False):
+                with self.assertRaisesRegex(SystemExit, "already published"):
+                    builder.build_one(source, check_only=check_only)
+            sign.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
