@@ -3,6 +3,7 @@ name: Validate pack sources
 on:
   # No path filter: the main ruleset requires this check, so it must report on every PR.
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
@@ -14,6 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Require a maintainer for first-party namespaces
+        if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           ASSOCIATION: ${{ github.event.pull_request.author_association }}

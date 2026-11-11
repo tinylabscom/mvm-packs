@@ -114,11 +114,12 @@ identity per version, which makes the user re-trust on every release. The `mvm`
 owners can revisit this if tag-triggered signing matters more than a smaller
 verifier.
 
-## Intake (next step, not built)
+## Intake
 
 A registry workflow resolves each reference: it lists the author's tagged
 releases, downloads each `manifest.json` and bundle, checks the identity and
 validation above, reads an application archive back against its descriptor
 before listing, copies the two small files verbatim, and regenerates
 `community/index.json`. A failing version is skipped and reported, never
-signed or repaired.
+signed or repaired. The generated index is proposed in a separate reviewed
+pull request; it is not published by a direct workflow push.
