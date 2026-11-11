@@ -9,6 +9,7 @@
 /packs/                         @auser @aneyzberg
 /index.json                     @auser @aneyzberg
 /revocations.toml               @auser @aneyzberg
+/component-authorizations.toml  @auser @aneyzberg
 /community/                     @auser @aneyzberg
 /package.json                   @auser @aneyzberg
 /package-lock.json              @auser @aneyzberg

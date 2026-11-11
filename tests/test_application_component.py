@@ -188,10 +188,9 @@ class ApplicationComponentTests(unittest.TestCase):
                 f'minimum_kernel = "6.1.0"\nrequired_capabilities = []\n')
         (self.source / "pack.toml").write_text(body)
         self.assertEqual(builder.parse_pack_toml(self.source / "pack.toml")["application_component"]["schema_version"], 1)
-        with self.assertRaisesRegex(SystemExit, "not publishable"):
-            builder.build_one(self.source, check_only=True)
+        builder.build_one(self.source, check_only=True)
         with patch.object(builder, "sign") as sign:
-            with self.assertRaisesRegex(SystemExit, "not publishable"):
+            with self.assertRaisesRegex(SystemExit, "not authorized by the owner"):
                 builder.build_one(self.source)
             sign.assert_not_called()
         (self.source / "pack.toml").write_text(body.replace('libc = "musl"', 'libc = "other"'))

@@ -44,6 +44,7 @@ from urllib.parse import urlsplit
 from pathlib import Path
 
 import ed25519
+from component_authorizations import component_authorized
 import pack_details
 import rootfs_requirements
 from application_manifest import manifest_bytes as application_manifest_bytes
@@ -59,6 +60,7 @@ from publisher_identity import (
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = ROOT / "pack-sources"
 PACKS = ROOT / "packs"
+COMPONENT_AUTHORIZATIONS = ROOT / "component-authorizations.toml"
 DETAILS = ROOT / "pack-details"
 
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:[-+][0-9A-Za-z.+-]+)?$")
@@ -527,10 +529,20 @@ def build_one(source, check_only=False):
     reference = f"{namespace}/{name}@{meta['version']}"
     if meta["runtime_layer"] is not None:
         fail(f"{reference}: runtime layers are not publishable until the mvm consumer dispatch, installer and our gate exist (ADR 005)")
-    if meta["application_component"] is not None:
-        fail(f"{reference}: application components are not publishable until mvm agrees on the wire format, consumer and archive gate (ADR 004)")
-    if meta["runtime_component"] is not None or meta["tool_component"] is not None:
-        fail(f"{reference}: runtime/tool components are not publishable until the consumer archive/ABI gate and boot witness exist")
+    kind = next((k for k in ("application_component", "runtime_component", "tool_component") if meta[k] is not None), None)
+    if kind is not None:
+        component = meta[kind]
+        try:
+            authorized = component_authorized(reference, component["archive"]["archive_sha256"], COMPONENT_AUTHORIZATIONS)
+        except ValueError as error:
+            fail(f"{reference}: {error}")
+        if check_only:
+            print(f"{reference}: component source valid" + ("" if authorized else "; not authorized for signing"))
+            return
+        if not authorized:
+            fail(f"{reference}: component not authorized by the owner")
+        verify_component_archive(component, kind)
+        fail(f"{reference}: component signing is not wired up yet; nothing is written to packs/ until the publication gate lifts")
     application = meta["application"]
     payload = source / "pack"
     if application is not None:

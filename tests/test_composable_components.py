@@ -167,11 +167,11 @@ class ComposableComponentTests(unittest.TestCase):
             path = source / "pack.toml"
             path.write_text(lines)
             self.assertEqual(builder.parse_pack_toml(path)[kind], data)
-            for check_only in (True, False):
-                with self.subTest(kind=kind, check_only=check_only), patch.object(builder, "sign") as sign:
-                    with self.assertRaisesRegex(SystemExit, "not publishable"):
-                        builder.build_one(source, check_only=check_only)
-                    sign.assert_not_called()
+            with patch.object(builder, "sign") as sign:
+                builder.build_one(source, check_only=True)
+                with self.assertRaisesRegex(SystemExit, "not authorized by the owner"):
+                    builder.build_one(source)
+                sign.assert_not_called()
             for invalid in (
                 lines.replace('libc = "musl"', 'libc = "unknown"'),
                 lines + '[application]\nschema_version = 1\n',
