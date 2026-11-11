@@ -499,6 +499,21 @@ def version_key(value):
 
 def registry_index(packs_dir):
     """Derive discovery metadata only from published manifests, not sources."""
+    def published_version(directory):
+        manifest_path = directory / "manifest.json"
+        manifest = json.loads(manifest_path.read_bytes())
+        version = {
+            "version": directory.name,
+            "manifest_sha256": sha256_of(manifest_path)[0],
+        }
+        if manifest.get("kind") == "runtime_layer":
+            layer = manifest.get("runtime_layer")
+            arch = layer.get("guest_arch") if isinstance(layer, dict) else None
+            if arch not in ("x86_64", "aarch64"):
+                fail(f"{manifest_path}: published runtime layer has invalid guest architecture")
+            version["guest_arch"] = arch
+        return version, manifest
+
     packs = []
     if packs_dir.is_dir():
         for namespace in sorted(p for p in packs_dir.iterdir() if p.is_dir()):
@@ -513,23 +528,13 @@ def registry_index(packs_dir):
                     reverse=True,
                 )
                 if versions:
-                    manifest = json.loads(
-                        (name / versions[0] / "manifest.json").read_text()
-                    )
+                    published = [published_version(name / version) for version in versions]
                     packs.append(
                         {
                             "namespace": namespace.name,
                             "name": name.name,
-                            "description": manifest["description"],
-                            "versions": [
-                                {
-                                    "version": version,
-                                    "manifest_sha256": sha256_of(
-                                        name / version / "manifest.json"
-                                    )[0],
-                                }
-                                for version in versions
-                            ],
+                            "description": published[0][1]["description"],
+                            "versions": [entry for entry, _ in published],
                         }
                     )
     return {"schema_version": 2, "packs": packs}

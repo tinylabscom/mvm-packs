@@ -1,6 +1,7 @@
 # UNPUBLISHED FIXTURE for the runtime/python layer descriptor (ADR 005). Not a pack source:
 # build-packs refuses to sign a runtime layer until the consumer install and boot exist.
-# The archive pins are placeholders; the producer replaces them with the real tar.
+# The release URL is reserved, not live. Pins are measured from the reproducible
+# x86_64 tar; neither this descriptor nor its release asset has been signed.
 version = "1.1.0"
 description = "Offline Python runtime layer: interpreter and standard library."
 
@@ -10,6 +11,6 @@ guest_arch = "x86_64"
 dependencies = []
 
 [runtime_layer.archive]
-source = "https://example.invalid/runtime-python-1.1.0-x86_64.layer.tar"
-archive_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
-archive_size = 1
+source = "https://github.com/tinylabscom/mvm-packs/releases/download/python-layer-v1.1.0/runtime-python-x86_64.layer.tar"
+archive_sha256 = "9f5dfaf983a54a62212184f08f5dfc36d1474052d71a799cdfd3f1a53dc970d4"
+archive_size = 63836160

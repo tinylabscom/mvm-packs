@@ -1,0 +1,5 @@
+description = "Offline Python runtime; no host capabilities or network grants."
+required = true
+
+[network]
+block = true
