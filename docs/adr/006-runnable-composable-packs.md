@@ -85,6 +85,18 @@ its entire boot closure and provenance (ADR 004). A builder-vm
 materializes but cannot approve, sign or publish it. No production
 release is authorized by passing local or PR-only synthetic tests.
 
+## Per-architecture versions (provisional)
+
+**Provisional; not yet confirmed with the `mvm` owner.** One descriptor targets one
+`guest_arch`, a published version is immutable so two descriptors cannot share a version,
+and the `mvm` client filters versions by host architecture and then takes the highest
+semver (`resolve_matching` in `discovery.rs` in the `mvm` repo). The proposed scheme: within
+one release line the aarch64 build takes `X.Y.0` and the x86_64 build takes `X.Y.1`; a new
+release line bumps the minor. This needs confirmation by the `mvm` owner. If they choose a
+different scheme, only the version numbers in the pack sources and these docs change.
+
+See also the [application pack guide](../application-packs.md).
+
 ## Status and acceptance
 
 `mvm` PR #5228 stages v2 authoring, signed runtime descriptors, strict

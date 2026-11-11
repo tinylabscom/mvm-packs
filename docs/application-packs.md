@@ -111,6 +111,16 @@ this under "Recorded at signing", labelled as **not signed registry metadata**. 
 refuses a record that does not match the signed descriptor. A failure to write the record never
 blocks signing, and a pull re-verifies the archive itself.
 
+## Per-architecture versions (provisional)
+
+**Provisional; not yet confirmed with the `mvm` owner.** One descriptor targets one
+`guest_arch`, a published version is immutable so two descriptors cannot share a version,
+and the `mvm` client filters versions by host architecture and then takes the highest
+semver (`resolve_matching` in `discovery.rs` in the `mvm` repo). The proposed scheme: within
+one release line the aarch64 build takes `X.Y.0` and the x86_64 build takes `X.Y.1`; a new
+release line bumps the minor. This needs confirmation by the `mvm` owner. If they choose a
+different scheme, only the version numbers in the pack sources and these docs change.
+
 ## Traps we have already hit
 
 - **A draft release cannot be read.** The publisher downloads anonymously. Merging a
