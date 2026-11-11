@@ -203,9 +203,20 @@ exact syntax belongs to the `mvm` owner. The requirement is that it is one comma
 File layout, test structure, exact validator wording, catalog and pages rendering,
 and how to stage the work across PRs.
 
+## Answers from the owner (2026-11-11)
+
+- Architectures: aarch64 first, but x86_64 is paramount: both ship for the demo, and
+  nothing may be designed so that x86_64 is an afterthought. Each descriptor targets
+  one `guest_arch`, so every pack is built, pinned and tested once per architecture.
+  The demo date is not stated yet.
+- Redistribution: the Claude executable may be redistributed in a registry payload.
+  The owner assumes the licensing risk and authorizes it. This covers redistribution
+  only. Signing and publishing still need the owner's approval of the exact archive
+  through the protected workflow.
+
 ## Open items for the owner
 
-- The demo date and the smallest acceptable demo (one architecture? which?).
-- Whether the Claude executable may be redistributed in a registry payload. If
-  not, the demo needs a different shape or a different application.
-- Which session or person is the `mvm` format owner for the wire fields.
+- Which session or person is the `mvm` format owner for the wire fields (being
+  discovered by messaging the other sessions; `specs/contracts/composable-pack-build.md`
+  in `mvm` says only that the format owner is `mvm`, coordinated with the registry).
+- The demo date.
