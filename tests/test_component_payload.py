@@ -94,6 +94,35 @@ class ComponentPayloadTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate"):
             self.check(reg("a"), ("a", tarfile.SYMTYPE, "b", 0o777))
 
+    def sym(self, name, target):
+        return (name, tarfile.SYMTYPE, target, 0o777)
+
+    def test_probe_dot_prefix_and_dot_components_are_refused(self):
+        app = "application_component"
+        cases = [  # p06, p14, p07, p05, p08, p16
+            ([reg("a/f"), self.sym("l", "a"), reg("./l/z")], "runtime_component"),
+            ([self.sym("srv/app/l", "."), reg("srv/app/./l/z")], app),
+            ([reg("a"), reg("./a")], "runtime_component"),
+            ([self.sym("./l", "..")], "runtime_component"),
+            ([self.sym("a//l", "../..")], "runtime_component"),
+            ([self.sym("d/.", "..")], "runtime_component"),
+        ]
+        for members, kind in cases:
+            with self.subTest(members=[m[0] for m in members]), self.assertRaises(ValueError):
+                self.check(reg("a/keep"), *members, kind=kind)
+
+    def test_stale_link_targets_are_refused(self):
+        # p11 and p12: a later link turns an ancestor of an earlier target into a symlink
+        with self.assertRaisesRegex(ValueError, "escapes"):
+            self.check(self.sym("x", "b/b2/c"), self.sym("b", "."), self.sym("z", "x/../../.."))
+        with self.assertRaisesRegex(ValueError, "srv/app"):
+            self.check(self.sym("srv/app/x", "b/b2/c"), self.sym("srv/app/b", "."),
+                       self.sym("srv/app/z", "x/../../.."), kind="application_component")
+
+    def test_symlink_loop_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "loop"):
+            self.check(self.sym("a", "b"), self.sym("b", "a"))
+
 
 class VerifyComponentArchiveTests(unittest.TestCase):
     def run_verify(self, tar_members, kind="runtime_component", clock=None, **changes):
@@ -102,7 +131,7 @@ class VerifyComponentArchiveTests(unittest.TestCase):
         data = Path(path).read_bytes()
         archive = {"source": "https://bundles.example/c.tar", "archive_sha256": hashlib.sha256(data).hexdigest(),
                    "archive_size": len(data)} | changes
-        fetched = []
+        fetched = self.fetched = []
 
         def serve(url, timeout=None):
             fetched.append(url)
@@ -134,7 +163,10 @@ class VerifyComponentArchiveTests(unittest.TestCase):
     def test_bad_scheme_and_private_host_are_refused_before_fetch(self):
         for source in ("http://bundles.example/c.tar", "https://127.0.0.1/c.tar", "https://localhost/c.tar"):
             with self.subTest(source=source), self.assertRaises(SystemExit):
-                self.run_verify([reg("a")], source=source)
+                try:
+                    self.run_verify([reg("a")], source=source)
+                finally:
+                    self.assertEqual(self.fetched, [])
 
     def test_declared_size_zero_or_over_cap_is_refused(self):
         for size in (0, 2 * 1024**3 + 1):
@@ -143,5 +175,5 @@ class VerifyComponentArchiveTests(unittest.TestCase):
 
     def test_deadline_is_enforced(self):
         clock = iter([0])
-        with self.assertRaises(SystemExit):
+        with self.assertRaisesRegex(SystemExit, "exceeded"):
             self.run_verify([reg("a")], clock=lambda: next(clock, builder.DOWNLOAD_DEADLINE_SECONDS + 1))
