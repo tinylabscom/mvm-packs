@@ -152,6 +152,41 @@ class DedicatedRevocationTests(unittest.TestCase):
                 f"revocations-{sequence}.sigstore.json",
             ])
 
+    def test_pruned_history_must_be_contiguous_and_is_opt_in_at_inventory(self):
+        def names(sequences):
+            return [f"revocations-{n}.{kind}" for n in sequences for kind in ("json", "sigstore.json")]
+        self.assertEqual(feed.inventory(names([151, 152, 153]), allow_pruned=True)[0], [151, 152, 153])
+        with self.assertRaisesRegex(feed.RevocationError, "gap"):
+            feed.inventory(names([151, 152, 153]))
+        with self.assertRaisesRegex(feed.RevocationError, "gap"):
+            feed.inventory(names([151, 153]), allow_pruned=True)
+
+    def test_archive_plan_moves_the_oldest_pairs_only_when_keep_plus_batch_exist(self):
+        def names(sequences):
+            return [f"revocations-{n}.{kind}" for n in sequences for kind in ("json", "sigstore.json")]
+        total = feed.KEEP_PAIRS + feed.ARCHIVE_BATCH
+        self.assertEqual(feed.plan_archive(names(range(1, total))), [])
+        plan = feed.plan_archive(names(range(1, total + 1)))
+        self.assertEqual(plan, list(range(1, feed.ARCHIVE_BATCH + 1)))
+        # After pruning, the remainder is still a valid contiguous history and plans nothing more.
+        self.assertEqual(feed.plan_archive(names(range(feed.ARCHIVE_BATCH + 1, total + 1))), [])
+        # An unsigned orphan is never archived.
+        orphaned = names(range(1, total + 1)) + [f"revocations-{total + 1}.json"]
+        self.assertNotIn(total + 1, feed.plan_archive(orphaned))
+
+    def test_archive_workflow_is_manual_copies_and_verifies_before_it_deletes(self):
+        workflow = (ROOT / ".github/workflows/registry-pack-revocations-archive.yml").read_text()
+        triggers = workflow.split("permissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", triggers)
+        for automatic in ("push:", "schedule:", "pull_request"):
+            self.assertNotIn(automatic, triggers)
+        self.assertNotIn("id-token", workflow)
+        self.assertIn("group: official-pack-revocations", workflow)
+        self.assertLess(workflow.index("gh release create"), workflow.index("cmp "))
+        self.assertLess(workflow.index("cmp "), workflow.index("delete-asset"))
+        self.assertLess(workflow.index("delete-asset"), workflow.rindex("--verify-history"))
+        self.assertNotIn("--clobber", workflow)
+
     def test_history_rejects_missing_or_mismatched_aliases(self):
         raw = self.document()
         with tempfile.TemporaryDirectory() as temp:
