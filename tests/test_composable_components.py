@@ -182,6 +182,36 @@ class ComposableComponentTests(unittest.TestCase):
                     builder.parse_pack_toml(path)
             path.write_text(lines)
 
+    def test_x86_64_descriptor_is_valid_and_arch_must_match_loader(self):
+        for kind in ("runtime_component", "tool_component"):
+            data = component()
+            data["guest_arch"] = "x86_64"
+            data["requirements"]["loader"] = "/lib/ld-musl-x86_64.so.1"
+            raw = composable_component_manifest_bytes(f"{kind[:-10]}/demo@1.0.0", "demo", kind, data, FILES)
+            self.assertEqual(json.loads(raw)[kind]["guest_arch"], "x86_64")
+
+    def test_authorized_component_still_stops_before_signing(self):
+        source = self.root / "pack-sources" / "tool" / "demo"
+        source.mkdir(parents=True)
+        (source / "pack.toml").write_text(
+            'version = "1.0.0"\ndescription = "demo"\n[tool_component]\nschema_version = 1\n'
+            f'guest_arch = "x86_64"\ndependencies = [{{reference = "tool/helper@1.2.3", manifest_sha256 = "{"b" * 64}"}}]\n'
+            '[tool_component.archive]\nsource = "https://example.com/c.tar"\n'
+            f'archive_sha256 = "{"a" * 64}"\narchive_size = 123\n'
+            '[tool_component.requirements]\nfilesystem_abi = 1\nlibc = "musl"\n'
+            'loader = "/lib/ld-musl-x86_64.so.1"\nminimum_kernel = "6.1.0"\nrequired_capabilities = []\n')
+        approvals = self.root / "auth.toml"
+        approvals.write_text(f'[[approved]]\nreference = "tool/demo@1.0.0"\narchive_sha256 = "{"a" * 64}"\n'
+                             'approved_by = "owner"\ndate = "2026-11-11"\n')
+        with patch.object(builder, "PACKS", self.root / "packs"), \
+                patch.object(builder, "COMPONENT_AUTHORIZATIONS", approvals), \
+                patch.object(builder, "verify_component_archive") as verify, \
+                patch.object(builder, "sign") as sign:
+            with self.assertRaisesRegex(SystemExit, "component signing is not wired up yet"):
+                builder.build_one(source)
+            verify.assert_called_once()
+            sign.assert_not_called()
+
     def test_component_version_already_published_is_refused_in_both_modes(self):
         source = self.root / "pack-sources" / "runtime" / "demo"
         source.mkdir(parents=True)

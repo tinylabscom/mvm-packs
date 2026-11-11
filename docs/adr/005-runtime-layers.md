@@ -86,5 +86,5 @@ to the signed plan/audit. Policy still composes across every component.
 `scripts/application_manifest.py` validates the closed `runtime_layer` shape, its archive pin and its
 policy-file inventory and can render the manifest bytes; `build-packs.py` refuses to publish a runtime
 layer until the `mvm` consumer dispatch, installer and our gate exist. `validate-packs.py`
-still accepts only schema versions 1 and 2, so a published layer fails closed. The legacy
+accepts schema versions 1 to 4 but has no schema for a runtime layer, and signing refuses one, so a published layer fails closed. The legacy
 rule holds: every pack ships a binary.

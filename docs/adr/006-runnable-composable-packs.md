@@ -99,7 +99,7 @@ release is authorized by passing local or PR-only synthetic tests.
 and the `mvm` client filters versions by host architecture and then takes the highest
 semver (`resolve_matching` in `discovery.rs` in the `mvm` repo). The proposed scheme: within
 one release line the aarch64 build takes `X.Y.0` and the x86_64 build takes `X.Y.1`; a new
-release line bumps the minor. This needs confirmation by the `mvm` owner. If they choose a
+release line bumps the minor. The scheme starts at a NEW release line, not at the published `agent/claude` 2.0.x (2.0.1 is already an aarch64 build). This needs confirmation by the `mvm` owner. If they choose a
 different scheme, only the version numbers in the pack sources and these docs change.
 
 See also the [application pack guide](../application-packs.md).

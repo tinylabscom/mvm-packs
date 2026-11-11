@@ -86,7 +86,10 @@ def select_entrypoint(applications, runtime_override=None, workload=None):
     chosen = None
     for i, app in enumerate(applications):
         names = set()
-        for e in app.get("entrypoints", []):
+        entries = app.get("entrypoints", [])
+        if not isinstance(entries, list):
+            raise ValueError(f"application {i}: entrypoints must be a list")
+        for e in entries:
             name = e.get("name")
             if not isinstance(name, str) or not name:
                 raise ValueError(f"application {i}: entrypoint name must be a non-empty string")
@@ -101,5 +104,5 @@ def select_entrypoint(applications, runtime_override=None, workload=None):
     if workload is not None:
         return _argv(workload, "workload")
     if chosen is None:
-        raise ValueError("no entrypoint")
+        raise ValueError("no entrypoint: no application declares a default")
     return chosen

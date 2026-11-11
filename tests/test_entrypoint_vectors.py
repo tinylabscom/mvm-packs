@@ -21,6 +21,12 @@ class EntrypointVectors(unittest.TestCase):
                 else:
                     self.assertEqual(policy_compose.select_entrypoint(*args), v["expect"])
 
+    def test_null_entrypoints_is_a_value_error_and_no_default_says_why(self):
+        with self.assertRaisesRegex(ValueError, "entrypoints must be a list"):
+            policy_compose.select_entrypoint([{"entrypoints": None}])
+        with self.assertRaisesRegex(ValueError, "no application declares a default"):
+            policy_compose.select_entrypoint([{"entrypoints": []}])
+
 
 if __name__ == "__main__":
     unittest.main()
