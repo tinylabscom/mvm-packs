@@ -34,6 +34,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import tomllib
 import urllib.request
 from pathlib import Path
@@ -368,6 +369,10 @@ def _store_in_cache(bundle, spooled):
         print(f"archive cache: not stored: {error}")
 
 
+# urlopen's timeout is per socket read, so a drip-feeding source needs this overall bound.
+DOWNLOAD_DEADLINE_SECONDS = 15 * 60
+
+
 def verify_archive(application, requirements=None):
     """Read the pinned archive back before signing a new application version.
 
@@ -386,10 +391,13 @@ def verify_archive(application, requirements=None):
         print(f"archive cache: using {cached.name} (re-verified)")
         return inspect_bundle(str(cached), application, public_key, requirements)
     digest, size = hashlib.sha256(), 0
+    deadline = time.monotonic() + DOWNLOAD_DEADLINE_SECONDS
     with tempfile.NamedTemporaryFile(prefix="mvmpkg-") as spool:
         try:
             with urllib.request.urlopen(source, timeout=60) as response:
                 while chunk := response.read(1 << 20):
+                    if time.monotonic() > deadline:
+                        fail(f"{source}: archive download exceeded {DOWNLOAD_DEADLINE_SECONDS} seconds")
                     size += len(chunk)
                     if size > bundle["archive_size"]:
                         break

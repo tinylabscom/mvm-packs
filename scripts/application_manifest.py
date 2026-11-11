@@ -98,6 +98,7 @@ RUNTIME_REFERENCE = re.compile(
     r"runtime/[a-z][a-z0-9-]*@(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 MAX_DEPENDENCIES = 16
 MAX_LAYER_TAR = 2 * 1024**3
+MAX_APPLICATION_ARCHIVE = 2 * 1024**3
 POLICY_FILES = ("pack/group.toml", "pack/profile.toml")
 
 
@@ -175,8 +176,8 @@ def validate_application(application):
     validate_source(bundle["source"])
     if not isinstance(bundle["archive_sha256"], str) or not HEX64.fullmatch(bundle["archive_sha256"]):
         raise ValueError("bundle archive_sha256 must be 64 lowercase hex characters")
-    if type(bundle["archive_size"]) is not int or not 0 < bundle["archive_size"] <= 2**64 - 1:
-        raise ValueError("bundle archive_size must be a positive u64 integer")
+    if type(bundle["archive_size"]) is not int or not 0 < bundle["archive_size"] <= MAX_APPLICATION_ARCHIVE:
+        raise ValueError("bundle archive_size must be a positive integer of at most 2 GiB")
     if not isinstance(bundle["key_id"], str) or not HEX32.fullmatch(bundle["key_id"]):
         raise ValueError("bundle key_id must be 32 lowercase hex characters")
 
