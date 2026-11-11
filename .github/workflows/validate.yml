@@ -1,30 +1,8 @@
 name: Validate pack sources
 
 on:
+  # No path filter: the main ruleset requires this check, so it must report on every PR.
   pull_request:
-    paths:
-      - "pack-sources/**"
-      - "index.json"
-      - "revocations.toml"
-      - "docs/registry/**"
-      - "docs/publishing-a-pack.md"
-      - "packs/**"
-      - "scripts/**"
-      - "tests/**"
-      - "README.md"
-      - "README.packs.md"
-      - "astro.config.mjs"
-      - "package.json"
-      - "package-lock.json"
-      - ".node-version"
-      - "src/content.config.ts"
-      - "src/styles/**"
-      - "justfile"
-      - ".github/PULL_REQUEST_TEMPLATE/**"
-      - ".github/workflows/pages.yml"
-      - ".github/workflows/publish.yml"
-      - ".github/workflows/registry-pack-revocations.yml"
-      - ".github/workflows/validate.yml"
 
 permissions:
   contents: read
