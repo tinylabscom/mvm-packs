@@ -12,6 +12,40 @@ The first application pack is `agent/claude`: `2.0.0` is published but its embed
 revocation list expires 2026-11-08T14:35Z, so `2.0.1` (same rootfs and author key,
 fresh list) supersedes it.
 
+## Product and trust boundary
+
+This registry owns signed, immutable application bytes, their policy requests,
+requirements, publication and revocation. It does not own local execution,
+host admission, image production, or fleet routing. A pack's signature proves
+origin and byte integrity, not safety or authority to run. The index is
+discovery, not a signature or a publisher trust root; consumers must verify
+the selected descriptor, archive, publisher enrollment, current revocations,
+and effective policy again at admission. Never let a local development signer
+become an official publisher merely because its package verifies.
+
+- A pack or application can request capabilities and set ceilings, but cannot
+  grant itself egress, secrets, writable host paths, or permission beyond user,
+  organization, and host limits. Preserve the current signed policy and
+  published version meanings. Where a merge rule has no implementation or
+  test, describe it as a requirement rather than a shipped guarantee.
+- Keep the common authoring path simple. One pack source may compose smaller
+  policy and application components where that reduces repetition. Signed
+  target-specific descriptors and digest-pinned, self-contained `.mvmpkg`
+  variants are the direction for multiple architectures; they are not
+  permission to publish unfinished component formats or to ship one huge
+  archive to a small target. Reject unsupported architectures and incomplete
+  requirements rather than changing backend or isolation tier silently.
+- Never edit signed releases, generated catalogues, or published bundles by
+  hand. Official publishing requires independent authorization for the exact
+  source, signer, descriptor and distribution rights, plus verified output
+  readback. A locally signed candidate is for development only. Keep signing,
+  revocation, and key custody separate; neither a cache hit nor a signature
+  waives current revocation and admission checks.
+- Measure package size, verification and acquisition separately from image
+  build and launch time. Prefer reproducible inputs and reuse verified bytes
+  without reusing authorization. Do not name competitors in new prose,
+  filenames or PR text, or add assistant/tool attribution.
+
 ## Layout
 
 - `index.json` — sole pack catalog (schema v2), generated from published
