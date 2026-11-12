@@ -25,9 +25,11 @@ policy-only version can be built or validated.
    Reviewers check the pinned archive, requested network access and
    secret-binding names and hosts. No pack is labelled official merely
    because it is submitted.
-5. After approval and merge, the publisher builds and signs the descriptor,
-   pins it in `index.json`, and publishes the versioned files. The site then
-   rebuilds the catalog and package pages from those published bytes.
+5. After the source PR merges, the main-branch publisher builds and signs the
+   descriptor, reads it back, and proposes the versioned files and `index.json`
+   in a separate review PR through the repository-scoped publishing App.
+   Verify its signatures and current revocations, then review and queue it.
+   The site rebuilds the catalog and package pages only after that PR lands.
 
 An application source contains only `pack.toml`; payload files cannot sit
 beside it. To update a pack, edit `pack.toml` and bump the version.
