@@ -29,5 +29,9 @@ policy-only version can be built or validated.
    Verify its signatures and current revocations, then review and queue it.
    The site rebuilds the catalog and package pages only after that PR lands.
 
+The repository's [review-protection checks](reviewed-publication.md) describe
+the GitHub settings required to make that review mandatory and the evidence
+needed before declaring the publisher and community intake rollout complete.
+
 An application source contains only `pack.toml`; payload files cannot sit
 beside it. To update a pack, edit `pack.toml` and bump the version.
