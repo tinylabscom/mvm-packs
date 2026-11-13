@@ -96,6 +96,9 @@ no publication write permission. Published versions are immutable: change a
 source and the build refuses until the version in `pack.toml` is bumped.
 Source changes and scheduled runs propose the catalogue and signed application
 descriptors; a successful signing run alone does not publish them.
+The [review-protection checks](docs/reviewed-publication.md) specify the GitHub
+settings needed to make approval mandatory and the rollout witnesses still
+required before this path can be called complete.
 
 The ordinary publisher continues to publish a repository-local revocation
 feed under `packs/revocations.json`, signed by the pack publisher identity.
