@@ -1,6 +1,6 @@
 {
-  "issued_at": "2026-11-12T18:05:55Z",
-  "not_after": "2026-11-14T06:05:55Z",
+  "issued_at": "2026-11-13T00:45:37Z",
+  "not_after": "2026-11-14T12:45:37Z",
   "revoked_identities": [],
   "revoked_manifests": [
     "63f7c363966fe3bacb894e50be1e04e720ea6ac4e9a2d878fb2c811dc21bea7c",
@@ -9,5 +9,5 @@
     "e10d2c7f070e00a1b5d8c713568c0aebe608cc4e346c091a4cb25057ffd25bd3"
   ],
   "schema_version": 1,
-  "sequence": 101
+  "sequence": 102
 }
