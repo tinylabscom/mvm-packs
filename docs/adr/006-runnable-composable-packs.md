@@ -45,6 +45,14 @@ base-owned paths, and any duplicate path between components. No
 last-wins file overwrite, whiteout, automatic install script or guest
 network fallback is allowed.
 
+The first protected production bundle has a narrower, versioned floor:
+schema 9 contains **one** application, ordered runtime inputs and one signed
+selected base. Its actual application entrypoint is bound at export and
+admission. Multiple applications, tool graphs and the command precedence
+below remain proposals for a later version, not optional schema-9 features.
+Schema 8 retains its existing host-local Dev inventory and cannot be
+relabeled to satisfy the production format.
+
 Entrypoint precedence is: runtime command override, then the
 user-defined workload/config command, then the **last application in
 the explicit order that declares a `default` entrypoint**. "Last wins" applies to command selection only, and the chosen command
@@ -87,7 +95,7 @@ or rolled-back evidence refuses launch, even after a cache hit.
 
 A local result carries a development trust class; host signing is not
 official publisher authority. Production export is a separately
-protected, independently verified and signed single `.mvmpkg` with
+protected, independently verified and signed single schema-9 `.mvmpkg` with
 its entire boot closure and provenance (ADR 004). A builder-vm
 materializes but cannot approve, sign or publish it. No production
 release is authorized by passing local or PR-only synthetic tests.
