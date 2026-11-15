@@ -359,6 +359,17 @@ def inspect_bundle(path, application, public_key, requirements=None):
             if not ed25519.verify(public_key, manifest_raw, archive.extractfile("manifest.sig").read()):
                 fail(f"{path}: manifest.sig is not a valid signature by the descriptor's bundle key")
             manifest = json.loads(manifest_raw, object_pairs_hook=unique_object)
+            if "schema_version" in manifest and (
+                    type(manifest["schema_version"]) is not int or not 1 <= manifest["schema_version"] <= 8):
+                fail(f"{path}: unsupported bundle manifest schema_version {manifest['schema_version']!r}")
+            bundle_members = manifest.get("members", [])
+            if not isinstance(bundle_members, list) or any(
+                    not isinstance(member, dict) or not isinstance(member.get("class"), str)
+                    for member in bundle_members):
+                fail(f"{path}: bundle members must be objects in an array")
+            if any(member.get("class") in ("local_composition", "production_composition")
+                   for member in bundle_members):
+                fail(f"{path}: bundle members include an unsupported composition")
             if manifest.get("key_id") != bundle["key_id"] or manifest.get("arch") != application["guest_arch"]:
                 fail(f"{path}: bundle key ID or architecture does not match the descriptor")
             artifacts = manifest.get("artifacts")
