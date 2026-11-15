@@ -17,7 +17,10 @@ runtime**. Runtime/tool components use their own signed descriptor and
 digest-bound payload (ADR 005). Neither an app nor a runtime component is
 independently bootable. A new schema/kind is required: readers must reject
 unknown versions instead of interpreting them as the existing schema-2
-application descriptor or schema-7 boot bundle. The exact new wire schema,
+application descriptor or schema-8 local boot bundle. The first protected
+export is a distinct schema-9 complete bundle with one application, ordered
+runtime inputs and one signed selected base; multiple applications and tool
+graphs require a later reviewed version. The exact new component wire schema,
 size caps and canonicalization must be shared with the `mvm` verifier before
 the registry can publish any such version.
 
@@ -63,18 +66,31 @@ Local composition creates a **measured ext4/verity workload before first
 boot**. Its host-signed local bundle and signed plan bind the ordered
 authenticated inputs, selected base and guest runtime, output hashes,
 effective policy and actual admitted command. This is a development receipt,
-not the application publisher's signature. Every run, including a cache
-hit, must independently recheck component/base publisher trust, fresh
+not the application publisher's signature. Schema 8 already names this
+`LocalComposition`; it must not be relabelled as a production member.
+Every run, including a cache hit, must independently recheck
+component/base publisher trust, fresh
 rollback-protected revocations, policy and host grants.
 
 Production export is a different operation: the protected pipeline
 independently verifies the frozen inputs, selected boot closure, output
 measurement, policy, actual command and boot witness, then signs a
-**self-contained `.mvmpkg`**. Its signed provenance binds the ordered
-component manifest digests and policy-document hashes, the selected base
-evidence, guest-runtime evidence, assembler version, ext4/verity output
-hashes and health-tested command. An offline verifier must authenticate the
-publisher and all required input/base evidence and apply current
+**self-contained schema-9 `.mvmpkg`**. The new reader must reject mixing its
+production member with the schema-8 local member, and old readers must refuse
+schema 9. Do not enable production issuance or acceptance until both the
+closed member encoding and its independent recipient checks are implemented.
+The first application's source is local authoring input, not an already
+signed application component. The protected verifier freezes and rechecks
+its spec, source tree, payload digest, producer revision and distribution
+rights before signing; a source hash alone is not publisher authority.
+Its signed provenance binds the ordered runtime manifest digests and policy
+hashes, selected base and guest-runtime evidence, application source/payload,
+assembler version, ext4/verity output hashes and health-tested command.
+Only after the complete archive exists may this registry publisher sign
+a separate application descriptor pinned to its exact archive hash, size,
+author key and architecture. An offline verifier must authenticate both
+the final descriptor publisher and bundle author, original signed runtime
+and base evidence, and apply current
 revocation/admission rules; no cache, builder receipt or host signature may
 be promoted by relabelling. Signing/publication needs separate explicit
 release approval. A synthetic test signer may test this boundary but never

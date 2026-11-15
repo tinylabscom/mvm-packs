@@ -39,6 +39,16 @@ Follows the closed wire shape in the `mvm` contract (`specs/contracts/composable
   take the minimum, secret destinations only narrow, then intersected with host grants at
   admission (`tests/policy-vectors/`). A layer never grants itself access.
 
+The first production composition is a separate schema-9 boot bundle with one
+locally authored application and ordered runtime layers. The application
+is pinned by its frozen source/payload and the protected final bundle and
+registry signatures, not by an invented original component signature.
+This does not change the schema-3
+runtime-layer descriptor or the historical schema-2 complete application.
+Multiple applications, tools and production command precedence are later
+format work; neither the publisher nor the consumer may treat their absence
+as permission to downgrade or substitute a schema-8 local build.
+
 **Architecture:** one `guest_arch` per version, as for applications. Multi-architecture
 fan-out under one version (M7) is left to a separate, versioned schema decision rather than
 changing schema 3 now.
@@ -73,9 +83,12 @@ release.
 
 ## Entrypoint
 
-Layers cannot set an entrypoint. An explicit runtime command override takes
-precedence over a user-defined workload/config command, which takes precedence
-over the last application in explicit order that declares an entrypoint.
+Layers cannot set an entrypoint. The first production format binds the sole
+application's actual selected entrypoint; it does not implement the broader
+command precedence below. In a later reviewed multi-application format, an
+explicit runtime command override takes precedence over a user-defined
+workload/config command, which takes precedence over the last application
+in explicit order that declares an entrypoint.
 Earlier applications keep theirs as named non-default commands; no service
 starts unless explicitly requested. The actual selected command is admitted
 against the security profile and host grants (even in production) and bound
