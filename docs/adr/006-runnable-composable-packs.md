@@ -46,8 +46,10 @@ last-wins file overwrite, whiteout, automatic install script or guest
 network fallback is allowed.
 
 The first protected production bundle has a narrower, versioned floor:
-schema 9 contains **one** application, ordered runtime inputs and one signed
-selected base. Its actual application entrypoint is bound at export and
+schema 9 contains **one locally authored** application, ordered runtime inputs
+and one signed selected base. Its exact source/payload is rechecked by the
+protected signer; no original signed application-component descriptor is
+invented. Its actual application entrypoint is bound at export and
 admission. Multiple applications, tool graphs and the command precedence
 below remain proposals for a later version, not optional schema-9 features.
 Schema 8 retains its existing host-local Dev inventory and cannot be

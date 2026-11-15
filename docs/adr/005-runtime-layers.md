@@ -40,7 +40,10 @@ Follows the closed wire shape in the `mvm` contract (`specs/contracts/composable
   admission (`tests/policy-vectors/`). A layer never grants itself access.
 
 The first production composition is a separate schema-9 boot bundle with one
-application and ordered runtime layers. This does not change the schema-3
+locally authored application and ordered runtime layers. The application
+is pinned by its frozen source/payload and the protected final bundle and
+registry signatures, not by an invented original component signature.
+This does not change the schema-3
 runtime-layer descriptor or the historical schema-2 complete application.
 Multiple applications, tools and production command precedence are later
 format work; neither the publisher nor the consumer may treat their absence
