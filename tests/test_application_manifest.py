@@ -290,7 +290,7 @@ TEST_KEY_ID = hashlib.sha256(TEST_PUBLIC).hexdigest()[:32]
 
 def make_mvmpkg(roles=("kernel", "rootfs"), key_id=TEST_KEY_ID, arch="aarch64", corrupt=None,
                 extra_members=(), repeat_artifact=0, raw_manifest=None, signing_secret=TEST_SECRET,
-                members=None):
+                members=None, schema_version=None):
     """Build a tiny synthetic .mvmpkg tar (manifest.json, manifest.sig, artifacts/)."""
     import io
     import tarfile
@@ -306,6 +306,8 @@ def make_mvmpkg(roles=("kernel", "rootfs"), key_id=TEST_KEY_ID, arch="aarch64", 
     body = {"key_id": key_id, "arch": arch, "artifacts": artifacts}
     if members is not None:
         body["members"] = members
+    if schema_version is not None:
+        body["schema_version"] = schema_version
     manifest = raw_manifest or json.dumps(body).encode()
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w") as archive:
@@ -342,6 +344,25 @@ class ArchiveReadBackTests(unittest.TestCase):
     def test_archive_embedding_a_kernel_and_rootfs_passes(self):
         data = make_mvmpkg()
         self.check(self.descriptor(data), data)
+
+    def test_signed_archive_refuses_unknown_explicit_schema(self):
+        for version in (0, 9, 10, "9", True):
+            with self.subTest(version=version):
+                data = make_mvmpkg(schema_version=version)
+                with self.assertRaisesRegex(SystemExit, "unsupported bundle manifest schema_version"):
+                    self.check(self.descriptor(data), data)
+        data = make_mvmpkg(schema_version=8)
+        self.check(self.descriptor(data), data)
+
+    def test_signed_dev_local_composition_cannot_be_promoted_by_a_descriptor(self):
+        for members in ([
+            {"class": "local_composition", "lock_artifact": "composition-lock.json", "layers": []}
+        ], [{"class": "production_composition", "lock_artifact": "frozen-lock.json", "layers": []}],
+                        {"class": "local_composition"}, ["local_composition"], [{"class": 1}], [{}]):
+            with self.subTest(members=members):
+                data = make_mvmpkg(schema_version=8, members=members)
+                with self.assertRaisesRegex(SystemExit, "bundle members"):
+                    self.check(self.descriptor(data), data)
 
     def test_wrong_digest_size_or_scheme_is_refused(self):
         data = make_mvmpkg()
