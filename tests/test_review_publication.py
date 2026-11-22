@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -76,6 +77,58 @@ class ReviewPublicationTests(unittest.TestCase):
             "pr", "create", "--base", "main", "--head", "automation/packs-1234-1",
             "--title", "Review publication", "--body", "Verify signed bytes",
         ])
+
+    def supersede_gh(self, close_fails=False):
+        """A gh that records every call, lists fixture PRs through real jq, and creates PR 99."""
+        listing = [
+            {"number": 10, "headRefName": "automation/packs-1-1", "isCrossRepository": False},
+            {"number": 11, "headRefName": "automation/packs-2-1", "isCrossRepository": False},
+            {"number": 12, "headRefName": "automation/community-3-1", "isCrossRepository": False},
+            {"number": 13, "headRefName": "automation/packs-4-1-extra", "isCrossRepository": False},
+            {"number": 14, "headRefName": "feature/automation/packs-5-1", "isCrossRepository": False},
+            {"number": 15, "headRefName": "automation/packs-6-1", "isCrossRepository": True},
+            {"number": 99, "headRefName": "automation/packs-1234-1", "isCrossRepository": False},
+        ]
+        gh = Path(self.env["PATH"].split(os.pathsep)[0]) / "gh"
+        gh.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, subprocess, sys\n"
+            "a = sys.argv[1:]\n"
+            "open(os.environ['MOCK_GH_LOG'], 'a').write(json.dumps(a) + '\\n')\n"
+            "if a[:2] == ['pr', 'create']:\n"
+            "    print('https://github.com/o/r/pull/99')\n"
+            "elif a[:2] == ['pr', 'list']:\n"
+            f"    data = {json.dumps(listing)!r}\n"
+            "    sys.stdout.write(subprocess.run(['jq', '-r', a[a.index('--jq') + 1]],\n"
+            "        input=data, capture_output=True, text=True, check=True).stdout)\n"
+            f"elif a[:2] == ['pr', 'close'] and {close_fails!r}:\n"
+            "    sys.exit(1)\n"
+        )
+        self.log.unlink(missing_ok=True)
+
+    def closed(self):
+        calls = [json.loads(line) for line in self.log.read_text().splitlines()]
+        return [c[2] for c in calls if c[:2] == ["pr", "close"]], calls
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is required to evaluate the gh filter")
+    def test_only_older_same_kind_automation_prs_are_closed(self):
+        self.supersede_gh()
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        closed, calls = self.closed()
+        self.assertEqual(closed, ["10", "11"])
+        for call in calls:
+            if call[:2] == ["pr", "close"]:
+                self.assertIn("--delete-branch", call)
+                self.assertIn("Superseded by #99", call[-1])
+
+    @unittest.skipUnless(shutil.which("jq"), "jq is required to evaluate the gh filter")
+    def test_close_failure_does_not_fail_the_run(self):
+        self.supersede_gh(close_fails=True)
+        result = self.run_script()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.closed()[0], ["10", "11"])
+        self.assertIn("could not close superseded pull request #10", result.stderr)
 
     def test_invalid_run_identity_refuses_before_publishing(self):
         for key, value in [("GITHUB_REF", "refs/heads/other"),
